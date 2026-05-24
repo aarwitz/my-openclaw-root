@@ -1,0 +1,63 @@
+# OpenClaw runtime/app state inside the workspace
+.openclaw/
+.clawhub/
+
+# Secrets / env files
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.secret
+secrets/
+
+# Local temp/scratch outputs
+tmp/
+tmp_*
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python / Node / editor caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+.vscode/
+.idea/
+
+# OS / notebook noise
+.ipynb_checkpoints/
+
+# Runtime memory recall artifacts
+memory/.dreams/
+
+# Archives and generated bundles
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Runtime databases
+*.db
+
+# Xcode build artifacts (if iosApp is ever re-added)
+**/build/
+**/DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# If nested repos appear elsewhere, don't accidentally vendor their git metadata
+**/.git

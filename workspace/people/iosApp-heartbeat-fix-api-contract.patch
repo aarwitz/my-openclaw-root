@@ -1,0 +1,575 @@
+From 3eb3746543e582de572689a8f19fe179e7b6f181 Mon Sep 17 00:00:00 2001
+From: aarwitz <horwina@bu.edu>
+Date: Wed, 1 Apr 2026 14:28:10 -0400
+Subject: [PATCH] fix: refresh generated API contract artifacts
+
+---
+ .../App/OpenAPI/openapi.generated.json        | 226 +++++++++++++++++-
+ api-explorer/catalog.generated.js             |  15 ++
+ api-explorer/openapi.generated.json           | 226 +++++++++++++++++-
+ 3 files changed, 465 insertions(+), 2 deletions(-)
+
+diff --git a/Backend/Sources/App/OpenAPI/openapi.generated.json b/Backend/Sources/App/OpenAPI/openapi.generated.json
+index 2ee883f..36ba967 100644
+--- a/Backend/Sources/App/OpenAPI/openapi.generated.json
++++ b/Backend/Sources/App/OpenAPI/openapi.generated.json
+@@ -2011,6 +2011,32 @@
+         "security": []
+       }
+     },
++    "/api/v1/trainer/residents": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "List Residents",
++        "operationId": "get_api_v1_trainer_residents",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_ResidentListItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": []
++      }
++    },
+     "/api/v1/trainer/classes": {
+       "get": {
+         "tags": [
+@@ -2074,6 +2100,69 @@
+         }
+       }
+     },
++    "/api/v1/trainer/sessions": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "List Sessions",
++        "operationId": "get_api_v1_trainer_sessions",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_SessionListItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": []
++      }
++    },
++    "/api/v1/trainer/sessions/{sessionId}/roster": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "Session Roster",
++        "operationId": "get_api_v1_trainer_sessions_sessionId_roster",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_SessionRosterItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": [],
++        "parameters": [
++          {
++            "name": "sessionId",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string"
++            },
++            "example": "{{sessionId}}"
++          }
++        ]
++      }
++    },
+     "/api/v1/trainer/classes/{classId}/enrollments": {
+       "post": {
+         "tags": [
+@@ -6064,6 +6153,9 @@
+           },
+           "imageAsset": {
+             "type": "string"
++          },
++          "isCompleted": {
++            "type": "boolean"
+           }
+         },
+         "additionalProperties": false,
+@@ -6073,7 +6165,8 @@
+           "type",
+           "time",
+           "duration",
+-          "location"
++          "location",
++          "isCompleted"
+         ]
+       },
+       "ResidentExperience_CommunityNutritionEventResponse": {
+@@ -7663,6 +7756,137 @@
+           "isActive"
+         ]
+       },
++      "TrainerAnalytics_SessionListItem": {
++        "type": "object",
++        "properties": {
++          "id": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "classID": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "title": {
++            "type": "string"
++          },
++          "activityType": {
++            "type": "string"
++          },
++          "location": {
++            "type": "string"
++          },
++          "startsAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "endsAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "capacity": {
++            "type": "integer"
++          },
++          "enrolledCount": {
++            "type": "integer"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "id",
++          "classID",
++          "title",
++          "activityType",
++          "startsAt",
++          "endsAt",
++          "capacity",
++          "enrolledCount",
++          "status"
++        ]
++      },
++      "TrainerAnalytics_SessionRosterItem": {
++        "type": "object",
++        "properties": {
++          "residentID": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "residentName": {
++            "type": "string"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          },
++          "checkedInAt": {
++            "type": "string",
++            "format": "date-time"
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "residentID",
++          "residentName",
++          "status"
++        ]
++      },
++      "TrainerAnalytics_ResidentListItem": {
++        "type": "object",
++        "properties": {
++          "id": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "name": {
++            "type": "string"
++          },
++          "avatarUrl": {
++            "type": "string"
++          },
++          "enrolledClasses": {
++            "type": "array",
++            "items": {
++              "type": "string"
++            }
++          },
++          "classesAttended": {
++            "type": "integer"
++          },
++          "personalSessions": {
++            "type": "integer"
++          },
++          "lastActiveAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "id",
++          "name",
++          "enrolledClasses",
++          "classesAttended",
++          "personalSessions",
++          "status"
++        ]
++      },
+       "TrainerAnalytics_TrainerMetricsSummary": {
+         "type": "object",
+         "properties": {
+diff --git a/api-explorer/catalog.generated.js b/api-explorer/catalog.generated.js
+index 70251c9..3a06985 100644
+--- a/api-explorer/catalog.generated.js
++++ b/api-explorer/catalog.generated.js
+@@ -378,11 +378,26 @@ window.API_EXPLORER_CATALOG = [
+         "label": "Community Summary",
+         "path": "/api/v1/trainer/community/summary"
+       },
++      {
++        "method": "GET",
++        "label": "List Residents",
++        "path": "/api/v1/trainer/residents"
++      },
+       {
+         "method": "GET",
+         "label": "List Classes",
+         "path": "/api/v1/trainer/classes"
+       },
++      {
++        "method": "GET",
++        "label": "List Sessions",
++        "path": "/api/v1/trainer/sessions"
++      },
++      {
++        "method": "GET",
++        "label": "Session Roster",
++        "path": "/api/v1/trainer/sessions/{{sessionId}}/roster"
++      },
+       {
+         "method": "POST",
+         "label": "Create Class",
+diff --git a/api-explorer/openapi.generated.json b/api-explorer/openapi.generated.json
+index 2ee883f..36ba967 100644
+--- a/api-explorer/openapi.generated.json
++++ b/api-explorer/openapi.generated.json
+@@ -2011,6 +2011,32 @@
+         "security": []
+       }
+     },
++    "/api/v1/trainer/residents": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "List Residents",
++        "operationId": "get_api_v1_trainer_residents",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_ResidentListItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": []
++      }
++    },
+     "/api/v1/trainer/classes": {
+       "get": {
+         "tags": [
+@@ -2074,6 +2100,69 @@
+         }
+       }
+     },
++    "/api/v1/trainer/sessions": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "List Sessions",
++        "operationId": "get_api_v1_trainer_sessions",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_SessionListItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": []
++      }
++    },
++    "/api/v1/trainer/sessions/{sessionId}/roster": {
++      "get": {
++        "tags": [
++          "Trainer Analytics"
++        ],
++        "summary": "Session Roster",
++        "operationId": "get_api_v1_trainer_sessions_sessionId_roster",
++        "responses": {
++          "200": {
++            "description": "Success",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/TrainerAnalytics_SessionRosterItem"
++                  }
++                }
++              }
++            }
++          }
++        },
++        "description": "Requires trainer role",
++        "security": [],
++        "parameters": [
++          {
++            "name": "sessionId",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string"
++            },
++            "example": "{{sessionId}}"
++          }
++        ]
++      }
++    },
+     "/api/v1/trainer/classes/{classId}/enrollments": {
+       "post": {
+         "tags": [
+@@ -6064,6 +6153,9 @@
+           },
+           "imageAsset": {
+             "type": "string"
++          },
++          "isCompleted": {
++            "type": "boolean"
+           }
+         },
+         "additionalProperties": false,
+@@ -6073,7 +6165,8 @@
+           "type",
+           "time",
+           "duration",
+-          "location"
++          "location",
++          "isCompleted"
+         ]
+       },
+       "ResidentExperience_CommunityNutritionEventResponse": {
+@@ -7663,6 +7756,137 @@
+           "isActive"
+         ]
+       },
++      "TrainerAnalytics_SessionListItem": {
++        "type": "object",
++        "properties": {
++          "id": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "classID": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "title": {
++            "type": "string"
++          },
++          "activityType": {
++            "type": "string"
++          },
++          "location": {
++            "type": "string"
++          },
++          "startsAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "endsAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "capacity": {
++            "type": "integer"
++          },
++          "enrolledCount": {
++            "type": "integer"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "id",
++          "classID",
++          "title",
++          "activityType",
++          "startsAt",
++          "endsAt",
++          "capacity",
++          "enrolledCount",
++          "status"
++        ]
++      },
++      "TrainerAnalytics_SessionRosterItem": {
++        "type": "object",
++        "properties": {
++          "residentID": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "residentName": {
++            "type": "string"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          },
++          "checkedInAt": {
++            "type": "string",
++            "format": "date-time"
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "residentID",
++          "residentName",
++          "status"
++        ]
++      },
++      "TrainerAnalytics_ResidentListItem": {
++        "type": "object",
++        "properties": {
++          "id": {
++            "type": "string",
++            "format": "uuid"
++          },
++          "name": {
++            "type": "string"
++          },
++          "avatarUrl": {
++            "type": "string"
++          },
++          "enrolledClasses": {
++            "type": "array",
++            "items": {
++              "type": "string"
++            }
++          },
++          "classesAttended": {
++            "type": "integer"
++          },
++          "personalSessions": {
++            "type": "integer"
++          },
++          "lastActiveAt": {
++            "type": "string",
++            "format": "date-time"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "attended",
++              "late"
++            ]
++          }
++        },
++        "additionalProperties": false,
++        "required": [
++          "id",
++          "name",
++          "enrolledClasses",
++          "classesAttended",
++          "personalSessions",
++          "status"
++        ]
++      },
+       "TrainerAnalytics_TrainerMetricsSummary": {
+         "type": "object",
+         "properties": {
+-- 
+2.34.1
+

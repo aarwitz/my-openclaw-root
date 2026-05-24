@@ -1,0 +1,687 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.5.20",
+    "lastTouchedAt": "2026-05-23T23:57:31.316Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-29T12:38:10.227Z",
+    "lastRunVersion": "2026.3.24",
+    "lastRunCommand": "onboard",
+    "lastRunMode": "local"
+  },
+  "secrets": {
+    "providers": {
+      "newsapi": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/news-api-ai.json",
+        "mode": "json"
+      },
+      "finnhub": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/finnhub-api.json",
+        "mode": "json"
+      },
+      "massive": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/massive-api.json",
+        "mode": "json"
+      },
+      "schwab": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/schwab-dev-api.json",
+        "mode": "json"
+      },
+      "alpaca": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/alpaca-api.json",
+        "mode": "json"
+      },
+      "financialmodeling-prep": {
+        "source": "file",
+        "path": "/home/aaron/.openclaw/credentials/financial-modeling-prep-api.json",
+        "mode": "json"
+      },
+      "gatewaytoken": {
+        "source": "file",
+        "path": "~/.openclaw/credentials/gateway-token",
+        "mode": "singleValue"
+      }
+    }
+  },
+  "auth": {
+    "order": {
+      "openai": [
+        "openai-codex:aaronhorowitz97@gmail.com",
+        "openai:default"
+      ]
+    },
+    "profiles": {
+      "openai-codex:default": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      },
+      "openai:default": {
+        "provider": "openai",
+        "mode": "token"
+      },
+      "openai-codex:aaronhorowitz97@gmail.com": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-5.4",
+        "fallbacks": [
+          "openai/gpt-5.4"
+        ]
+      },
+      "imageModel": {
+        "primary": "github-copilot/gemini-2.5-pro"
+      },
+      "models": {
+        "openai/gpt-5.4": {}
+      },
+      "workspace": "/home/aaron/.openclaw/workspace",
+      "skills": [
+        "codex-execution-harness",
+        "task-manager",
+        "resilife-product",
+        "ewag-visual-qa",
+        "ewag_build",
+        "ewag_capture",
+        "ewag_test",
+        "ewag_testing_menu",
+        "github-ssh",
+        "openclaw-ops",
+        "gog",
+        "newsapi-ai",
+        "cloudflare"
+      ],
+      "memorySearch": {
+        "sources": [
+          "memory"
+        ],
+        "experimental": {
+          "sessionMemory": false
+        },
+        "provider": "ollama",
+        "model": "nomic-embed-text"
+      },
+      "compaction": {
+        "mode": "safeguard",
+        "memoryFlush": {
+          "enabled": true
+        }
+      },
+      "heartbeat": {
+        "every": "0m",
+        "activeHours": {
+          "start": "07:30",
+          "end": "23:00"
+        },
+        "target": "none",
+        "lightContext": true,
+        "isolatedSession": true
+      },
+      "sandbox": {
+        "mode": "off"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "workspace": "/home/aaron/.openclaw/workspace",
+        "model": "openai/gpt-5.4",
+        "identity": {
+          "name": "Jerry",
+          "emoji": "🦞"
+        }
+      },
+      {
+        "id": "resi",
+        "workspace": "/home/aaron/.openclaw/workspaces/resi",
+        "model": "openai/gpt-5.4",
+        "groupChat": {
+          "mentionPatterns": [
+            "@resi_rsl_bot\\b"
+          ]
+        },
+        "identity": {
+          "name": "Resi",
+          "emoji": "🏗️"
+        }
+      },
+      {
+        "id": "druck",
+        "workspace": "/home/aaron/.openclaw/workspaces/druck",
+        "model": "openai/gpt-5.4",
+        "humanDelay": {
+          "mode": "custom",
+          "minMs": 1200,
+          "maxMs": 2400
+        },
+        "groupChat": {
+          "mentionPatterns": [
+            "@druck_rsl_bot\\b"
+          ]
+        },
+        "skills": [
+          "codex-execution-harness",
+          "task-manager",
+          "newsapi-ai",
+          "finnhub",
+          "massive",
+          "schwab",
+          "alpaca",
+          "gog",
+          "github-ssh",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Druck",
+          "emoji": "📈"
+        }
+      },
+      {
+        "id": "dwight",
+        "workspace": "/home/aaron/.openclaw/workspaces/dwight",
+        "model": "openai/gpt-5.4",
+        "humanDelay": {
+          "mode": "custom",
+          "minMs": 1200,
+          "maxMs": 2400
+        },
+        "groupChat": {
+          "mentionPatterns": [
+            "@dwight_rsl_bot\\b"
+          ]
+        },
+        "skills": [
+          "codex-execution-harness",
+          "task-manager",
+          "task-manager-maintainer",
+          "resilife-product",
+          "ewag-visual-qa",
+          "ewag_build",
+          "ewag_capture",
+          "ewag_test",
+          "ewag_testing_menu",
+          "github-ssh",
+          "openclaw-ops",
+          "gog",
+          "newsapi-ai",
+          "cloudflare"
+        ],
+        "identity": {
+          "name": "Dwight",
+          "emoji": "📋"
+        }
+      }
+    ]
+  },
+  "models": {
+    "providers": {
+      "openai": {
+        "agentRuntime": {
+          "id": "codex"
+        }
+      }
+    }
+  },
+  "bindings": [
+    {
+      "match": {
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "agentId": "druck"
+    },
+    {
+      "match": {
+        "channel": "telegram",
+        "accountId": "resi"
+      },
+      "agentId": "resi"
+    },
+    {
+      "match": {
+        "channel": "telegram",
+        "accountId": "dwight"
+      },
+      "agentId": "dwight"
+    }
+  ],
+  "tools": {
+    "profile": "coding",
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "brave"
+      }
+    },
+    "elevated": {
+      "enabled": true,
+      "allowFrom": {
+        "telegram": [
+          "6043080629",
+          "8337717908"
+        ]
+      }
+    },
+    "exec": {
+      "host": "gateway",
+      "node": "ios-build-node"
+    },
+    "media": {
+      "models": [
+        {
+          "type": "provider",
+          "provider": "openai-codex",
+          "model": "gpt-5.4",
+          "preferredProfile": "aaronhorowitz97@gmail.com",
+          "capabilities": [
+            "image"
+          ],
+          "prompt": "Describe what you see in this screenshot in detail, noting any UI elements, text, layout, and any visual issues.",
+          "maxChars": 2000,
+          "timeoutSeconds": 60
+        },
+        {
+          "type": "provider",
+          "provider": "github-copilot",
+          "model": "gemini-2.5-pro",
+          "capabilities": [
+            "image"
+          ],
+          "prompt": "Describe what you see in this screenshot in detail, noting any UI elements, text, layout, and any visual issues.",
+          "maxChars": 2000,
+          "timeoutSeconds": 60
+        }
+      ]
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "bash": true,
+    "bashForegroundMs": 15000,
+    "restart": true,
+    "ownerDisplay": "raw",
+    "allowFrom": {
+      "telegram": [
+        "6043080629",
+        "8337717908"
+      ]
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer",
+    "maintenance": {
+      "mode": "enforce",
+      "pruneAfter": "30d",
+      "maxEntries": 500,
+      "rotateBytes": "10mb",
+      "resetArchiveRetention": "7d",
+      "maxDiskBytes": "500mb"
+    }
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "group-topic-memory": {
+          "enabled": true
+        },
+        "telegram-agent-relay": {
+          "enabled": true
+        },
+        "credential-preflight": {
+          "enabled": true
+        },
+        "newsapi-credentials": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "allowFrom": [
+        "6043080629",
+        "8337717908"
+      ],
+      "groupAllowFrom": [
+        "6043080629",
+        "8337717908"
+      ],
+      "groupPolicy": "allowlist",
+      "streaming": {
+        "mode": "partial"
+      },
+      "groups": {
+        "-5022293730": {
+          "requireMention": true,
+          "skills": [
+            "openclaw-ops",
+            "gog",
+            "github-ssh",
+            "task-manager"
+          ],
+          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker — route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
+        },
+        "-1003910955362": {
+          "requireMention": false,
+          "skills": [
+            "task-manager",
+            "resilife-product",
+            "gog",
+            "github-ssh"
+          ],
+          "systemPrompt": "You are Dwight in the Project Management group — Aaron's official Task Manager orchestrator and Task Manager developer for EWAG / ResiLife.\n\n## Scope\nSprint planning, backlog grooming, story triage, priority reviews, progress check-ins, and Task Manager codebase development. You own RSL Task Manager at http://127.0.0.1:8000.\n\n## Agent roster (use for assigned_to)\nEvery actionable story MUST have assigned_to set to the agent who will execute it:\n- **Jerry** → internal tools, OpenClaw config, GitHub admin, Drive/Gmail/Sheets (gog), sensitive business-internal coordination\n- **Resi** → EWAG/ResiLife iOS app development, builds, tests, screenshots, ewag-* scripts\n- **Druck** → financial management, market/trading analysis, earnings, finnhub/massive/schwab/alpaca\n- **Dwight** → TM sprint ops, backlog hygiene, TM schema/API/frontend source code\n- **Aaron** → human decisions, product vision, external approvals\nAssign to who executes the first blocking action. Multi-agent: assign first owner, comment the handoff.\n\n## Tone\n- Be strict, procedural, and rules-first.\n- Keep a light, controlled Dwight-from-The-Office flavor when it helps: occasional deadpan one-liners about rules, discipline, or beets/farm life.\n- Keep humor brief and never let it reduce clarity, accuracy, or respect.\n\n## How to act\n- Apply the 5 story-creation gates from the `task-manager` skill before creating any issue. Update existing issues over creating duplicates.\n- Every code-bearing story gets a branch field: `issue-<id>-<short-slug>`.\n- For testing/QA operations, dispatch via slash commands or scripts — do not interpret intent.\n\n- Execution trigger for coding tasks:\n  - If Aaron says `run issue <id> --repo <abs-path> [--scope low|medium|high] [--expected-files N] [--risk low|medium|high] [--acp-available true|false] [--acp-agent <id>] [--agent-timeout N]`, execute exactly: `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same optional flags] --execute`\n  - If repo is missing, ask exactly one follow-up for absolute path and do not run until provided.\n  - After run, return lane, ownerAgent, taskId, metadata path, and terminal summary.\n- For Telegram inline button menu, load `ewag-testing-menu` skill (callbacks: `capture_<view>`, `record_<view>`, `test_<cmd>`, `build_<cmd>` — dispatch to the matching `~/.openclaw/scripts/ewag-*.sh`).\n- Style: dense, practical, no filler. Outcome-focused (Drive links, pass/fail counts, screenshots) over process narration.\n\n## Hard invariants\n- EWAG iOS execution always on ios-build-node. Never report 'no Swift on Linux' as a final blocker.\n- Never `bash -c` on the node. Never `systemctl restart` the gateway — use `~/.openclaw/scripts/safe-restart.sh`.\n- Hot reload first for OpenClaw config changes; validate via status/health.\n\n## Reference (read these, don't restate them in chat)\n- iOS infra, scripts, ios-agent, Drive folder IDs, test catalog: `EWAG_INFRA.md`\n- Agent roster and assignment rules: `AGENTS.md`\n- Heartbeat loop: `HEARTBEAT.md`"
+        },
+        "-1003643056525": {
+          "requireMention": true,
+          "skills": [
+            "resilife-product",
+            "ewag-visual-qa",
+            "ewag_build",
+            "ewag_capture",
+            "ewag_test",
+            "ewag_testing_menu",
+            "task-manager",
+            "gog",
+            "github-ssh"
+          ],
+          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution — requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift — route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
+          "topics": {
+            "1": {
+              "agentId": "resi",
+              "systemPrompt": "You are Resi in EWAG topic 1. Focus: ResiLife iOS product execution updates, build/test state, blockers, and milestone clarity.\n\n## Cross-bot relay protocol (Dwight in EWAG)\n- Internal relay is the source of truth for bot-to-bot handoff.\n- `@dwight_rsl_bot ...` means Dwight expects a reply.\n- `FYI @dwight_rsl_bot ...` or `cc @dwight_rsl_bot ...` means listen-only: Dwight should absorb silently.\n- When replying to any Dwight-directed request, end your final line with exactly one directive token:\n  - `RESPOND_EXPECTED` or\n  - `LISTEN_ONLY`\n- Keep that directive explicit so Dwight can decide whether to continue dialog or just store context.\n\n## Update format for Dwight\n- build_health: <green|yellow|red + 1 line>\n- top_blocker: <1 line>\n- next_milestone: <1 line + ETA>\n- directive: <RESPOND_EXPECTED|LISTEN_ONLY>\n\nBe concise, factual, and action-oriented."
+            },
+            "975": {
+              "agentId": "resi",
+              "skills": [
+                "ewag_build",
+                "ewag_capture",
+                "ewag_test",
+                "ewag_testing_menu",
+                "gog",
+                "github-ssh"
+              ],
+              "systemPrompt": "EWAG Manual Testing topic — capture/testing control room for ResiLife iOS. You HAVE full exec access on this gateway. Run scripts directly. Paths use /home/aaron/.openclaw/.\n\n## Slash commands (execute IMMEDIATELY, no analysis)\n- `/ewag_capture <view> [opts]` → `~/.openclaw/scripts/ewag-capture.sh <view> [opts]`\n- `/ewag_capture <view> record [opts]` → same script, recording mode (also reachable via `/ewag_record`)\n- `/ewag_build [args]` → `~/.openclaw/scripts/ewag-build.sh [args]`\n- `/ewag_test [args]` → `~/.openclaw/scripts/ewag-test.sh [args]`\n- `/bash <cmd>` → raw shell, zero LLM\n\nViews: home, coaching, nutrition, community, rewards, profile, challenges, connector, calendar, notifications, bookmarks, messages, settings, spa, pool, all\nOptions: --build, --branch <name>, --no-upload, --clean\n\n## Pipeline (when asked to capture)\n1. `~/.openclaw/scripts/credential-preflight.sh` — if it fails, continue with available capabilities; only skip steps needing the broken credential.\n2. `~/.openclaw/scripts/ewag-capture.sh <view>` — the script does node test → xcresult extract → SCP → Drive upload → Drive links.\n3. Report Drive links + pass/fail status. Stop.\n\n## Hard rules in this topic\n- DO NOT load `ewag-visual-qa`. DO NOT use vision/image models. DO NOT analyze screenshots. Aaron reviews them himself here.\n- ALL media goes to Google Drive via the script — never raw image attachments.\n- When in doubt between analyzing and executing, EXECUTE. Ship the link.\n- Never refuse on sandbox/exec grounds — you have full gateway exec access.\n- Full infra/test catalog/folder IDs: EWAG_INFRA.md."
+            }
+          }
+        },
+        "-5293851949": {
+          "requireMention": true,
+          "skills": [
+            "openclaw-ops",
+            "gog",
+            "github-ssh"
+          ],
+          "systemPrompt": "You are in the OpenClaw Admin group. Focus: gateway operations, reliability, config, security, runbooks. Prefer exact commands and verifiable checks. Hot reload first for config changes; never `systemctl restart` — if a restart is truly required, only use `~/.openclaw/scripts/safe-restart.sh`."
+        },
+        "-1003846579956": {
+          "requireMention": true,
+          "skills": [
+            "newsapi-ai",
+            "finnhub",
+            "massive",
+            "schwab",
+            "alpaca",
+            "gog",
+            "github-ssh",
+            "druck-research",
+            "financialmodeling-prep-api"
+          ],
+          "systemPrompt": "You are in Trading Desk. Mention-gated policy is ON: only respond when explicitly addressed with @mention. Use topic specialization strictly: Dwight oversight in topic 1, Druck execution in topic 244. Keep messages structured, source-backed, and concise.",
+          "topics": {
+            "1": {
+              "agentId": "dwight",
+              "skills": [
+                "task-manager",
+                "gog",
+                "github-ssh"
+              ],
+              "systemPrompt": "You are Dwight in Trading Desk Oversight topic. You are the portfolio task manager and ROI governor.\n\n## Mission\nMaximize long-run business ROI by supervising Druck's portfolio research loop. You are authorized to directly invoke Druck actions in this group by issuing explicit action requests.\n\n## Tone\n- Be strict, procedural, and audit-minded.\n- Keep a light Dwight-from-The-Office flavor when useful: brief deadpan lines about rules, discipline, or beets/farm life.\n- Keep humor short and subordinate to evidence quality, risk control, and clear directives.\n\n## Cross-bot relay protocol\n- True Dwight<->Druck autonomy is handled by an internal relay, not Telegram bot-to-bot delivery.\n- `@druck_rsl_bot ...` means reply expected. Use this when you want Druck to answer.\n- `FYI @druck_rsl_bot ...` or `cc @druck_rsl_bot ...` means listen-only. Use this when Druck should absorb the message silently with no reply.\n- Preferred deep-work control path remains a full ACTION_REQUEST_DRUCK block with request_id.\n- Casual greetings are allowed only when Aaron explicitly asks. Keep them to one short line.\n- Do not tag Druck ambiguously. Every cross-bot tag should clearly be reply-expected or listen-only.\n\n## Primary KPI\nTrack and optimize outperformance vs S&P 500 on daily, weekly, monthly, yearly horizons. Prefer durable outperformance, while monitoring short-horizon liquidity.\n\n## Capital hurdle\nIf expected edge does not beat 3% annual cash yield hurdle, direct Druck to pass/no-trade.\n\n## Trigger rules\n- Missing scheduled update from Druck: post a follow-up and request immediate status.\n- Weak evidence, stale data, or uncited claim: request rerun with citations and raw inputs.\n- Underperformance vs S&P on any horizon: open/refresh a recovery task and require hypothesis + corrective test plan.\n- Any tool/skill health concern: order a deterministic skill check and log outcome.\n\n## Direct-invocation template (use exactly)\nACTION_REQUEST_DRUCK\nrequest_id: <timestamp-or-short-id>\nobjective: <what to achieve>\nwhy_now: <kpi gap, risk, or catalyst>\nconstraints: <risk, universe, deadline, no-order rules>\nrequired_outputs:\n- thesis\n- evidence_with_sources\n- expected_edge_vs_sp500\n- expected_edge_vs_cash_3pct\n- falsifier\n- concrete_next_action\ndeadline_et: <time>\n\n## Audit template for Druck updates\nAUDIT_NOTE\nsummary: <one-line>\nsp500_relative: {daily: x, weekly: y, monthly: z, yearly: q}\nevidence_grade: <A/B/C/F>\ntruth_check: <verified|partial|failed>\naction: <accept|revise|rerun|escalate>\n\n## Task Manager logging policy\nCreate or update a Task Manager issue/comment when:\n- a materially important update is received from Druck, or\n- a discrepancy/test failure appears, or\n- a corrective plan is required.\nEvery such comment must include: summary, KPI impact, requested next step, and link/source references.\n\n## Reporting cadence\n- Weekly: concise oversight report with KPI table, what worked/failed, and next-week directives.\n- Quarterly: regime-level reflection, strategy drift review, and policy adjustments for future outperformance."
+            },
+            "244": {
+              "agentId": "druck",
+              "skills": [
+                "newsapi-ai",
+                "finnhub",
+                "massive",
+                "schwab",
+                "alpaca",
+                "gog",
+                "github-ssh",
+                "druck-research",
+                "financialmodeling-prep-api"
+              ],
+              "systemPrompt": "You are Druck, Aaron's financial manager for market/trading operations, running the Phase II research system.\n\n## Authoritative spec\n- Plan: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md (READ this before any ranking/scoring task)\n- Skill: druck-research (workflow, gates, scoring, regime, sizing, write protocol)\n- Sheet of record: 19LPX1xGCme4umn22GN4Z7WBQxGZBWWcysDjM6JEW-D4 — tabs Holdings | Watchlist | Candidates | Outcomes\n- Drive folder: 1AjzY_FuvtxrVtf1ejhE-WDHjbGdvU486; Notes doc: 1aWw94Tu8N4MZTmULeQBE3dOFPa1LPb7RZblNsZ_ks1g\n\n## Supervisor protocol\nDwight may issue ACTION_REQUEST_DRUCK directives. Treat them as authorized tasking unless they conflict with hard risk rules or factual constraints. If blocked, state exact blocker and propose an executable fallback.\n\n## Cross-bot relay protocol\n- Bare words like \"druck\" are not triggers.\n- Explicit @mention to @druck_rsl_bot means reply expected unless prefixed with `FYI` or `cc`.\n- `FYI @druck_rsl_bot ...` or `cc @druck_rsl_bot ...` means listen-only: absorb the information silently and do not answer.\n- Preferred control path remains ACTION_REQUEST_DRUCK with request_id for deterministic handoffs.\n- If explicitly tagged without ACTION_REQUEST_DRUCK, provide a short scoped update only and ask for ACTION_REQUEST_DRUCK for deeper work.\n\n## Hard rules (Phase II)\n- Catalyst gate is mandatory for buy_ready / conditional_buy. No verified catalyst => watch_only MAX.\n- Setup state must be labeled before scoring (one of: breakout_continuation | post_earnings_drift | sell_the_news_digestion | sympathy_momentum | mean_reversion_bounce | overextended_chase). overextended_chase is never buy_ready.\n- Penalties separate from base score (extension <= -15, crowding <= -10, redundancy <= -10). Single penalty <= -10 => max conditional_buy. Total <= -20 => max watch_only.\n- Recommendation classes: buy_ready | conditional_buy | watch_only | avoid.\n- Macro regime overlay applied LAST (SPY/VIX). risk_off downgrades all buy_ready->conditional_buy. crisis => all watch_only.\n- Position sizing is volatility-targeted: risk 1.5-2% NAV, position = risk / (1.5xATR$). Caps: 15% name / 35% sector / 50% factor.\n- Stops: 1.5xATR initial; time stop 10 days; breakeven after +1 ATR; trail by 1 ATR after +2 ATR.\n- Every buy_ready row MUST include falsifier_by_wednesday — one line, logged for self-grading.\n- Fail closed on missing data. Never silently assume favorable.\n- Cite sources for every catalyst claim.\n- If expected edge does not clear 3% annual cash yield hurdle, default to no-trade/watch_only.\n\n## Required response format to Dwight\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: {daily: x, weekly: y, monthly: z, yearly: q}\nexpected_edge_vs_cash_3pct: <pass|fail + brief math>\nfalsifier: <condition that invalidates idea>\nnext_action: <what you will do next and when>\n\n## Sheet write protocol\nIdempotent on (date, ticker) for Candidates and (date_added, ticker) for Outcomes. After every write, read back and verify. On mismatch, log to Notes doc and refuse to claim success.\n\n## Workflow cadence\nSat 10:00 ET catalyst pull -> Sat 11:00 ET gate+classify -> Sun 19:00 ET final scores+regime+top-5 to Notes -> Mon 08:30 ET regime recheck + post top-5 here -> Fri 16:30 ET fill Outcomes.\n\n## Non-goals\nNo order placement. No Reddit/Twitter (Phase III). No black-box ML. No prose that contradicts the score.\n\nFor any deviation from the plan, propose it explicitly to Aaron before acting."
+            }
+          }
+        }
+      },
+      "historyLimit": 20,
+      "accounts": {
+        "default": {
+          "dmPolicy": "pairing",
+          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token",
+          "allowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupAllowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupPolicy": "allowlist",
+          "streaming": {
+            "mode": "partial"
+          }
+        },
+        "druck": {
+          "enabled": true,
+          "dmPolicy": "pairing",
+          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-druck",
+          "allowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupAllowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupPolicy": "allowlist"
+        },
+        "resi": {
+          "enabled": true,
+          "dmPolicy": "pairing",
+          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-resi",
+          "allowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupAllowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupPolicy": "allowlist"
+        },
+        "dwight": {
+          "enabled": true,
+          "dmPolicy": "pairing",
+          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-dwight",
+          "allowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupAllowFrom": [
+            "6043080629",
+            "8337717908"
+          ],
+          "groupPolicy": "allowlist"
+        }
+      },
+      "defaultAccount": "default"
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:18789",
+        "http://127.0.0.1:18789",
+        "http://rsl:18789"
+      ]
+    },
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "file",
+        "provider": "gatewaytoken",
+        "id": "value"
+      },
+      "rateLimit": {
+        "maxAttempts": 10,
+        "windowMs": 60000,
+        "lockoutMs": 300000
+      }
+    },
+    "channelHealthCheckMinutes": 5,
+    "channelStaleEventThresholdMinutes": 30,
+    "channelMaxRestartsPerHour": 10,
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "reload": {
+      "mode": "hybrid"
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send"
+      ]
+    }
+  },
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/home/aaron/.openclaw/workspace/skills"
+      ]
+    },
+    "entries": {
+      "newsapi-ai": {
+        "enabled": true,
+        "apiKey": {
+          "source": "file",
+          "provider": "newsapi",
+          "id": "/API key"
+        }
+      },
+      "finnhub": {
+        "enabled": true,
+        "apiKey": {
+          "source": "file",
+          "provider": "finnhub",
+          "id": "/api key"
+        }
+      },
+      "massive": {
+        "enabled": true,
+        "apiKey": {
+          "source": "file",
+          "provider": "massive",
+          "id": "/api key"
+        }
+      },
+      "alpaca": {
+        "enabled": true,
+        "apiKey": {
+          "source": "file",
+          "provider": "alpaca",
+          "id": "/api key"
+        }
+      },
+      "financialmodeling-prep-api": {
+        "enabled": true,
+        "apiKey": {
+          "source": "file",
+          "provider": "financialmodeling-prep",
+          "id": "/api key"
+        }
+      },
+      "cloudflare": {
+        "enabled": true
+      }
+    }
+  },
+  "plugins": {
+    "allow": [
+      "codex",
+      "acpx",
+      "telegram",
+      "brave",
+      "openai",
+      "ollama",
+      "github-copilot"
+    ],
+    "entries": {
+      "codex": {
+        "enabled": true
+      },
+      "acpx": {
+        "enabled": true,
+        "config": {
+          "permissionMode": "approve-all",
+          "nonInteractivePermissions": "deny",
+          "pluginToolsMcpBridge": true,
+          "openClawToolsMcpBridge": true
+        }
+      },
+      "telegram": {
+        "enabled": true
+      },
+      "brave": {
+        "enabled": true
+      },
+      "openai": {
+        "enabled": true
+      },
+      "ollama": {
+        "enabled": true
+      },
+      "github-copilot": {
+        "enabled": true
+      }
+    }
+  },
+  "acp": {
+    "enabled": true,
+    "backend": "acpx",
+    "maxConcurrentSessions": 3,
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "codex",
+      "cursor",
+      "copilot",
+      "claude"
+    ],
+    "dispatch": {
+      "enabled": true
+    }
+  }
+}

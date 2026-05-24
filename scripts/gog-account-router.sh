@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: gog-account-router.sh [--agent <main|resi|dwight|druck>] <gog args...>
+
+Routes gog account deterministically by agent and enforces non-interactive mode.
+
+Account mapping (override via env vars):
+  - main   -> GOG_ACCOUNT_MAIN   (default: aaronhorowitz97@gmail.com)
+  - resi   -> GOG_ACCOUNT_RESI   (default: aaronhorowitz97@gmail.com)
+  - dwight -> GOG_ACCOUNT_DWIGHT (default: aaronhorowitz97@gmail.com)
+  - druck  -> GOG_ACCOUNT_DRUCK  (default: aaronhorowitz97@gmail.com)
+
+You can also set OPENCLAW_AGENT_ID, OPENCLAW_AGENT, or AGENT_ID.
+EOF
+}
+
+agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-main}}}"
+if [[ "${1:-}" == "--agent" ]]; then
+  [[ $# -ge 3 ]] || {
+    usage
+    exit 2
+  }
+  agent="$2"
+  shift 2
+fi
+
+[[ $# -gt 0 ]] || {
+  usage
+  exit 2
+}
+
+if ! command -v gog >/dev/null 2>&1; then
+  echo "[gog-account-router] gog CLI not found in PATH" >&2
+  exit 1
+fi
+
+case "$agent" in
+  main) account="${GOG_ACCOUNT_MAIN:-aaronhorowitz97@gmail.com}" ;;
+  resi) account="${GOG_ACCOUNT_RESI:-aaronhorowitz97@gmail.com}" ;;
+  dwight) account="${GOG_ACCOUNT_DWIGHT:-aaronhorowitz97@gmail.com}" ;;
+  druck) account="${GOG_ACCOUNT_DRUCK:-aaronhorowitz97@gmail.com}" ;;
+  *)
+    echo "[gog-account-router] unknown agent '$agent'" >&2
+    exit 2
+    ;;
+esac
+
+# Global auth health check first.
+if ! gog auth list --check --no-input >/dev/null 2>&1; then
+  echo "[gog-account-router] gog auth unhealthy; run: gog auth manage --services drive,gmail,calendar,sheets,docs" >&2
+  exit 1
+fi
+
+service="${1:-}"
+subcommand="${2:-}"
+
+# Cheap service probes to fail fast before mutating calls.
+case "$service:$subcommand" in
+  drive:*)
+    gog drive search 'owner:me' --max 1 --account "$account" --no-input >/dev/null 2>&1 || {
+      echo "[gog-account-router] drive probe failed for account '$account'" >&2
+      exit 1
+    }
+    ;;
+  gmail:*)
+    gog gmail search 'newer_than:7d' --max 1 --account "$account" --no-input >/dev/null 2>&1 || {
+      echo "[gog-account-router] gmail probe failed for account '$account'" >&2
+      exit 1
+    }
+    ;;
+  calendar:*)
+    gog calendar calendars --max 1 --account "$account" --no-input >/dev/null 2>&1 || {
+      echo "[gog-account-router] calendar probe failed for account '$account'" >&2
+      exit 1
+    }
+    ;;
+  sheets:*)
+    # Auth check is usually enough; leave sheet-specific checks to caller context.
+    ;;
+  docs:*)
+    ;;
+  contacts:*)
+    ;;
+  *)
+    ;;
+esac
+
+has_no_input=0
+has_account=0
+for arg in "$@"; do
+  if [[ "$arg" == "--no-input" ]]; then
+    has_no_input=1
+  fi
+  if [[ "$arg" == "--account" ]]; then
+    has_account=1
+  fi
+done
+
+cmd=(gog)
+if [[ "$has_account" -eq 0 ]]; then
+  cmd+=(--account "$account")
+fi
+cmd+=("$@")
+if [[ "$has_no_input" -eq 0 ]]; then
+  cmd+=(--no-input)
+fi
+
+exec "${cmd[@]}"

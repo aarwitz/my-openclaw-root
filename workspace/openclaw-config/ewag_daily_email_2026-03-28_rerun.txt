@@ -1,0 +1,20 @@
+Hi Aaron and Taylor,
+
+Your Daily Summary for Saturday, March 28
+
+MEETINGS
+No events are currently coming through the connected calendar for today.
+
+RECOMMENDED NEXT TASKS
+Aaron: Issue #7 — Reproduce the YOLO / GXF graph failure, verify the 90fps vs 30fps mismatch, and identify the smallest fix or config change that stabilizes the robot vision pipeline.
+Taylor: Issue #13 — Define the exact demo deliverable, success criteria, and smallest next implementation chunk so the demo can move from vague idea to concrete plan.
+Jerry: Issue #9 — Turn the company-focus question into a sharper decision frame with concrete market options, tradeoffs, and a recommended next move for Aaron and Taylor.
+
+MORE DETAIL
+- I updated the real Task Manager so Aaron, Taylor, and Jerry each now have an assigned task in the active sprint.
+- Aaron was assigned the concrete robotics/perception debugging issue because it fits his strength in hands-on systems debugging with real logs and hardware context.
+- Taylor was assigned the demo issue because it benefits from her cross-domain product, implementation, and quality judgment.
+- Jerry is carrying the strategy/ops task of clarifying Redstone’s positioning so the team can make cleaner website, outreach, and prioritization decisions.
+- The Crew Quest app is live here: http://rsl:8000/static/miniapp.html?group=telegram:-4995650408&v=3
+
+— Jerry

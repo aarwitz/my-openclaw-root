@@ -1,0 +1,198 @@
+version: 2
+owner: Aaron
+status: approved_for_v6_buildout
+
+seed_mode_defaults:
+  active: true
+  max_position_pct_override: 0.5
+  notes: >-
+    Applied to all paper-live strategies for the first 14 calendar days unless
+    explicitly disabled.
+
+allocation_policy:
+  capital_allocation_pct:
+    conviction: 60
+    opportunistic: 30
+    cash_reserve: 10
+  exploit_pct: 70
+  explore_pct: 30
+  notes: >-
+    Conviction and opportunistic are the active risk buckets. Cash reserve is a
+    protected allocation, not a leftover.
+
+strategies:
+  - strategy_id: trusted_source_catalyst
+    category: opportunistic
+    state: paper_live
+    active: true
+    allocation_pct: 10
+    default_size_pct: 2.0
+    max_size_pct: 3.0
+    max_holding_days: 45
+    default_stop_pct: 15.0
+    default_targets:
+      - 20.0
+      - 35.0
+    min_corroborating_signals: 2
+    source_trust_scaled: true
+    trigger_type: manual_or_trusted_source
+    notes: Strong user-curated or trusted-source catalyst with corroboration.
+
+  - strategy_id: post_earnings_drift
+    category: opportunistic
+    state: paper_live
+    active: true
+    allocation_pct: 10
+    default_size_pct: 2.0
+    max_size_pct: 2.0
+    max_holding_days: 45
+    default_stop_pct: 8.0
+    default_targets:
+      - 10.0
+      - 18.0
+    trigger_type: event_driven
+    requires:
+      - eps_beat
+      - revenue_beat
+      - guidance_raise
+      - day1_reaction_between_5_and_15_pct
+    notes: Entry day after earnings with clean drift setup.
+
+  - strategy_id: 8k_material_event
+    category: opportunistic
+    state: paper_live
+    active: true
+    allocation_pct: 10
+    default_size_pct: 1.5
+    max_size_pct: 1.5
+    max_holding_days: 30
+    default_stop_pct: 12.0
+    default_targets:
+      - 12.0
+      - 22.0
+    trigger_type: filing_driven
+    allowed_item_numbers:
+      - "1.01"
+      - "2.01"
+      - "5.02"
+      - "8.01"
+    requires:
+      - positive_sentiment_classification
+      - price_volume_corroboration
+    notes: Trade only positive material 8-Ks with corroboration.
+
+  - strategy_id: analyst_upgrade_momentum
+    category: opportunistic
+    state: shadow
+    active: true
+    allocation_pct: 0
+    default_size_pct: 1.5
+    max_size_pct: 1.5
+    max_holding_days: 21
+    default_stop_pct: 10.0
+    default_targets:
+      - 12.0
+      - 22.0
+    trigger_type: analyst_flow
+    requires:
+      - two_upgrades_in_48h_or_single_target_raise_above_25_pct
+      - post_earnings_within_30d
+    notes: Shadow first, then promote if attribution is clean.
+
+  - strategy_id: insider_cluster_buying
+    category: opportunistic
+    state: shadow
+    active: true
+    allocation_pct: 0
+    default_size_pct: 2.0
+    max_size_pct: 2.0
+    max_holding_days: 60
+    default_stop_pct: 18.0
+    default_targets:
+      - 20.0
+      - 40.0
+    trigger_type: filing_driven
+    requires:
+      - two_or_more_insiders_within_5d
+      - total_purchase_above_500k
+      - officer_role_includes_ceo_cfo_or_director
+    notes: Scale in over multiple days only after paper validation.
+
+  - strategy_id: x_cashtag_paste
+    category: opportunistic
+    state: shadow
+    active: true
+    allocation_pct: 0
+    default_size_pct: 1.5
+    max_size_pct: 2.0
+    max_holding_days: 21
+    default_stop_pct: 12.0
+    default_targets:
+      - 15.0
+      - 25.0
+    trigger_type: manual_paste_in
+    min_corroborating_signals: 2
+    notes: No X API dependency required, user paste triggers investigation.
+
+  - strategy_id: high_conviction_thesis
+    category: conviction
+    state: research_only
+    active: true
+    allocation_pct: 60
+    default_size_pct: 5.0
+    max_size_pct: 15.0
+    max_holding_days: 540
+    default_stop_pct: null
+    default_targets: []
+    trigger_type: thesis_driven
+    requires:
+      - thesis_object_complete
+      - three_testable_predictions
+      - pre_mortem_present
+    notes: Build thesis engine first, autonomous execution later.
+
+  - strategy_id: reserved_slot
+    category: reserved
+    state: retired
+    active: false
+    allocation_pct: 0
+    default_size_pct: 0
+    max_size_pct: 0
+    max_holding_days: 0
+    default_stop_pct: null
+    default_targets: []
+    trigger_type: none
+    notes: Reserved for future strategy once baseline evaluation data exists.
+
+rollout_rules:
+  strategy_states:
+    - research_only
+    - shadow
+    - paper_live
+    - quarantine
+    - paused
+    - retired
+  promotion_requirements:
+    shadow_to_paper_live:
+      min_shadow_signals: 10
+      require_clean_reconciliation: true
+      require_expected_value_positive: true
+    paper_live_to_scaled:
+      min_closed_trades: 20
+      require_positive_expectancy: true
+  pause_rules:
+    allocated_capital_drawdown_pause_pct: 30.0
+    negative_expectancy_after_trades: 30
+    rolling_60d_alpha_pause_threshold_pct: -5.0
+
+variant_policy:
+  auto_generation_enabled: false
+  max_active_variants_per_strategy: 2
+  notes: >-
+    For the first 30 to 45 days, create variants manually only, changing one
+    parameter at a time.
+
+notes:
+  - Start with three paper-live opportunistic strategies and one conviction research track.
+  - Shadow strategies still generate signals and research records, but do not place orders.
+  - High-conviction thesis remains research-first until slower feedback loops are understood.

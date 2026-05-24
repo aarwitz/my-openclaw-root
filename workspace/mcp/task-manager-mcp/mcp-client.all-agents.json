@@ -1,0 +1,44 @@
+{
+  "mcpServers": {
+    "task-manager-main": {
+      "command": "python3",
+      "args": [
+        "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
+      ],
+      "env": {
+        "TM_BASE_URL": "http://127.0.0.1:8000",
+        "TM_DEFAULT_ACTOR": "Jerry"
+      }
+    },
+    "task-manager-resi": {
+      "command": "python3",
+      "args": [
+        "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
+      ],
+      "env": {
+        "TM_BASE_URL": "http://127.0.0.1:8000",
+        "TM_DEFAULT_ACTOR": "Resi"
+      }
+    },
+    "task-manager-dwight": {
+      "command": "python3",
+      "args": [
+        "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
+      ],
+      "env": {
+        "TM_BASE_URL": "http://127.0.0.1:8000",
+        "TM_DEFAULT_ACTOR": "Dwight"
+      }
+    },
+    "task-manager-druck": {
+      "command": "python3",
+      "args": [
+        "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
+      ],
+      "env": {
+        "TM_BASE_URL": "http://127.0.0.1:8000",
+        "TM_DEFAULT_ACTOR": "Druck"
+      }
+    }
+  }
+}

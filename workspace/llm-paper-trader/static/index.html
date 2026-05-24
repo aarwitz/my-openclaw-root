@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Paper Trader</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d0f14;
+      --card: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --amber: #e3b341;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --font: 'Segoe UI', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
+    header span { color: var(--muted); font-size: 12px; }
+    nav {
+      display: flex;
+      gap: 4px;
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+    }
+    nav button {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all .15s;
+    }
+    nav button:hover { border-color: var(--border); color: var(--text); }
+    nav button.active { background: var(--accent); color: #0d0f14; border-color: var(--accent); font-weight: 600; }
+    main { padding: 24px; max-width: 1300px; margin: 0 auto; }
+    .section { display: none; }
+    .section.active { display: block; }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .stat-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .stat-value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .stat-value.green { color: var(--green); }
+    .stat-value.red { color: var(--red); }
+    .stat-value.accent { color: var(--accent); }
+    label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+    input, select {
+      width: 100%;
+      background: #0d0f14;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; gap: 12px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    button.btn {
+      padding: 9px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    button.btn:hover { opacity: .85; }
+    .btn-primary { background: var(--accent); color: #0d0f14; }
+    .btn-green { background: var(--green); color: #0d0f14; }
+    .btn-red { background: var(--red); color: #fff; }
+    .btn-amber { background: var(--amber); color: #0d0f14; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border) !important; color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .05em; padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+    td { padding: 10px 12px; border-bottom: 1px solid #1c2128; }
+    tr:hover td { background: #1c2128; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green { background: rgba(63,185,80,.15); color: var(--green); }
+    .badge-red { background: rgba(248,81,73,.15); color: var(--red); }
+    .badge-amber { background: rgba(227,179,65,.15); color: var(--amber); }
+    .badge-blue { background: rgba(88,166,255,.15); color: var(--accent); }
+    .badge-muted { background: rgba(139,148,158,.15); color: var(--muted); }
+    #chart-frontier, #chart-mc { width: 100%; height: 300px; }
+    .mt { margin-top: 16px; }
+    .mb { margin-bottom: 16px; }
+    .text-muted { color: var(--muted); }
+    .flex { display: flex; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .gap { gap: 8px; }
+    .action-row { display: flex; gap: 8px; }
+    .link-btn {
+      background: transparent;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-weight: 700;
+      padding: 0;
+      text-decoration: underline;
+    }
+    .link-btn:hover { opacity: .85; }
+    .error { color: var(--red); padding: 8px; background: rgba(248,81,73,.08); border-radius: 6px; margin-top: 8px; }
+    .loading { color: var(--muted); font-style: italic; }
+    .weights-table { font-size: 12px; }
+    .weights-table td:last-child { text-align: right; font-weight: 600; }
+    canvas { max-width: 100%; }
+    @media (max-width: 900px) {
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>🤖 LLM Paper Trader</h1>
+  <span id="clock"></span>
+</header>
+<nav>
+  <button class="active" onclick="showTab('dashboard', this)">Dashboard</button>
+  <button onclick="showTab('optimizer', this)">Portfolio Optimizer</button>
+  <button onclick="showTab('backtest', this)">Backtest</button>
+  <button onclick="showTab('pipeline', this)">Pipeline</button>
+  <button onclick="showTab('hitl', this)">HITL Queue</button>
+  <button onclick="showTab('signals', this)">Signal Feed</button>
+</nav>
+<main>
+
+<!-- ══════════════════════════ DASHBOARD ══════════════════════════ -->
+<div class="section active" id="sec-dashboard">
+  <h2>Portfolio Overview</h2>
+  <div class="grid-4 mb" id="summary-cards">
+    <div class="stat-card"><div class="stat-label">Portfolio Value</div><div class="stat-value accent" id="stat-pv">—</div></div>
+    <div class="stat-card"><div class="stat-label">Cash</div><div class="stat-value" id="stat-cash">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-value" id="stat-trades">—</div></div>
+    <div class="stat-card"><div class="stat-label">HITL Pending</div><div class="stat-value amber" id="stat-hitl">—</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="flex-between mb"><h2>Positions</h2><button class="btn btn-ghost" onclick="loadDashboard()">↻ Refresh</button></div>
+      <table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Value</th></tr></thead>
+      <tbody id="positions-body"><tr><td colspan="4" class="text-muted loading">Loading…</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Recent Orders</h2>
+      <table><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th></tr></thead>
+      <tbody id="history-body"><tr><td colspan="4" class="text-muted loading">Loading…</td></tr></tbody></table>
+    </div>
+  </div>
+  <div class="grid-2 mt">
+    <div class="card">
+      <div class="flex-between mb">
+        <h2>Portfolio Ticker View</h2>
+        <button class="btn btn-ghost" onclick="loadTickerList()">↻ Refresh</button>
+      </div>
+      <table>
+        <thead><tr><th>Ticker</th><th>In Portfolio</th><th>Qty</th><th>Last</th><th>Chg%</th></tr></thead>
+        <tbody id="ticker-list-body"><tr><td colspan="5" class="text-muted loading">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2 id="ticker-detail-title">Ticker Detail</h2>
+      <div id="ticker-detail-meta" class="text-muted mb">Click a ticker to view live quote, regime, position and recent signals.</div>
+      <canvas id="chart-ticker"></canvas>
+      <div id="ticker-detail-signals" class="mt"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ OPTIMIZER ══════════════════════════ -->
+<div class="section" id="sec-optimizer">
+  <h2>Portfolio Optimizer (Markowitz Mean-Variance)</h2>
+  <div class="grid-2">
+    <div class="card">
+      <label>Tickers (comma separated)</label>
+      <input id="opt-tickers" value="AAPL,MSFT,GOOGL,AMZN,NVDA" />
+      <div class="row">
+        <div><label>Start Date</label><input type="date" id="opt-start" value="2022-01-01" /></div>
+        <div><label>End Date</label><input type="date" id="opt-end" /></div>
+      </div>
+      <div class="row">
+        <div><label>Risk-Free Rate (daily %)</label><input type="number" id="opt-rf" value="0.0" step="0.001" /></div>
+        <div><label>Monte Carlo Trials (0=off)</label><input type="number" id="opt-mc" value="20" /></div>
+      </div>
+      <button class="btn btn-primary" onclick="runOptimizer()">Run Optimizer</button>
+      <div id="opt-error"></div>
+    </div>
+    <div class="card">
+      <h2>Global Min Variance Portfolio</h2>
+      <div id="opt-global-min"><span class="text-muted">Run optimizer to see results.</span></div>
+      <div class="mt">
+        <h2>Max Sharpe Portfolio</h2>
+        <div id="opt-sharpe-max"></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-2 mt">
+    <div class="card">
+      <h2>Efficient Frontier</h2>
+      <canvas id="chart-frontier"></canvas>
+    </div>
+    <div class="card">
+      <h2>Monte Carlo Paths (Sharpe-Max Portfolio)</h2>
+      <canvas id="chart-mc"></canvas>
+    </div>
+  </div>
+  <div class="card mt" id="regime-card" style="display:none">
+    <h2>Market Regime</h2>
+    <div id="regime-results" class="grid-3"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ BACKTEST ══════════════════════════ -->
+<div class="section" id="sec-backtest">
+  <h2>Walk-Forward Backtest</h2>
+  <div class="card mb">
+    <div class="row">
+      <div><label>Tickers</label><input id="bt-tickers" value="AAPL,MSFT,GOOGL,AMZN" /></div>
+      <div><label>Model Start</label><input type="date" id="bt-m-start" value="2021-01-01" /></div>
+      <div><label>Model End</label><input type="date" id="bt-m-end" value="2022-12-31" /></div>
+    </div>
+    <div class="row">
+      <div><label>Test Start</label><input type="date" id="bt-t-start" value="2023-01-01" /></div>
+      <div><label>Test End</label><input type="date" id="bt-t-end" /></div>
+      <div><label>Portfolios</label><input type="number" id="bt-n" value="10" /></div>
+    </div>
+    <button class="btn btn-primary" onclick="runBacktest()">Run Backtest</button>
+    <div id="bt-error"></div>
+  </div>
+  <div class="card" id="bt-results" style="display:none">
+    <div class="flex-between mb">
+      <h2>Results</h2>
+      <div id="bt-summary" class="text-muted"></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Target Ret %</th><th>Model Ret %</th><th>Test Ret %</th><th>Model Std %</th><th>Test Std %</th><th>Outperformed</th></tr></thead>
+      <tbody id="bt-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════ PIPELINE ══════════════════════════ -->
+<div class="section" id="sec-pipeline">
+  <h2>Run Trading Pipeline (News → LLM → Signal → HITL / Auto-Execute)</h2>
+  <div class="card mb">
+    <label>Symbols (comma separated)</label>
+    <input id="pipe-symbols" value="AAPL,MSFT,GOOGL" />
+    <div class="row">
+      <div><label>HITL Threshold (USD notional — above this goes to review queue)</label>
+        <input type="number" id="pipe-threshold" value="500" />
+      </div>
+    </div>
+    <button class="btn btn-green" onclick="runPipeline()">▶ Run Pipeline</button>
+    <div id="pipe-status" class="loading" style="margin-top:8px;display:none">Running…</div>
+  </div>
+  <div class="card" id="pipe-results" style="display:none">
+    <h2>Results</h2>
+    <table>
+      <thead><tr><th>Symbol</th><th>Article</th><th>Direction</th><th>Confidence</th><th>Action</th><th>Qty</th><th>Notional</th><th>Status</th></tr></thead>
+      <tbody id="pipe-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════ HITL ══════════════════════════ -->
+<div class="section" id="sec-hitl">
+  <div class="flex-between mb">
+    <h2>Human-in-the-Loop Review Queue</h2>
+    <div class="flex gap">
+      <button class="btn btn-ghost" onclick="loadHitl()">↻ Refresh</button>
+      <button class="btn btn-amber" onclick="clearHitl()">Clear Reviewed</button>
+    </div>
+  </div>
+  <div class="card mb">
+    <div class="flex-between"><h2>Pending Orders</h2><span id="hitl-count" class="badge badge-amber">0 pending</span></div>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Notional</th><th>Confidence</th><th>Regime</th><th>Submitted</th><th>Rationale</th><th>Actions</th></tr></thead>
+        <tbody id="hitl-pending-body"><tr><td colspan="10" class="text-muted loading">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>History (All Orders)</h2>
+    <table>
+      <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Reviewed</th><th>Note</th></tr></thead>
+      <tbody id="hitl-all-body"><tr><td colspan="7" class="text-muted loading">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════ SIGNALS ══════════════════════════ -->
+<div class="section" id="sec-signals">
+  <div class="flex-between mb">
+    <h2>Signal Feed (LLM-Generated)</h2>
+    <button class="btn btn-ghost" onclick="loadSignals()">↻ Refresh</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Direction</th><th>Confidence</th><th>Rationale</th><th>Article</th></tr></thead>
+      <tbody id="signals-body"><tr><td colspan="7" class="text-muted loading">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+</main>
+
+<script>
+const API = '';
+let frontierChart = null;
+let mcChart = null;
+let tickerChart = null;
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function showTab(tab, btn=null) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('sec-' + tab).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'hitl') loadHitl();
+  if (tab === 'signals') loadSignals();
+}
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleString();
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function fmt(n, dec=2) { return Number(n).toFixed(dec); }
+function fmtUSD(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function badge(status) {
+  const map = { buy: 'badge-green', sell: 'badge-red', hold: 'badge-muted', approved: 'badge-green', rejected: 'badge-red', pending: 'badge-amber', up: 'badge-green', down: 'badge-red', neutral: 'badge-muted', bull: 'badge-green', bear: 'badge-red', high_vol: 'badge-red', sideways: 'badge-muted' };
+  return `<span class="badge ${map[status] || 'badge-blue'}">${status}</span>`;
+}
+function shortDate(iso) { return iso ? iso.slice(0,16).replace('T',' ') : '—'; }
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const [sum, hitl] = await Promise.all([api('/api/portfolio_summary'), api('/api/hitl/pending')]);
+  if (sum.status === 'ok') {
+    const d = sum.data;
+    document.getElementById('stat-pv').textContent = fmtUSD(d.portfolio_value);
+    document.getElementById('stat-cash').textContent = fmtUSD(d.cash);
+    document.getElementById('stat-trades').textContent = d.n_trades;
+  }
+  if (hitl.status === 'ok') {
+    document.getElementById('stat-hitl').textContent = hitl.data.length;
+  }
+  const pos = await api('/api/positions');
+  if (pos.status === 'ok') {
+    const positions = pos.data.positions;
+    const pb = document.getElementById('positions-body');
+    pb.innerHTML = Object.keys(positions).length === 0
+      ? '<tr><td colspan="4" class="text-muted">No open positions.</td></tr>'
+      : Object.entries(positions).map(([sym, p]) => `<tr>
+          <td><button class="link-btn" onclick="openTicker('${sym}')">${sym}</button></td><td>${p.qty}</td>
+          <td>${fmtUSD(p.avg_price)}</td>
+          <td>${fmtUSD(p.value ?? (p.qty * p.avg_price))}</td>
+        </tr>`).join('');
+    const hb = document.getElementById('history-body');
+    const hist = pos.data.history;
+    hb.innerHTML = hist.length === 0
+      ? '<tr><td colspan="4" class="text-muted">No orders yet.</td></tr>'
+      : hist.slice(-20).reverse().map(o => `<tr>
+          <td><button class="link-btn" onclick="openTicker('${o.symbol}')">${o.symbol}</button></td><td>${badge(o.side)}</td>
+          <td>${o.qty}</td><td>${fmtUSD(o.price)}</td>
+        </tr>`).join('');
+  }
+  loadTickerList();
+}
+
+async function loadTickerList() {
+  const res = await api('/api/portfolio/tickers');
+  const tb = document.getElementById('ticker-list-body');
+  if (res.status !== 'ok' || !res.data?.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="text-muted">No tickers yet.</td></tr>';
+    return;
+  }
+  tb.innerHTML = res.data.map(t => `<tr>
+    <td><button class="link-btn" onclick="openTicker('${t.symbol}')">${t.symbol}</button></td>
+    <td>${t.in_portfolio ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-muted">No</span>'}</td>
+    <td>${t.qty ?? 0}</td>
+    <td>${t.market_price != null ? fmtUSD(t.market_price) : '—'}</td>
+    <td>${t.change_pct != null ? (t.change_pct >= 0 ? '<span class="badge badge-green">' : '<span class="badge badge-red">') + fmt(t.change_pct,2) + '%</span>' : '—'}</td>
+  </tr>`).join('');
+}
+
+async function openTicker(symbol) {
+  const [detailRes, candleRes] = await Promise.all([
+    api(`/api/ticker/${symbol}`),
+    api(`/api/live/candles/${symbol}?period=1mo&interval=1d`),
+  ]);
+  if (detailRes.status !== 'ok') return;
+  const d = detailRes.data;
+  const q = d.quote || {};
+
+  document.getElementById('ticker-detail-title').textContent = `${d.ticker} Detail`;
+  document.getElementById('ticker-detail-meta').innerHTML = `
+    <div><strong>Price:</strong> ${q.price != null ? fmtUSD(q.price) : '—'} &nbsp; ${q.change_pct != null ? (q.change_pct >= 0 ? '<span class="badge badge-green">' : '<span class="badge badge-red">') + fmt(q.change_pct,2) + '%</span>' : ''}</div>
+    <div class="mt"><strong>Regime:</strong> ${badge(d.regime)}</div>
+    <div class="mt"><strong>Position:</strong> ${d.position ? `${d.position.qty} shares @ ${fmtUSD(d.position.avg_price)} | Unrealized ${d.position.unrealized_pnl >= 0 ? '<span class="badge badge-green">' : '<span class="badge badge-red">'}${fmtUSD(d.position.unrealized_pnl)}</span>` : 'Not held'}</div>
+  `;
+
+  const sigEl = document.getElementById('ticker-detail-signals');
+  const sigs = d.recent_signals || [];
+  sigEl.innerHTML = `<h2 style="margin-bottom:8px">Recent Signals</h2>` +
+    (sigs.length ? `<table><thead><tr><th>Time</th><th>Action</th><th>Confidence</th><th>Article</th></tr></thead><tbody>` +
+      sigs.map(s => `<tr><td>${shortDate(s.timestamp)}</td><td>${badge(s.action || 'hold')}</td><td>${s.confidence != null ? fmt(s.confidence*100,1)+'%' : '—'}</td><td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.article_title || '—'}</td></tr>`).join('') +
+      `</tbody></table>` : '<div class="text-muted">No recent signals for this ticker.</div>');
+
+  if (candleRes.status === 'ok') {
+    const candles = candleRes.data.candles || [];
+    renderTickerChart(symbol, candles);
+  }
+}
+
+function renderTickerChart(symbol, candles) {
+  const ctx = document.getElementById('chart-ticker').getContext('2d');
+  if (tickerChart) tickerChart.destroy();
+  tickerChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: candles.map(c => c.time.slice(0, 10)),
+      datasets: [{
+        label: `${symbol} Close`,
+        data: candles.map(c => c.close),
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,.1)',
+        tension: 0.25,
+        pointRadius: 1,
+      }],
+    },
+    options: {
+      plugins: { legend: { labels: { color: '#e6edf3' } } },
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', maxTicksLimit: 8 } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' } },
+      },
+    },
+  });
+}
+
+// ── Optimizer ─────────────────────────────────────────────────────────────────
+async function runOptimizer() {
+  const tickers = document.getElementById('opt-tickers').value.split(',').map(t=>t.trim()).filter(Boolean);
+  const start = document.getElementById('opt-start').value;
+  const end = document.getElementById('opt-end').value || new Date().toISOString().slice(0,10);
+  const rf = parseFloat(document.getElementById('opt-rf').value) / 100;
+  const n_mc = parseInt(document.getElementById('opt-mc').value);
+  document.getElementById('opt-error').innerHTML = '';
+  document.getElementById('opt-global-min').innerHTML = '<span class="loading">Calculating…</span>';
+  const res = await api('/api/optimize', 'POST', {tickers, start, end, rf_daily: rf, n_mc_trials: n_mc});
+  if (res.status !== 'ok') { document.getElementById('opt-error').innerHTML = `<div class="error">${res.message}</div>`; return; }
+  const d = res.data;
+  renderPortfolioCard('opt-global-min', d.global_min, d.tickers);
+  renderPortfolioCard('opt-sharpe-max', d.sharpe_max, d.tickers);
+  renderFrontierChart(d.frontier);
+  if (d.montecarlo_paths && d.montecarlo_paths.length > 0) renderMcChart(d.montecarlo_paths);
+  // Fetch regimes
+  fetchRegimes(tickers);
+}
+
+function renderPortfolioCard(elId, pt, tickers) {
+  if (!pt) { document.getElementById(elId).innerHTML = '<span class="text-muted">N/A</span>'; return; }
+  const rows = Object.entries(pt.weights).map(([t,w]) => `<tr><td>${t}</td><td>${fmt(w*100,2)}%</td></tr>`).join('');
+  document.getElementById(elId).innerHTML = `
+    <div class="grid-2">
+      <div>
+        <div class="stat-label">Ann. Return</div><div class="stat-value green">${fmt(pt.ann_return_pct,2)}%</div>
+        <div class="stat-label mt">Ann. Std Dev</div><div class="stat-value">${fmt(pt.ann_std_pct,2)}%</div>
+        <div class="stat-label mt">Sharpe</div><div class="stat-value accent">${fmt(pt.sharpe,3)}</div>
+      </div>
+      <table class="weights-table"><thead><tr><th>Ticker</th><th>Weight</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
+
+function renderFrontierChart(pts) {
+  if (frontierChart) { frontierChart.destroy(); }
+  const ctx = document.getElementById('chart-frontier').getContext('2d');
+  frontierChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        label: 'Efficient Frontier',
+        data: pts.map(p => ({x: p.daily_std_pct, y: p.daily_return_pct})),
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,.1)',
+        pointRadius: 3,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        x: { title: {display:true, text:'Daily Std Dev (%)', color:'#8b949e'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e'} },
+        y: { title: {display:true, text:'Daily Return (%)', color:'#8b949e'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e'} },
+      },
+      plugins: { legend: { labels: {color:'#e6edf3'} } },
+    }
+  });
+}
+
+function renderMcChart(paths) {
+  if (mcChart) { mcChart.destroy(); }
+  const ctx = document.getElementById('chart-mc').getContext('2d');
+  const nSteps = paths[0].length;
+  const labels = Array.from({length: nSteps}, (_,i) => i);
+  mcChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: paths.slice(0,30).map((p,i) => ({
+        data: p,
+        borderColor: `hsl(${(i*37)%360},70%,55%)`,
+        pointRadius: 0,
+        borderWidth: 1,
+        tension: 0.1,
+      }))
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: {display:false} },
+      scales: {
+        x: { title:{display:true,text:'Days',color:'#8b949e'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e', maxTicksLimit:8} },
+        y: { title:{display:true,text:'Portfolio Value (normalized)',color:'#8b949e'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e'} },
+      }
+    }
+  });
+}
+
+async function fetchRegimes(tickers) {
+  const el = document.getElementById('regime-card');
+  const res_el = document.getElementById('regime-results');
+  el.style.display = 'block';
+  res_el.innerHTML = '<span class="loading">Fetching regime data…</span>';
+  const results = await Promise.all(tickers.slice(0,6).map(t => api(`/api/regime/${t}`)));
+  res_el.innerHTML = results.map(r => {
+    if (r.status !== 'ok') return '';
+    const d = r.data;
+    return `<div class="stat-card">
+      <div class="stat-label">${d.ticker}</div>
+      <div class="stat-value" style="font-size:18px">${badge(d.regime)}</div>
+      <div class="text-muted" style="font-size:12px;margin-top:8px">${d.description}</div>
+      <div style="margin-top:8px;font-size:12px"><span class="text-muted">Vol: </span>${d.realized_vol_ann_pct}% ann.</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+async function runBacktest() {
+  const tickers = document.getElementById('bt-tickers').value.split(',').map(t=>t.trim()).filter(Boolean);
+  const body = {
+    tickers,
+    model_start: document.getElementById('bt-m-start').value,
+    model_end: document.getElementById('bt-m-end').value,
+    test_start: document.getElementById('bt-t-start').value,
+    test_end: document.getElementById('bt-t-end').value || new Date().toISOString().slice(0,10),
+    n_portfolios: parseInt(document.getElementById('bt-n').value),
+  };
+  document.getElementById('bt-error').innerHTML = '';
+  document.getElementById('bt-results').style.display = 'none';
+  const res = await api('/api/backtest', 'POST', body);
+  if (res.status !== 'ok') { document.getElementById('bt-error').innerHTML = `<div class="error">${res.message}</div>`; return; }
+  const d = res.data;
+  const wins = d.portfolios.filter(p=>p.outperformed).length;
+  document.getElementById('bt-summary').textContent = `${wins}/${d.portfolios.length} portfolios outperformed model prediction (test: ${d.test_start} → ${d.test_end})`;
+  document.getElementById('bt-body').innerHTML = d.portfolios.map(p => `<tr>
+    <td>${p.portfolio}</td>
+    <td>${fmt(p.target_return_pct,4)}</td>
+    <td>${fmt(p.model_return_pct,4)}</td>
+    <td>${fmt(p.test_return_pct,4)}</td>
+    <td>${fmt(p.model_std_pct,4)}</td>
+    <td>${fmt(p.test_std_pct,4)}</td>
+    <td>${p.outperformed ? '<span class="badge badge-green">✓ Yes</span>' : '<span class="badge badge-red">✗ No</span>'}</td>
+  </tr>`).join('');
+  document.getElementById('bt-results').style.display = 'block';
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+async function runPipeline() {
+  const symbols = document.getElementById('pipe-symbols').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const hitl_threshold = parseFloat(document.getElementById('pipe-threshold').value);
+  document.getElementById('pipe-status').style.display = 'block';
+  document.getElementById('pipe-results').style.display = 'none';
+  const res = await api('/api/run_pipeline', 'POST', {symbols, hitl_threshold});
+  document.getElementById('pipe-status').style.display = 'none';
+  if (res.status !== 'ok') return;
+  document.getElementById('pipe-body').innerHTML = res.data.map(r => {
+    const status = r.error ? `<span class="badge badge-red">Error</span>`
+      : r.queued_for_review ? `<span class="badge badge-amber">HITL Queue</span>`
+      : r.auto_executed ? `<span class="badge badge-green">Auto-Executed</span>`
+      : `<span class="badge badge-muted">Hold</span>`;
+    return `<tr>
+      <td>${r.symbol || '—'}</td>
+      <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.article_title || r.error || '—'}</td>
+      <td>${r.direction ? badge(r.direction) : '—'}</td>
+      <td>${r.confidence !== undefined ? fmt(r.confidence*100,1)+'%' : '—'}</td>
+      <td>${r.action ? badge(r.action) : '—'}</td>
+      <td>${r.qty !== undefined ? r.qty : '—'}</td>
+      <td>${r.notional !== undefined ? fmtUSD(r.notional) : '—'}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('pipe-results').style.display = 'block';
+  loadHitlCount();
+}
+
+// ── HITL ──────────────────────────────────────────────────────────────────────
+async function loadHitl() {
+  const [pending, all] = await Promise.all([api('/api/hitl/pending'), api('/api/hitl/all')]);
+  const pb = document.getElementById('hitl-pending-body');
+  document.getElementById('hitl-count').textContent = (pending.data||[]).length + ' pending';
+  pb.innerHTML = !pending.data || pending.data.length === 0
+    ? '<tr><td colspan="10" class="text-muted">No pending orders.</td></tr>'
+    : pending.data.map(o => `<tr>
+        <td><strong>${o.symbol}</strong></td>
+        <td>${badge(o.side)}</td>
+        <td>${o.qty}</td>
+        <td>${fmtUSD(o.price)}</td>
+        <td>${fmtUSD(o.notional)}</td>
+        <td>${fmt(o.signal_confidence*100,1)}%</td>
+        <td>${badge(o.regime)}</td>
+        <td>${shortDate(o.submitted_at)}</td>
+        <td style="max-width:180px;font-size:12px">${o.rationale}</td>
+        <td>
+          <div class="action-row">
+            <button class="btn btn-green" onclick="reviewOrder('${o.order_id}',true)">✓ Approve</button>
+            <button class="btn btn-red" onclick="reviewOrder('${o.order_id}',false)">✗ Reject</button>
+          </div>
+        </td>
+      </tr>`).join('');
+  const ab = document.getElementById('hitl-all-body');
+  ab.innerHTML = !all.data || all.data.length === 0
+    ? '<tr><td colspan="7" class="text-muted">No orders.</td></tr>'
+    : [...all.data].reverse().map(o => `<tr>
+        <td>${o.symbol}</td><td>${badge(o.side)}</td>
+        <td>${o.qty}</td><td>${fmtUSD(o.price)}</td>
+        <td>${badge(o.status)}</td>
+        <td>${shortDate(o.reviewed_at)}</td>
+        <td style="font-size:12px">${o.reviewer_note || '—'}</td>
+      </tr>`).join('');
+}
+
+async function reviewOrder(id, approve) {
+  const note = approve ? '' : prompt('Rejection reason (optional):') || '';
+  const res = await api(`/api/hitl/review/${id}`, 'POST', {approve, note});
+  if (res.status === 'ok') loadHitl();
+  else alert('Error: ' + res.message);
+}
+
+async function clearHitl() {
+  const res = await api('/api/hitl/clear', 'POST');
+  if (res.status === 'ok') { loadHitl(); }
+}
+
+async function loadHitlCount() {
+  const r = await api('/api/hitl/pending');
+  document.getElementById('stat-hitl').textContent = (r.data||[]).length;
+}
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+async function loadSignals() {
+  const res = await api('/api/signals');
+  const sb = document.getElementById('signals-body');
+  if (res.status !== 'ok' || !res.data.length) {
+    sb.innerHTML = '<tr><td colspan="7" class="text-muted">No signals yet. Run the pipeline.</td></tr>';
+    return;
+  }
+  sb.innerHTML = res.data.map(s => `<tr>
+    <td>${shortDate(s.timestamp)}</td>
+    <td><strong>${s.symbol}</strong></td>
+    <td>${badge(s.action)}</td>
+    <td>${badge(s.direction)}</td>
+    <td>${fmt(s.confidence*100,1)}%</td>
+    <td style="font-size:12px">${s.rationale}</td>
+    <td style="max-width:200px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.article_title}</td>
+  </tr>`).join('');
+}
+
+// Set default end dates to today
+document.addEventListener('DOMContentLoaded', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('opt-end').value = today;
+  document.getElementById('bt-t-end').value = today;
+  loadDashboard();
+});
+</script>
+</body>
+</html>

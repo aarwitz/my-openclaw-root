@@ -1,0 +1,215 @@
+version: 2
+owner: Aaron
+scope: alpaca_paper_only
+status: approved_for_v6_buildout
+
+runtime:
+  startup_mode: seed
+  allowed_modes:
+    - seed
+    - normal
+    - aggressive
+  broker_mode: alpaca_paper
+  engine_types:
+    - conviction
+    - opportunistic
+  allowed_instruments:
+    - stocks
+
+modes:
+  seed:
+    enabled: true
+    duration_calendar_days: 14
+    max_position_pct_override: 0.5
+    notes: >-
+      Default startup mode. Use to collect baseline telemetry before scaling.
+  normal:
+    enabled: true
+    notes: Standard paper-live operating mode after seed evidence is acceptable.
+  aggressive:
+    enabled: true
+    requires_manual_approval: true
+    notes: For explicitly approved high-conviction or high-opportunity bursts only.
+
+global_limits:
+  max_position_pct:
+    conviction: 15.0
+    opportunistic: 3.0
+  max_after_adds_pct: 25.0
+  max_positions: 30
+  max_new_entries_per_day: 3
+  max_sector_pct: 60.0
+  max_same_theme_pct: 40.0
+  max_short_gross_pct: 30.0
+  max_same_catalyst_cluster: 3
+  max_daily_loss_pct: 8.0
+  max_weekly_drawdown_pct: 15.0
+  max_monthly_drawdown_pct: 20.0
+  max_gap_entry_pct_above_ref:
+    default: 3.0
+    post_earnings_drift: 2.0
+    trusted_source_catalyst: 3.0
+    analyst_upgrade_momentum: 2.5
+    8k_material_event: 3.5
+
+eligibility:
+  min_market_cap_usd: 500000000
+  min_dollar_volume_usd:
+    default: 20000000
+    conviction_watch: 5000000
+    post_earnings_drift: 20000000
+    trusted_source_catalyst: 20000000
+    analyst_upgrade_momentum: 20000000
+    insider_cluster_buying: 5000000
+    8k_material_event: 20000000
+  options_allowed: false
+  shorts_allowed: true
+  leveraged_etfs_allowed: false
+  penny_stocks_allowed: false
+  short_earnings_blackout_days: 3
+
+cash_hurdle:
+  enabled: true
+  annual_cash_rate_pct: 3.0
+  min_excess_edge_bps:
+    default: 75
+    conviction: 50
+    opportunistic: 100
+  require_positive_expected_value: true
+
+hard_gates:
+  require_signal_freshness: true
+  require_data_integrity_pass: true
+  require_reconciliation_clean: true
+  require_cash_hurdle_pass: true
+  require_risk_snapshot_within_minutes: 15
+  block_on_factor_concentration_breach: true
+  block_on_theme_concentration_breach: true
+  block_on_unresolved_order_state: true
+  block_on_broker_api_instability: true
+
+portfolio_controls:
+  factor_buckets:
+    - mega_cap_tech
+    - ai_semis
+    - software
+    - high_beta_growth
+    - index_proxy
+    - energy_commodity
+    - financials
+    - consumer_beta
+  theme_examples:
+    - ai_capex_cycle
+    - enterprise_software_reaccel
+    - china_exposure
+    - crypto_beta
+    - oil_macro
+  enforce_factor_tagging: true
+  enforce_theme_tagging: true
+  correlation:
+    rolling_window_days: 90
+    max_pairwise_correlation: 0.85
+    warn_pairwise_correlation: 0.75
+    thematic_cluster_caps_pct:
+      ai_capex_cycle: 25
+      enterprise_software_reaccel: 20
+      china_exposure: 15
+      crypto_beta: 15
+      oil_macro: 20
+    block_new_entries_above_threshold: true
+
+execution:
+  default_entry_style: limit_mid
+  allow_marketable_limit: true
+  allow_market_entries_only_for:
+    - stop_exit
+    - high_liquidity_exit
+  avoid_first_minute_discretionary_entries: true
+  sell_fill_aware_redeployment: true
+  partial_fill_not_blocking: true
+
+stop_management:
+  stop_loss_rule_source: deterministic_only
+  allow_llm_for_stop_updates: false
+  time_stop_default_trading_days: 10
+
+pause_reasons:
+  risk_breach:
+    scope: full_system
+    blocks:
+      - new_entries
+      - adds
+      - shorts
+  data_integrity_failure:
+    scope: full_system
+    blocks:
+      - new_entries
+      - adds
+  reconciliation_mismatch:
+    scope: new_entries_only
+    blocks:
+      - new_entries
+  broker_api_instability:
+    scope: full_system
+    blocks:
+      - new_entries
+      - exits_non_protective
+      - adds
+  cost_overrun:
+    scope: nonessential_sources
+    blocks:
+      - broad_scans
+      - shadow_enrichment
+      - transcript_retries
+  signal_source_corruption:
+    scope: strategy_or_source
+    blocks:
+      - new_entries
+  order_rejection_spike:
+    scope: strategy_or_symbol
+    blocks:
+      - new_entries
+  manual_review_required:
+    scope: configurable
+    blocks:
+      - new_entries
+
+monitoring_thresholds:
+  order_rejection_rate_pause_pct: 25.0
+  reconciliation_tolerance_shares: 0
+  reconciliation_tolerance_notional_usd: 1.0
+  broker_health_max_consecutive_failures: 3
+  stale_signal_default_minutes: 1440
+
+shorts_policy:
+  size_scalar_vs_long: 0.75
+  require_high_liquidity: true
+  require_easy_borrow_proxy_if_available: true
+  default_max_holding_days: 21
+  disallow_around_earnings_if_not_explicit_strategy: true
+
+reporting:
+  weekly_review:
+    required: true
+    cadence: weekly
+    venue: telegram_and_sheet_summary
+    include:
+      - strategy_performance
+      - attribution_summary
+      - correlation_breaches
+      - capital_allocation_drift
+  monthly_review:
+    required: true
+    cadence: monthly
+    venue: manager_review_packet
+    include:
+      - strategy_expectancy
+      - alpha_vs_spy
+      - source_calibration
+      - risk_breach_log
+      - pause_reason_summary
+
+notes:
+  - Cash is treated as a real alternative to every trade.
+  - Position caps are necessary but not sufficient; factor and theme crowding also block trades.
+  - Reporting failures should not invent trades, but unresolved reconciliation should block fresh risk.

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Crew Quest Map V2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="world-map-v2.css" />
+</head>
+<body>
+  <div class="frame">
+    <header class="hud">
+      <div>
+        <div class="tiny">DAILY QUEST MAP</div>
+        <h1>JERRY DISPATCH BOARD</h1>
+      </div>
+      <div class="day-note">Jerry assigns next tasks → Aaron + Taylor</div>
+    </header>
+
+    <main class="map">
+      <div id="detailOverlay" class="overlay hidden">
+        <div class="overlay-backdrop" data-close="true"></div>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+          <button class="close-button" id="closeModal" aria-label="Close">✕</button>
+          <div class="modal-icon" id="modalIcon">📌</div>
+          <div class="modal-body">
+            <div class="tiny modal-tiny" id="modalEyebrow">DETAIL</div>
+            <h2 id="modalTitle">Node</h2>
+            <p id="modalSummary" class="modal-summary">Summary</p>
+            <p id="modalDescription" class="modal-description">Description</p>
+            <a id="modalLink" class="task-link" href="#" target="_blank" rel="noreferrer">Open full task manager ↗</a>
+          </div>
+        </section>
+      </div>
+      <div class="sky"></div>
+      <div class="grass grass-1"></div>
+      <div class="grass grass-2"></div>
+      <div class="grass grass-3"></div>
+      <div class="pond"></div>
+      <div class="path meeting-path"></div>
+      <div class="path left-path"></div>
+      <div class="path right-path"></div>
+
+      <svg class="flow-lines" viewBox="0 0 1000 1400" preserveAspectRatio="none">
+        <path class="flow blue" d="M500 860 C 470 700, 420 540, 250 420"/>
+        <path class="flow pink" d="M500 860 C 560 700, 650 560, 780 430"/>
+        <path class="flow gold" d="M500 860 C 500 650, 500 430, 500 220"/>
+      </svg>
+
+      <div class="packet blue p1"></div>
+      <div class="packet blue p2"></div>
+      <div class="packet pink p3"></div>
+      <div class="packet pink p4"></div>
+      <div class="packet gold p5"></div>
+      <div class="packet gold p6"></div>
+
+      <section class="node meetings tappable" data-node="meetings" style="top:110px; left:360px;">
+        <div class="island meeting-island">
+          <div class="icon">📅</div>
+        </div>
+        <div class="label">
+          <h3>Meetings</h3>
+          <p>3:00 PM EWAG sync</p>
+        </div>
+      </section>
+
+      <section class="node aaron tappable" data-node="aaron" style="top:340px; left:80px;">
+        <div class="island aaron-island">
+          <div class="icon">🧠</div>
+        </div>
+        <div class="label">
+          <h3>Aaron</h3>
+          <p>Next: review daily priorities</p>
+        </div>
+      </section>
+
+      <section class="node taylor tappable" data-node="taylor" style="top:350px; left:640px;">
+        <div class="island taylor-island">
+          <div class="icon">🛰️</div>
+        </div>
+        <div class="label">
+          <h3>Taylor</h3>
+          <p>Next: resolve blockers + dependencies</p>
+        </div>
+      </section>
+
+      <section class="node jerry tappable" data-node="jerry" style="top:760px; left:300px;">
+        <div class="island jerry-island hub">
+          <div class="icon">🤖</div>
+          <div class="beacon"></div>
+        </div>
+        <div class="label big">
+          <h3>Jerry HQ</h3>
+          <p>Working on: build today’s task plan</p>
+          <p>Blocker: none</p>
+        </div>
+      </section>
+
+      <div class="sprite s-aaron" style="top:455px; left:220px;"><span>🧢</span></div>
+      <div class="sprite s-taylor" style="top:470px; left:720px;"><span>💁‍♀️</span></div>
+      <div class="sprite s-jerry" style="top:980px; left:470px;"><span>🤖</span></div>
+    </main>
+  </div>
+  <script src="world-map-v2.js"></script>
+</body>
+</html>

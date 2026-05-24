@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Mission Map</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Orbitron:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="game-map.css" />
+</head>
+<body>
+  <div class="hud">
+    <div class="title-block">
+      <div class="tiny">TACTICAL OVERWORLD</div>
+      <h1>MISSION MAP // DAILY OPS</h1>
+      <div class="subtitle">Aaron · Taylor · Jerry · upcoming meetings</div>
+    </div>
+    <div class="legend">
+      <span><i class="dot aaron"></i>Aaron</span>
+      <span><i class="dot taylor"></i>Taylor</span>
+      <span><i class="dot jerry"></i>Jerry</span>
+      <span><i class="dot meet"></i>Meetings</span>
+    </div>
+  </div>
+
+  <main class="viewport">
+    <div class="grid"></div>
+    <div class="glow glow-1"></div>
+    <div class="glow glow-2"></div>
+
+    <svg class="rails" viewBox="0 0 1000 1600" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="railBlue" x1="0" x2="1">
+          <stop offset="0%" stop-color="#5ae4ff"/>
+          <stop offset="100%" stop-color="#8d7dff"/>
+        </linearGradient>
+        <linearGradient id="railPink" x1="0" x2="1">
+          <stop offset="0%" stop-color="#ff5db1"/>
+          <stop offset="100%" stop-color="#ffb45e"/>
+        </linearGradient>
+      </defs>
+      <path class="track blue" d="M120 220 C 280 160, 420 180, 500 320 S 690 520, 860 470"/>
+      <path class="track blue" d="M140 890 C 330 760, 520 820, 640 980 S 810 1190, 900 1290"/>
+      <path class="track pink" d="M180 540 C 340 560, 420 660, 530 730 S 720 820, 830 820"/>
+      <path class="track pink" d="M130 1350 C 260 1290, 360 1260, 500 1310 S 760 1430, 880 1490"/>
+      <path class="track spine" d="M500 100 L 500 1510"/>
+    </svg>
+
+    <div class="packet lane-a p1"></div>
+    <div class="packet lane-a p2"></div>
+    <div class="packet lane-b p3"></div>
+    <div class="packet lane-b p4"></div>
+    <div class="packet lane-c p5"></div>
+    <div class="packet lane-d p6"></div>
+
+    <section class="zone meeting-zone" style="top:70px; left:350px;">
+      <div class="zone-core meeting">📅</div>
+      <div class="zone-label">
+        <div class="zone-name">Meeting Gate</div>
+        <div class="zone-task">3:00 PM EWAG sync</div>
+      </div>
+    </section>
+
+    <section class="zone aaron-zone" style="top:280px; left:90px;">
+      <div class="zone-core aaron">🧠</div>
+      <div class="zone-label">
+        <div class="zone-name">Aaron Base</div>
+        <div class="zone-task">Choose top objective</div>
+      </div>
+    </section>
+
+    <section class="zone command-zone" style="top:470px; left:380px;">
+      <div class="zone-core neutral">⚡</div>
+      <div class="zone-label">
+        <div class="zone-name">Command Nexus</div>
+        <div class="zone-task">Today: ship clean handoffs</div>
+      </div>
+    </section>
+
+    <section class="zone taylor-zone" style="top:700px; left:720px;">
+      <div class="zone-core taylor">🛰️</div>
+      <div class="zone-label">
+        <div class="zone-name">Taylor Orbit</div>
+        <div class="zone-task">Review blockers + dependencies</div>
+      </div>
+    </section>
+
+    <section class="zone jerry-zone" style="top:980px; left:120px;">
+      <div class="zone-core jerry">⚙️</div>
+      <div class="zone-label">
+        <div class="zone-name">Jerry Forge</div>
+        <div class="zone-task">Build current implementation chunk</div>
+      </div>
+    </section>
+
+    <section class="zone future-zone" style="top:1220px; left:640px;">
+      <div class="zone-core meeting">⏰</div>
+      <div class="zone-label">
+        <div class="zone-name">Next Window</div>
+        <div class="zone-task">Mon 10:00 planning check-in</div>
+      </div>
+    </section>
+
+    <div class="character aaron" style="top:355px; left:250px;">
+      <div class="sprite">🧍</div>
+      <div class="tag">Aaron → deciding next move</div>
+    </div>
+
+    <div class="character taylor" style="top:790px; left:610px;">
+      <div class="sprite">🧍</div>
+      <div class="tag">Taylor → sequencing follow-ups</div>
+    </div>
+
+    <div class="character jerry" style="top:1080px; left:310px;">
+      <div class="sprite">🤖</div>
+      <div class="tag">Jerry → building</div>
+    </div>
+  </main>
+</body>
+</html>

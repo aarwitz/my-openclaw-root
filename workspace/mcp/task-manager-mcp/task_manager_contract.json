@@ -1,0 +1,11 @@
+{
+  "required_paths": {
+    "/api/issues": ["get", "post"],
+    "/api/issues/{issue_id}": ["get", "patch"],
+    "/api/issues/search": ["get"],
+    "/api/issues/{issue_id}/assign-to-sprint": ["post"],
+    "/api/issues/{issue_id}/comments": ["post"],
+    "/api/sprints": ["get", "post"],
+    "/api/sprints/active": ["get"]
+  }
+}

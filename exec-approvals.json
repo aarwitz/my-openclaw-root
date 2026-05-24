@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "socket": {
+    "path": "/home/aaron/.openclaw/exec-approvals.sock",
+    "token": "YVkripIdxNaG-8XA92UH5EN7FpgWH42D"
+  },
+  "defaults": {
+    "security": "full",
+    "ask": "off",
+    "askFallback": "full"
+  },
+  "agents": {
+    "*": {
+      "security": "full",
+      "ask": "off",
+      "askFallback": "full",
+      "allowlist": [
+        {
+          "pattern": "/Users/taylorolsen-vogt/ios-agent/ios-agent",
+          "id": "a1c2d3e4-5678-4abc-9def-012345678901"
+        },
+        {
+          "pattern": "/opt/homebrew/Cellar/node@22/*@22/*/bin/node",
+          "id": "79cfad5f-ea47-4727-8c42-598bc0d9e7d5"
+        },
+        {
+          "pattern": "/usr/bin/xcrun",
+          "id": "3d1b932e-ade3-4a5b-b006-fb4e6caac164"
+        },
+        {
+          "pattern": "/usr/bin/xcodebuild",
+          "id": "c21b90a4-329c-4eb2-b006-b9603b8f5bfd"
+        },
+        {
+          "pattern": "/usr/bin/git",
+          "id": "f546c022-e039-4c86-b575-5bd8c75e0152"
+        },
+        {
+          "pattern": "/usr/bin/uname",
+          "id": "deb2bd6e-03e0-4581-a7e6-6c70044a4616"
+        },
+        {
+          "pattern": "/usr/bin/bash",
+          "id": "8f7d2dc8-a5ec-4f60-8c73-7ec1828f2b11"
+        },
+        {
+          "pattern": "/home/aaron/.openclaw/scripts/*",
+          "id": "3ce6c50c-6375-4f1a-bd7d-6fc55650bc89"
+        },
+        {
+          "pattern": "/usr/bin/env",
+          "lastUsedAt": 1775510387187,
+          "id": "30462adc-136d-4082-a243-447ca9164411"
+        }
+      ]
+    },
+    "main": {
+      "security": "full",
+      "ask": "off",
+      "askFallback": "full",
+      "allowlist": [
+        {
+          "pattern": "/usr/bin/curl",
+          "id": "26f57d5f-64ba-4ca5-92ef-f57317e6f31b",
+          "lastUsedAt": 1779476481074,
+          "lastUsedCommand": "curl -s 'http://127.0.0.1:8000/api/issues/search?min_story_points=1' | jq 'length' && curl -s http://127.0.0.1:8000/api/issues/118 | jq '{id,status,branch,repo_slug,story_points}' && cd /home/aaron/repos/Task-Manager && git status --short && git add backend/main.py backend/models.py backend/schemas.py frontend/backlog.html frontend/issue.html frontend/search.html frontend/sprint.html frontend/js/backlog.js frontend/js/issue.js frontend/js/search.js frontend/js/sprint.js frontend/js/tm_shared.js frontend/css/styles.css && git commit -m \"refactor(planning): remove priority sizing from task manager\" && git push -u origin issue-118-remove-priority-sizing",
+          "lastResolvedPath": "/usr/bin/curl"
+        },
+        {
+          "pattern": "/usr/bin/git",
+          "id": "35b29a86-84b0-4cd2-b4fc-76372fcd3287",
+          "lastUsedAt": 1779406798153,
+          "lastUsedCommand": "git -C /home/aaron/repos/lidi-solutions status --short && git -C /home/aaron/repos/lidi-solutions pull --ff-only && printf '\\n--- latest commits ---\\n' && git -C /home/aaron/repos/lidi-solutions log --oneline -n 8 && printf '\\n--- search BOOKINGS_DB/calendar ---\\n' && cd /home/aaron/repos/lidi-solutions && rg -n \"BOOKINGS_DB|calendar|booking|schedule|D1\" -S functions src public README.md wrangler.jsonc | sed -n '1,260p'",
+          "lastResolvedPath": "/usr/bin/git"
+        },
+        {
+          "pattern": "/usr/bin/gh",
+          "id": "817d812b-88ce-4f0f-bd90-c6a35cff51c9",
+          "lastUsedAt": 1779037590300,
+          "lastUsedCommand": "gh pr view 81513 --repo openclaw/openclaw --json commits | jq -r '.commits[] | [.oid[0:10], .messageHeadline] | @tsv'",
+          "lastResolvedPath": "/usr/bin/gh"
+        },
+        {
+          "pattern": "/usr/bin/journalctl",
+          "id": "8d9390e3-7f95-4140-ad4e-2a8dd9fb2f49"
+        },
+        {
+          "pattern": "/usr/bin/bash",
+          "id": "d5dbf11e-6a56-4f73-8ea3-f44663fec130",
+          "lastUsedAt": 1776406145265,
+          "lastUsedCommand": "bash /home/aaron/.openclaw/scripts/credential-preflight.sh",
+          "lastResolvedPath": "/usr/bin/bash"
+        },
+        {
+          "pattern": "/usr/bin/env",
+          "id": "650ddeba-6371-4f1e-a42e-b5709f3b0cb2"
+        },
+        {
+          "pattern": "/usr/bin/python3",
+          "id": "1f4788f6-69f8-42f3-88d6-149f0a9ae1af",
+          "lastUsedAt": 1779530478858,
+          "lastUsedCommand": "/usr/bin/python3 - <<'PY'\nimport json, urllib.request\nbase='http://127.0.0.1:8000'\nactive=json.load(urllib.request.urlopen(base+'/api/sprints/active'))\nprint('ACTIVE', json.dumps(active))\nif active:\n    sid=active.get('id')\n    issues=json.load(urllib.request.urlopen(f'{base}/api/issues?sprint_id={sid}'))\n    print('ISSUES', json.dumps(issues))\nPY",
+          "lastResolvedPath": "/usr/bin/python3"
+        },
+        {
+          "pattern": "/home/aaron/.nvm/versions/node/*/bin/node",
+          "id": "eea3f34f-b006-4d29-8134-5a2e3563ab14",
+          "lastUsedAt": 1778778499230,
+          "lastUsedCommand": "node -v && corepack pnpm -v && jq -r '.scripts | to_entries[] | select(.key|test(\"lint|test\")) | [.key,.value] | @tsv' package.json | head -n 40",
+          "lastResolvedPath": "/home/aaron/.nvm/versions/node/v22.22.1/bin/node"
+        },
+        {
+          "pattern": "/home/aaron/.nvm/versions/node/*/bin/npm",
+          "id": "8e70f36e-50ad-4a15-a8c6-689ad734c84d"
+        },
+        {
+          "pattern": "/home/aaron/.nvm/versions/node/*/bin/npx",
+          "id": "dc46f2fe-c6ee-4f93-b8af-b2d0d35f8f11"
+        },
+        {
+          "pattern": "/home/aaron/.openclaw/scripts/*",
+          "id": "4e3144d2-842b-4ef2-a99c-d688cbf93258",
+          "lastUsedAt": 1779485772170,
+          "lastUsedCommand": "/home/aaron/.openclaw/scripts/github-ssh-preflight.sh && /home/aaron/.openclaw/scripts/gh-account-router.sh --agent main auth status && cd /home/aaron/repos && git ls-remote https://github.com/aarwitz/Task-Manager.git HEAD && git ls-remote https://github.com/aarwitz/lidi-solutions.git HEAD || true",
+          "lastResolvedPath": "/home/aaron/.openclaw/scripts/github-ssh-preflight.sh"
+        },
+        {
+          "id": "d622ed04-47fb-4219-b373-17bf17792eec",
+          "pattern": "=command:13ea43927edc1347",
+          "source": "allow-always",
+          "lastUsedAt": 1776433803209
+        }
+      ]
+    },
+    "druck": {
+      "allowlist": []
+    },
+    "resi": {
+      "allowlist": []
+    },
+    "dwight": {
+      "allowlist": []
+    }
+  }
+}

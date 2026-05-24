@@ -1,0 +1,19 @@
+# Phase II cache and credentials
+phase2_cache/
+schwab_positions.json
+schwab_account_raw.json
+alpaca_paper_ledger.json
+*.pyc
+__pycache__/
+.pytest_cache/
+.DS_Store
+*.log
+
+# Local runtime artifacts
+sql/*.db
+memory/.dreams/
+
+# Local environment
+.env
+.venv
+venv/

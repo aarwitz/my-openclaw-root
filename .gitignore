@@ -1,0 +1,91 @@
+# OpenClaw repo policy: deny by default, then allow a small human-authored set.
+
+# Ignore everything unless explicitly allowed.
+*
+
+# Always keep ignore policy itself.
+!.gitignore
+
+# Root docs and core non-secret config snapshots.
+!FINAL_ARCHITECTURE.md
+!FINAL_ARCHITECTURE.v1.md
+!NEW_ARCHITECTURE.md
+!NEW_ARCHITECTURE_CRITIQUE.md
+!TELEGRAM_EXECUTION_GUIDE.md
+!TELEGRAM_USER_GUIDE.md
+!cli_guide.md
+!telegram_documentation.html.txt
+!openclaw.json
+!openclaw.json.last-good
+!exec-approvals.json
+!gateway-instance-id
+!referenced_files.txt
+!referenced_ids.txt
+
+# Allow scripts folder; still ignore generated/script-local junk.
+!scripts/
+!scripts/**
+scripts/__pycache__/
+scripts/*.pyc
+scripts/*.pyo
+scripts/*.pyd
+
+# Allow selected source/config helper folders.
+!acpx/
+!acpx/**
+acpx/codex-home/
+
+!completions/
+!completions/**
+
+!plugin-skills/
+!plugin-skills/**
+
+!workspace/
+!workspace/**
+
+!workspaces/
+!workspaces/**
+
+# Keep editor/local runtime state out.
+.vscode/
+
+# Hard exclusions for sensitive/runtime data even if parent folders are unignored later.
+credentials/
+logs/
+tmp/
+media/
+memory/
+tasks/
+delivery-queue/
+locks/
+flows/
+nodes/
+devices/
+identity/
+telegram/
+cron/runs/
+cron/jobs-state.json
+agents/
+npm/
+canvas/
+plugins/
+qqbot/
+
+# Generic secret and transient patterns.
+**/*token*
+**/*secret*
+**/*password*
+**/*apikey*
+**/*api-key*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+*.pid
+*.lock
+*.tmp
+*.swp
+*.swo
