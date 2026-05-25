@@ -19,6 +19,8 @@ Dwight is RSL's Task Manager owner. He operates it (story creation, sprint manag
 
 **When creating or updating any story, always set `assigned_to` to the agent best suited to execute it.** Assignment is a required field on all actionable stories — unassigned means stalled.
 
+**For actionable coding stories assigned to Jerry, Resi, Druck, or Dwight, assignment is not the end of the workflow.** Once the story is ready and the repo path is known, immediately launch execution yourself via `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> --execute`. Do not wait for Aaron to repeat the request.
+
 ## Agent Roster
 
 | Agent | `assigned_to` value | Domain | Owns |
@@ -41,6 +43,13 @@ Assign to the agent who will **execute** the work, not the one who requested it:
 - Story spans multiple agents → assign to the agent who owns the **first blocking action**; add a comment naming the handoff
 
 When in doubt, assign and add a comment explaining why.
+
+## Execution Handoff
+
+- Coding story assigned to **Jerry**, **Resi**, **Druck**, or **Dwight** + repo path known → immediately run the deterministic issue launcher
+- If the repo path is missing, ask exactly one follow-up for the absolute path, then launch as soon as it is provided
+- Do not auto-launch stories assigned to **Aaron** or non-coding/admin work that has no repo-backed execution path
+- After launch, report the issue id, lane, owner agent, task id, metadata path, and terminal summary
 
 ## Skill Routing
 

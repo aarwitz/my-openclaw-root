@@ -1,119 +1,157 @@
-# Telegram Execution Guide (No-Script Mode)
+# Telegram Human Interface Guide (Canonical)
 
-This guide answers one question clearly:
+Date: 2026-05-25
+Status: authoritative
+Audience: Aaron operating OpenClaw through Telegram.
 
-Do you need to run scripts yourself from Telegram?
+## 1) Operating model
 
-Short answer: no, not for normal operation.
+- Default mode: Telegram-first.
+- Server CLI is only for maintenance/recovery.
+- Human loop:
+	1. Send precise intent.
+	2. Agent executes.
+	3. You approve/redirect.
+	4. Agent closes the loop with evidence.
 
-## How to think about OpenClaw
+## 2) What is currently true in this deployment
 
-There are two ways to operate:
+- Telegram accounts are active for `default`, `dwight`, `resi`, `druck`.
+- Allowed Telegram user IDs are allowlisted.
+- Coding execution path is detached task routing with lanes:
+	- `inline`
+	- `codex-subagent`
+	- `acp-external`
+- Dwight has an explicit run contract for coding:
+	- `run issue <id> --repo <abs-path> [--scope ... --expected-files ... --risk ... --acp-available ... --acp-agent ... --agent-timeout ...]`
 
-1. Telegram-first mode (recommended)
-- You send intent in Telegram.
-- Dwight/Jerry routes work and runs the needed commands internally.
-- You review results and approve next steps.
+## 3) Message format that gets best results
 
-2. Server-CLI mode (operator/debug mode)
-- You run scripts directly on the Ubuntu host.
-- Use this for maintenance, recovery, or advanced control.
+Use this shape in Telegram:
 
-If your goal is shipping work, stay in Telegram-first mode.
+1. Objective: one sentence.
+2. Inputs: links/attachments/constraints.
+3. Done criteria: concrete acceptance checks.
+4. Deadline and risk tolerance.
+5. Output format you want.
 
-## What you should send in Telegram
+Example skeleton:
 
-For coding delivery, message Dwight with an explicit run command:
+```text
+Objective: <what outcome you want>
+Context: <relevant facts, links, files>
+Constraints: <budget/time/risk/legal/style>
+Done means: <tests, artifacts, decisions>
+Deadline: <time>
+Return: <bullet summary | table | draft message | task list>
+```
 
-run issue <id> --repo <absolute-path> [--scope low|medium|high] [--expected-files N] [--risk low|medium|high] [--acp-available true|false] [--acp-agent copilot] [--agent-timeout 180]
+## 4) High-leverage AI usage pattern
 
-Example:
-run issue <your_tm_issue_id> --repo /home/aaron/repos/lidi-task-manager --scope high --expected-files 10 --risk medium --acp-available true --acp-agent copilot
+Use AI in this order:
 
-Important format rules:
-- Use a Task Manager issue id, not a GitHub issue number.
-- Do not add a trailing colon at the end of the command.
-- Keep the command on one line.
+1. Triage: summarize and classify incoming information.
+2. Plan: produce options with tradeoffs.
+3. Execute: run one chosen path with checkpoints.
+4. Verify: require evidence and failure modes.
+5. Log: push outcomes to Task Manager/docs.
 
-What happens:
-1. Dwight resolves issue fields.
-2. Lane is selected (inline, codex-subagent, or acp-external).
-3. Work executes in the target repo.
-4. You get task id, lane, metadata path, and result summary.
+This avoids "chat drift" and turns messages into measurable work.
 
-## Do I need to type shell scripts in Telegram?
+## 5) Real-world playbooks
 
-Usually no.
+### A) New client sends info in Gmail
 
-You only need manual shell commands if:
-- The gateway is unhealthy.
-- You are doing maintenance.
-- You are debugging a failed automation path.
+Send to Telegram (Jerry or Dwight):
 
-## Best practice for "repo + scoped feature"
+```text
+New client intake from Gmail.
+Pull all messages from <client/email> in last <N> days.
+Extract: stakeholders, goals, budget, deadlines, risks, open questions.
+Produce: (1) 1-page brief, (2) proposed project plan, (3) reply draft.
+Done means: I can forward the reply with minimal edits.
+```
 
-Use this checklist before execution:
+Best follow-up:
+- "Create Task Manager issues for the top 5 actions and assign owner."
 
-1. Issue quality
-- Clear title and objective.
-- Acceptance criteria that can be tested.
-- Repo path is absolute.
-- Assigned owner is correct.
+### B) Build a robot vision pipeline and grant SSH access
 
-2. Execution quality
-- Start with medium/high scope honestly.
-- Include expected file count and risk.
-- Use acp-available true only when harness is available.
+Send to Telegram (Dwight for orchestration):
 
-3. Validation quality
-- Require test/lint/build evidence in completion.
-- Require changed-files summary.
-- Require branch/commit reference.
+```text
+Start robot vision pipeline project.
+Goal: camera ingest -> detection -> tracking -> event output.
+Infra: provision SSH access to <host>, least-privilege user, key-based auth.
+Need: architecture, repo bootstrap, test plan, deployment checklist, security checklist.
+Done means: reproducible setup docs + first end-to-end demo script + rollback steps.
+```
 
-## Operator commands (only when needed)
+Then create coding run:
 
-Run these on the server, not in Telegram:
+```text
+run issue <tm_id> --repo <abs-path> --scope high --expected-files 12 --risk high --acp-available true
+```
 
-- openclaw health
-- openclaw gateway status
-- ~/.openclaw/scripts/safe-restart.sh
-- ~/.openclaw/scripts/coding-lane-preflight.sh
-- ~/.openclaw/scripts/test-coding-lane-regression.sh
+### C) Personal ops task (roof repair)
 
-## Fast start flow
+Send to Telegram (Jerry):
 
-1. In Task Manager, create or refine issue.
-2. In Telegram to Dwight, send run issue with repo and scope.
-3. Review completion evidence.
-4. Ask for fixes if acceptance is not fully met.
-5. Merge only after proof is complete.
+```text
+Help me get roof repair done this week.
+Collect local vendors, compare licensing/reviews/pricing/warranty/timeline.
+Draft outreach messages, call script, and quote comparison sheet.
+Output: ranked top 3 with recommendation and why.
+```
 
-## Common mistake to avoid
+Then:
+- "Set reminder follow-ups and draft confirmation message for selected vendor."
 
-Do not send vague asks like "build this feature" without:
-- issue id
-- absolute repo path
-- acceptance criteria
+## 6) Coding command contract (literal)
 
-Ambiguity lowers delivery quality.
+```text
+run issue <id> --repo <absolute-path> [--scope low|medium|high] [--expected-files N] [--risk low|medium|high] [--acp-available true|false] [--acp-agent <id>] [--agent-timeout <seconds>]
+```
 
-## If Dwight says "Blocked on issue identity"
+Rules:
+- Use Task Manager issue ID, not GitHub issue number.
+- One line only.
+- No trailing punctuation.
+- Include absolute repo path.
 
-Use this recovery sequence:
+## 7) What to request in every completion
 
-1. Verify the Task Manager issue id is correct for that repo.
-- Quick check on server: `curl -fsS http://127.0.0.1:8000/api/issues/<id> | python3 -m json.tool | head -80`
+- Outcome summary in 5 lines or less.
+- Evidence (tests/build/checks/links).
+- What changed.
+- Remaining risks.
+- Exact next action.
 
-2. Re-send the Telegram command with a known-good Task Manager issue id and no trailing punctuation.
+## 8) When to use server CLI
 
-3. If Telegram still drifts into exploration, run the launcher directly from server CLI (deterministic path):
-- `~/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> --scope high --expected-files 10 --risk medium --acp-available true --acp-agent copilot --execute`
+Only if unhealthy or blocked. Core commands:
 
-4. If the issue id is wrong or missing, create/fix the Task Manager issue first, then re-run.
+```bash
+openclaw health
+openclaw gateway status
+~/.openclaw/scripts/safe-restart.sh
+~/.openclaw/scripts/test-coding-lane-regression.sh
+```
 
-## Bottom line
+Never use `systemctl --user restart` for gateway restarts.
 
-You can absolutely send a mostly complete repo plus a clearly scoped missing feature and have it built through this system.
+## 9) Failure recovery (fast)
 
-Use Telegram as the control plane.
-Use server scripts only as operator tools.
+If execution fails:
+
+1. Re-check issue ID and absolute repo path.
+2. Re-run with explicit scope/risk/expected-files.
+3. If ACP path fails at runtime, rely on codex-subagent fallback and request metadata path.
+4. If still blocked, run deterministic CLI launcher from server.
+
+## 10) Bottom line
+
+- Treat Telegram as your AI operating console.
+- Send structured intent, not vague requests.
+- Force evidence on every completion.
+- Use automation for triage, planning, execution, and follow-through, not just chat answers.

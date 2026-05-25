@@ -92,6 +92,21 @@ def infer_acceptance(issue: Dict[str, Any], override: str) -> str:
 
 def infer_repo(issue: Dict[str, Any], override: str) -> str:
     candidates: List[str] = []
+
+    def add_repo_candidate(value: str) -> None:
+        cleaned = value.strip()
+        if not cleaned:
+            return
+        candidates.append(cleaned)
+        if os.path.isabs(cleaned):
+            return
+
+        # Task Manager issues often store GitHub-style repo slugs such as
+        # owner/repo, while local checkouts live directly under ~/repos/<repo>.
+        repo_name = cleaned.rstrip("/").split("/")[-1]
+        if repo_name and repo_name != cleaned:
+            candidates.append(repo_name)
+
     if override:
         repo = override
     else:
@@ -106,12 +121,20 @@ def infer_repo(issue: Dict[str, Any], override: str) -> str:
             ],
         )
         if repo:
-            candidates.append(repo)
+            add_repo_candidate(repo)
 
         repo_slug = get_first_nonempty(issue, ["repo_slug", "repoSlug", "project_slug"])
         if repo_slug:
-            candidates.append(os.path.join("/home/aaron/repos", repo_slug))
-            candidates.append(os.path.join(os.path.expanduser("~/.openclaw/workspace"), repo_slug))
+            add_repo_candidate(repo_slug)
+
+        expanded_candidates: List[str] = []
+        for candidate in candidates:
+            if os.path.isabs(candidate):
+                expanded_candidates.append(candidate)
+                continue
+            expanded_candidates.append(os.path.join("/home/aaron/repos", candidate))
+            expanded_candidates.append(os.path.join(os.path.expanduser("~/.openclaw/workspace"), candidate))
+        candidates = expanded_candidates
 
         env_default = os.environ.get("TM_DEFAULT_REPO", "")
         if env_default:

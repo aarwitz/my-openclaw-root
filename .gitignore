@@ -7,12 +7,8 @@
 !.gitignore
 
 # Root docs and core non-secret config snapshots.
-!FINAL_ARCHITECTURE.md
-!FINAL_ARCHITECTURE.v1.md
-!NEW_ARCHITECTURE.md
-!NEW_ARCHITECTURE_CRITIQUE.md
+!ARCHITECTURE.md
 !TELEGRAM_EXECUTION_GUIDE.md
-!TELEGRAM_USER_GUIDE.md
 !cli_guide.md
 !telegram_documentation.html.txt
 !openclaw.json

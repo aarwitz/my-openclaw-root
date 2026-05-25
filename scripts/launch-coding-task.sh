@@ -25,6 +25,20 @@ acp_available="false"
 run_timeout="1800"
 agent_timeout="120"
 execute="false"
+requested_lane=""
+selected_lane=""
+fallback_applied="false"
+fallback_reason=""
+acp_preflight_status="not-run"
+acp_preflight_detail=""
+
+should_trigger_acp_runtime_fallback() {
+  local output="$1"
+  if echo "$output" | grep -Eq 'Failed to spawn agent command|spawn [^ ]+ ENOENT|AcpRuntimeError|Permission prompt unavailable in non-interactive mode'; then
+    return 0
+  fi
+  return 1
+}
 
 resolve_openclaw_bin() {
   local candidate=""
@@ -323,18 +337,24 @@ acp_preflight_check() {
   allowed_agents_json="$(get_config_json "acp.allowedAgents" || true)"
 
   if [[ "$acp_enabled" != "true" || "$acpx_enabled" != "true" ]]; then
+    acp_preflight_status="failed"
+    acp_preflight_detail="acp_or_acpx_disabled"
     echo "ACP preflight failed. ACP/acpx must both be enabled." >&2
     echo "Detected: acp.enabled=${acp_enabled:-<unset>} plugins.entries.acpx.enabled=${acpx_enabled:-<unset>}" >&2
     return 1
   fi
 
   if [[ -n "$allowed_agents_json" ]] && ! echo "$allowed_agents_json" | grep -Eq '"'"$acp_agent"'"'; then
+    acp_preflight_status="failed"
+    acp_preflight_detail="agent_not_allowed"
     echo "ACP preflight failed. acp.allowedAgents does not include requested agent: $acp_agent" >&2
     echo "Detected acp.allowedAgents: ${allowed_agents_json}" >&2
     return 1
   fi
 
   if [[ "$permission_mode" != "approve-all" || "$non_interactive" != "deny" ]]; then
+    acp_preflight_status="failed"
+    acp_preflight_detail="permission_policy_mismatch"
     echo "ACP preflight failed. Required config:" >&2
     echo "  openclaw config set plugins.entries.acpx.config.permissionMode approve-all" >&2
     echo "  openclaw config set plugins.entries.acpx.config.nonInteractivePermissions deny" >&2
@@ -345,11 +365,15 @@ acp_preflight_check() {
   fi
 
   if ! acp_agent_command_available "$acp_agent"; then
+    acp_preflight_status="failed"
+    acp_preflight_detail="harness_binary_missing"
     echo "ACP preflight failed. Required harness executable for agent '$acp_agent' was not found on PATH." >&2
     echo "Install/auth the harness or override --acp-agent to an available one." >&2
     return 1
   fi
 
+  acp_preflight_status="ok"
+  acp_preflight_detail="ready"
   return 0
 }
 
@@ -377,6 +401,24 @@ if [[ -z "$lane" || -z "$reason" || -z "$fallback_lane" ]]; then
   exit 2
 fi
 
+requested_lane="$lane"
+selected_lane="$lane"
+
+if [[ "$selected_lane" == "acp-external" ]]; then
+  if ! acp_preflight_check; then
+    if [[ "$fallback_lane" == "codex-subagent" ]]; then
+      selected_lane="codex-subagent"
+      fallback_applied="true"
+      fallback_reason="acp-preflight-failed:${acp_preflight_detail}"
+      echo "ACP preflight failed; falling back to ${selected_lane}." >&2
+    elif [[ "$execute" == "true" ]]; then
+      exit 2
+    else
+      echo "Dry-run: ACP preflight is not satisfied; execution would fail until fixed." >&2
+    fi
+  fi
+fi
+
 mkdir -p "$RUNS_DIR"
 run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 meta_path="$RUNS_DIR/${task_id}.${run_stamp}.json"
@@ -387,34 +429,42 @@ else
   acceptance_line=""
 fi
 
+safe_reason="${reason//\"/\\\"}"
+safe_fallback_reason="${fallback_reason//\"/\\\"}"
+safe_preflight_status="${acp_preflight_status//\"/\\\"}"
+safe_preflight_detail="${acp_preflight_detail//\"/\\\"}"
+
 cat > "$meta_path" <<EOF
 {
   "taskId": "${task_id}",
   "timestamp": "${run_stamp}",
   "ownerAgent": "${owner_agent}",
+  "coderCodexAgent": "${coder_codex_agent}",
+  "orchestratorAgent": "${orchestrator_agent}",
   "repo": "${repo_path}",
   "goal": "${goals//\"/\\\"}",${acceptance_line}
   "routing": {
-    "lane": "${lane}",
-    "reason": "${reason}",
+    "requestedLane": "${requested_lane}",
+    "lane": "${selected_lane}",
+    "reason": "${safe_reason}",
     "fallbackLane": "${fallback_lane}",
+    "fallbackApplied": ${fallback_applied},
+    "fallbackReason": "${safe_fallback_reason}",
     "scope": "${scope}",
     "expectedFiles": ${expected_files},
     "risk": "${risk}",
     "heavyTag": ${heavy_tag},
-    "acpAvailable": ${acp_available}
+    "acpAvailable": ${acp_available},
+    "acpAgent": "${acp_agent}",
+    "acpPreflight": {
+      "status": "${safe_preflight_status}",
+      "detail": "${safe_preflight_detail}"
+    }
   }
 }
 EOF
 
-if [[ "$lane" == "acp-external" ]]; then
-  if ! acp_preflight_check; then
-    if [[ "$execute" == "true" ]]; then
-      exit 2
-    fi
-    echo "Dry-run: ACP preflight is not satisfied; execution would fail until fixed." >&2
-  fi
-
+if [[ "$selected_lane" == "acp-external" ]]; then
   prompt="Use sessions_spawn with runtime=\"acp\", agentId=\"${acp_agent}\", mode=\"run\", cwd=\"${repo_path}\", runTimeoutSeconds=${run_timeout}."
   if [[ -n "$owner_agent" ]]; then
     prompt+=" Assigned owner agent: ${owner_agent}."
@@ -429,7 +479,7 @@ if [[ "$lane" == "acp-external" ]]; then
     exit 2
   fi
   cmd=("$OPENCLAW_BIN" agent --agent "$orchestrator_agent" --message "$prompt" --timeout "$agent_timeout" --json)
-elif [[ "$lane" == "codex-subagent" ]]; then
+elif [[ "$selected_lane" == "codex-subagent" ]]; then
   codex_target_agent="$coder_codex_agent"
   if [[ -n "$owner_agent" ]]; then
     codex_target_agent="$owner_agent"
@@ -466,7 +516,7 @@ else
   cmd=("$OPENCLAW_BIN" agent --agent "$codex_target_agent" --message "$prompt" --timeout "$agent_timeout" --json)
 fi
 
-printf 'Routing decision: %s (%s), fallback=%s\n' "$lane" "$reason" "$fallback_lane"
+printf 'Routing decision: requested=%s selected=%s (%s), fallback=%s applied=%s\n' "$requested_lane" "$selected_lane" "$reason" "$fallback_lane" "$fallback_applied"
 printf 'Metadata written: %s\n' "$meta_path"
 printf 'Command: '
 printf '%q ' "${cmd[@]}"
@@ -480,11 +530,49 @@ if [[ "$execute" == "true" ]]; then
 
   printf '%s\n' "$cmd_output"
 
+  if [[ "$selected_lane" == "acp-external" ]]; then
+    if [[ $cmd_rc -ne 0 ]] || should_trigger_acp_runtime_fallback "$cmd_output"; then
+      if [[ "$fallback_lane" == "codex-subagent" ]]; then
+        echo "ACP execution appears failed at runtime; retrying via codex-subagent fallback." >&2
+        fallback_cmd=(
+          "$SCRIPT_DIR/launch-coding-task.sh"
+          --task-id "$task_id"
+          --repo "$repo_path"
+          --goal "$goals"
+          --scope "$scope"
+          --expected-files "$expected_files"
+          --risk "$risk"
+          --tag-heavy "$heavy_tag"
+          --acp-available false
+          --orchestrator-agent "$orchestrator_agent"
+          --coder-codex-agent "$coder_codex_agent"
+          --agent-timeout "$agent_timeout"
+          --execute
+        )
+        if [[ -n "$owner_agent" ]]; then
+          fallback_cmd+=(--owner-agent "$owner_agent")
+        fi
+        if [[ -n "$acceptance" ]]; then
+          fallback_cmd+=(--acceptance "$acceptance")
+        fi
+        if [[ -n "$acp_agent" ]]; then
+          fallback_cmd+=(--acp-agent "$acp_agent")
+        fi
+        set +e
+        fallback_output="$("${fallback_cmd[@]}" 2>&1)"
+        fallback_rc=$?
+        set -e
+        printf '%s\n' "$fallback_output"
+        exit $fallback_rc
+      fi
+    fi
+  fi
+
   if [[ $cmd_rc -ne 0 ]]; then
     exit $cmd_rc
   fi
 
-  if [[ "$lane" == "codex-subagent" ]]; then
+  if [[ "$selected_lane" == "codex-subagent" ]]; then
     if ! echo "$cmd_output" | grep -Eq '"lane"[[:space:]]*:[[:space:]]*"codex-subagent"' || \
        ! echo "$cmd_output" | grep -Eq '"spawnAgentUsed"[[:space:]]*:[[:space:]]*true'; then
       echo "Codex-subagent contract validation failed: missing lane/spawnAgentUsed markers in response." >&2

@@ -48,16 +48,20 @@ assert_contains "$c" '"lane":"acp-external"' "Router: heavy tag -> acp-external"
 assert_contains "$c" '"fallbackLane":"codex-subagent"' "Router: acp-external fallback -> codex-subagent"
 
 d="$($LAUNCHER --task-id TST-100 --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
-assert_contains "$d" 'Routing decision: inline' "Launcher: inline dry-run decision"
+assert_contains "$d" 'selected=inline' "Launcher: inline dry-run decision"
 
 
 e="$($LAUNCHER --task-id TST-101 --repo "$HOME/.openclaw" --goal "medium scope" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
-assert_contains "$e" 'Routing decision: codex-subagent' "Launcher: codex-subagent dry-run decision"
+assert_contains "$e" 'selected=codex-subagent' "Launcher: codex-subagent dry-run decision"
 assert_contains "$e" 'spawnAgentUsed' "Launcher: codex-subagent contract hint present"
 
 f="$($ASSIGNER --owner-agent resi --task-id TST-102 --repo "$HOME/.openclaw" --goal "heavy" --scope high --expected-files 12 --risk high --tag-heavy true --acp-available true 2>&1 || true)"
-assert_contains "$f" 'Routing decision: acp-external' "Assigner: heavy routes to acp-external"
-if echo "$f" | grep -Eq 'ACP preflight failed|agentId="copilot"|agentId="cursor"|agentId="claude"'; then
+if echo "$f" | grep -Eq 'selected=acp-external|selected=codex-subagent'; then
+  pass "Assigner: heavy route selected with deterministic fallback"
+else
+  fail "Assigner: heavy route selection missing"
+fi
+if echo "$f" | grep -Eq 'ACP preflight failed|agentId="copilot"|agentId="cursor"|agentId="claude"|applied=true'; then
   pass "Assigner: owner-aware ACP harness selection/preflight behavior"
 elif echo "$f" | grep -Fq 'Use\ sessions_spawn\ with\ runtime='; then
   pass "Assigner: ACP external command payload emitted"
