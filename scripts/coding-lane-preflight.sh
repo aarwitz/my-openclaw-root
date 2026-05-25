@@ -6,6 +6,8 @@ set -euo pipefail
 pass_count=0
 warn_count=0
 fail_count=0
+SCRIPTS_DIR="${HOME}/.openclaw/scripts"
+OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 
 pass() {
   echo "PASS: $1"
@@ -24,12 +26,12 @@ fail() {
 
 config_get() {
   local key="$1"
-  openclaw config get "$key" 2>/dev/null | tr -d '[:space:]' | tr -d '"'
+  "$OPENCLAW_BIN" config get "$key" 2>/dev/null | tr -d '[:space:]' | tr -d '"'
 }
 
 config_get_json() {
   local key="$1"
-  openclaw config get "$key" --json 2>/dev/null || true
+  "$OPENCLAW_BIN" config get "$key" --json 2>/dev/null || true
 }
 
 check_binary() {
@@ -45,7 +47,11 @@ check_binary() {
 echo "== Coding Lane Preflight =="
 echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-if openclaw config validate >/dev/null 2>&1; then
+if [[ -z "$OPENCLAW_BIN" ]]; then
+  OPENCLAW_BIN="$("$SCRIPTS_DIR/resolve-openclaw-bin.sh")"
+fi
+
+if "$OPENCLAW_BIN" config validate >/dev/null 2>&1; then
   pass "openclaw.json validates"
 else
   fail "openclaw.json validation failed"

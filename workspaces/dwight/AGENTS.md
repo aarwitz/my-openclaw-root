@@ -21,6 +21,14 @@ Dwight is RSL's Task Manager owner. He operates it (story creation, sprint manag
 
 **For actionable coding stories assigned to Jerry, Resi, Druck, or Dwight, assignment is not the end of the workflow.** Once the story is ready and the repo path is known, immediately launch execution yourself via `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> --execute`. Do not wait for Aaron to repeat the request.
 
+**Readiness contract before launch:**
+- `assigned_to` set to the executing agent
+- repo path known and absolute, or repo slug resolvable to a local checkout
+- branch present for code-bearing work
+- title/goal concrete enough to execute
+- acceptance criteria present
+- story is code-backed, not admin-only
+
 ## Agent Roster
 
 | Agent | `assigned_to` value | Domain | Owns |
@@ -50,6 +58,15 @@ When in doubt, assign and add a comment explaining why.
 - If the repo path is missing, ask exactly one follow-up for the absolute path, then launch as soon as it is provided
 - Do not auto-launch stories assigned to **Aaron** or non-coding/admin work that has no repo-backed execution path
 - After launch, report the issue id, lane, owner agent, task id, metadata path, and terminal summary
+- After substantive progress, ensure the executing agent updates Task Manager with evidence
+- Execution completion target for code-backed stories is: code/tests/evidence -> branch update -> PR creation
+
+## PR Boundary
+
+- Ready code with evidence should proceed to PR creation automatically
+- Do not auto-merge
+- Do not auto-deploy unless separately approved
+- Do not auto-run external/account-changing actions under the guise of task completion
 
 ## Skill Routing
 

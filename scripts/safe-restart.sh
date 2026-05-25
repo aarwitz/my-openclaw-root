@@ -21,7 +21,11 @@ set -euo pipefail
 
 SCRIPTS_DIR="${HOME}/.openclaw/scripts"
 CRON_JOBS="${HOME}/.openclaw/cron/jobs.json"
+SAFE_RESTART_LOG="${HOME}/.openclaw/logs/safe-restart.log"
+OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 MAX_WAIT=30  # seconds to wait for gateway to stop
+RUN_ID="$(date -u +"%Y%m%dT%H%M%SZ")-$$"
+REASON="manual"
 
 force=false
 skip_cron=false
@@ -29,23 +33,44 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) force=true; shift ;;
     --skip-cron) skip_cron=true; shift ;;
+    --reason)
+      REASON="${2:-manual}"
+      shift 2
+      ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
 
-log() { echo "[safe-restart] $*"; }
-warn() { echo "[safe-restart] ⚠️  $*" >&2; }
-fail() { echo "[safe-restart] 🚨 $*" >&2; exit 1; }
+mkdir -p "$(dirname "$SAFE_RESTART_LOG")"
+
+log() {
+  local msg="[safe-restart] $*"
+  echo "$msg"
+  printf '%s run=%s reason=%s level=INFO %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$RUN_ID" "$REASON" "$*" >> "$SAFE_RESTART_LOG"
+}
+warn() {
+  local msg="[safe-restart] ⚠️  $*"
+  echo "$msg" >&2
+  printf '%s run=%s reason=%s level=WARN %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$RUN_ID" "$REASON" "$*" >> "$SAFE_RESTART_LOG"
+}
+fail() {
+  local msg="[safe-restart] 🚨 $*"
+  echo "$msg" >&2
+  printf '%s run=%s reason=%s level=FAIL %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$RUN_ID" "$REASON" "$*" >> "$SAFE_RESTART_LOG"
+  exit 1
+}
 
 # --- Pre-flight ---
 log "Starting safe gateway restart..."
+log "Run context: force=${force} skip_cron=${skip_cron}"
 
-if ! command -v openclaw &>/dev/null; then
-  fail "openclaw CLI not found in PATH"
+if [[ -z "$OPENCLAW_BIN" ]]; then
+  OPENCLAW_BIN="$("$SCRIPTS_DIR/resolve-openclaw-bin.sh")" || fail "openclaw CLI not found via resolver"
 fi
+log "Resolved OpenClaw CLI: ${OPENCLAW_BIN}"
 
 # Check if gateway is actually running
-if ! openclaw health &>/dev/null; then
+if ! "$OPENCLAW_BIN" health &>/dev/null; then
   if [[ "$force" == "true" ]]; then
     warn "Gateway not healthy (may be down). Proceeding with --force."
   else
@@ -76,16 +101,16 @@ fi
 
 # --- Step 3: Graceful stop ---
 log "Step 3/6: Stopping gateway gracefully..."
-openclaw gateway stop 2>&1 || true
+"$OPENCLAW_BIN" gateway stop 2>&1 || true
 
 # Wait for the process to actually exit
 waited=0
-while openclaw health &>/dev/null 2>&1 && [[ $waited -lt $MAX_WAIT ]]; do
+while "$OPENCLAW_BIN" health &>/dev/null 2>&1 && [[ $waited -lt $MAX_WAIT ]]; do
   sleep 1
   waited=$((waited + 1))
 done
 
-if openclaw health &>/dev/null 2>&1; then
+if "$OPENCLAW_BIN" health &>/dev/null 2>&1; then
   warn "Gateway still responding after ${MAX_WAIT}s. Forcing stop..."
   # As a last resort, use systemctl stop (not restart)
   systemctl --user stop openclaw-gateway 2>/dev/null || true
@@ -96,12 +121,12 @@ log "  Gateway stopped."
 
 # --- Step 4: Start gateway ---
 log "Step 4/6: Starting gateway..."
-openclaw gateway start 2>&1
+"$OPENCLAW_BIN" gateway start 2>&1
 sleep 3  # Brief settle time for startup hooks
 
 # --- Step 5: Validate tokens ---
 log "Step 5/6: Validating token health..."
-if openclaw models status --check &>/dev/null 2>&1; then
+if "$OPENCLAW_BIN" models status --check &>/dev/null 2>&1; then
   log "  ✅ Model auth check passed — tokens are healthy."
   token_ok=true
 else
@@ -115,7 +140,7 @@ else
   # Give the gateway a moment to pick up the restored file
   sleep 2
 
-  if openclaw models status --check &>/dev/null 2>&1; then
+  if "$OPENCLAW_BIN" models status --check &>/dev/null 2>&1; then
     log "  ✅ Token restore successful — auth is working."
     token_ok=true
   else

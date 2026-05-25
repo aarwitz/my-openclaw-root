@@ -24,6 +24,8 @@ Audience: Aaron operating OpenClaw through Telegram.
 	- `acp-external`
 - Dwight has an explicit run contract for coding:
 	- `run issue <id> --repo <abs-path> [--scope ... --expected-files ... --risk ... --acp-available ... --acp-agent ... --agent-timeout ...]`
+- Dwight policy already says ready coding issues should be launched immediately when repo path is known.
+- Fully deterministic Task Manager state-triggered launch is planned, but not yet the current source of truth.
 
 ## 3) Message format that gets best results
 
@@ -119,7 +121,27 @@ Rules:
 - No trailing punctuation.
 - Include absolute repo path.
 
-## 7) What to request in every completion
+## 7) Task Manager automation boundary
+
+What should auto-start:
+- repo-backed coding issues
+- assigned to `Jerry`, `Resi`, `Druck`, or `Dwight`
+- branch/repo/acceptance criteria present
+- ready to execute without another human clarification loop
+
+What should not auto-start:
+- stories assigned to `Aaron`
+- admin/planning-only work
+- stories with no repo execution path
+- work that requires external approval first
+
+Target behavior:
+- Dwight creates or updates the issue
+- once the readiness contract is satisfied, execution starts automatically
+- assigned agent owns implementation, tests, evidence, branch updates, Task Manager comments, and PR creation
+- merge/deploy stay approval-gated
+
+## 8) What to request in every completion
 
 - Outcome summary in 5 lines or less.
 - Evidence (tests/build/checks/links).
@@ -127,7 +149,7 @@ Rules:
 - Remaining risks.
 - Exact next action.
 
-## 8) When to use server CLI
+## 9) When to use server CLI
 
 Only if unhealthy or blocked. Core commands:
 
@@ -136,11 +158,13 @@ openclaw health
 openclaw gateway status
 ~/.openclaw/scripts/safe-restart.sh
 ~/.openclaw/scripts/test-coding-lane-regression.sh
+TM_READY_WATCHER_ALLOW_EXECUTE=true ~/.openclaw/scripts/tm-ready-watcher.sh --execute --issue-id <tm_id>
+~/.openclaw/scripts/tm-ready-launch-once.sh --issue-id <tm_id>
 ```
 
 Never use `systemctl --user restart` for gateway restarts.
 
-## 9) Failure recovery (fast)
+## 10) Failure recovery (fast)
 
 If execution fails:
 
@@ -149,9 +173,29 @@ If execution fails:
 3. If ACP path fails at runtime, rely on codex-subagent fallback and request metadata path.
 4. If still blocked, run deterministic CLI launcher from server.
 
-## 10) Bottom line
+## 11) Safe First Live Use
+
+For the first live auto-launch on a real issue:
+
+1. Ensure the issue is code-backed and `in_progress`
+2. Ensure it has:
+   - `assigned_to`
+   - `repo_slug`
+   - `branch`
+   - acceptance criteria
+3. Add `AUTO_LAUNCH_READY` to the issue description
+4. Run exactly one controlled execute pass:
+
+```bash
+~/.openclaw/scripts/tm-ready-launch-once.sh --issue-id <tm_id>
+```
+
+This is preferred over enabling a permanent background loop immediately.
+
+## 12) Bottom line
 
 - Treat Telegram as your AI operating console.
 - Send structured intent, not vague requests.
 - Force evidence on every completion.
 - Use automation for triage, planning, execution, and follow-through, not just chat answers.
+- For the implementation rollout, use `workspace/docs/task-manager-execution-automation-plan.md`.

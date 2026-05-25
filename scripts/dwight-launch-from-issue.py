@@ -134,6 +134,8 @@ def infer_repo(issue: Dict[str, Any], override: str) -> str:
                 continue
             expanded_candidates.append(os.path.join("/home/aaron/repos", candidate))
             expanded_candidates.append(os.path.join(os.path.expanduser("~/.openclaw/workspace"), candidate))
+            if os.path.basename(candidate.rstrip("/")) == "openclaw":
+                expanded_candidates.append(os.path.expanduser("~/.openclaw"))
         candidates = expanded_candidates
 
         env_default = os.environ.get("TM_DEFAULT_REPO", "")

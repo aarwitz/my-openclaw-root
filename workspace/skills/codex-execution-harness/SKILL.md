@@ -1,81 +1,46 @@
 ---
 name: codex-execution-harness
-description: Enforce an execution-first coding harness for Telegram/OpenClaw Codex agents. Use for any coding/devops request to improve reliability and throughput: scope tasks, inspect files first, apply minimal edits, validate with targeted checks, and report outcomes with evidence.
+description: Deterministic coding-execution router for implementation-first workflows with inspection, minimal edits, and explicit validation evidence.
 metadata: {"clawdbot":{"emoji":"🧰"}}
 ---
 
-# Codex Execution Harness
+# Codex Execution Harness Router (Lean + Deterministic)
 
-This harness makes Telegram agents behave like a high-output coding assistant instead of a raw text model.
+Default for coding/devops requests is execution-first behavior.
+Use domain skills before ad hoc shell when a specialized path exists.
 
-## Core Policy
+## Operation Table
 
-For coding or infra requests, default to execution, not brainstorming.
-
-Always run this loop:
-
-1. Clarify target outcome in one sentence.
-2. Gather context with fast reads/search (`rg`, file reads, targeted logs).
-3. Make the smallest safe change that satisfies the request.
-4. Validate with focused checks (syntax/tests/lint/health/probes).
-5. Return concise evidence: what changed, what passed, what remains.
+| Operation | Deterministic Action | Fail-Closed Rule |
+|---|---|---|
+| Scope lock | restate target outcome in one sentence | if scope unclear, stop before edits |
+| Context gather | inspect files with fast reads/search | no blind edits |
+| Minimal implementation | smallest safe patch per file | avoid unrelated churn |
+| Validation | run at least one targeted check per change type | if check fails, do not claim success |
+| Evidence report | summarize changes + command outcomes + next step | no assumption-based completion |
 
 ## Tooling Priority
 
-Use specialized skills/tools first, general shell second:
+1. task orchestration skills
+2. repo/auth skills
+3. runtime/config domain skills
+4. shell for glue, probes, and validation
 
-1. Task tracking and orchestration: `task-manager` / `task-manager-maintainer`
-2. Repo ops: `github-ssh` (fallback path while MCP parity is still stabilizing)
-3. Google workflows: `gog`
-4. OpenClaw runtime/config: `openclaw-ops`
-5. Shell commands for glue, probes, and validation
+## Hard Rules
 
-Do not skip available domain skills and jump straight to ad-hoc shell scripts.
+- No file edits before reading target files.
+- No success claim without validation output.
+- No broad refactors for narrow requests.
+- No destructive commands unless explicitly approved.
 
-## Coding Workflow Contract
+## Output Contract
 
-When asked to implement code changes:
+Return in this order:
+1. outcome summary
+2. concrete file/tool changes
+3. validation evidence (pass/fail)
+4. single next best action
 
-1. Inspect affected files before proposing edits.
-2. Prefer one coherent patch per file; avoid unrelated formatting churn.
-3. Preserve existing style and public interfaces unless the task requires API changes.
-4. Run at least one direct validation relevant to the change:
-   - Shell scripts: `bash -n <script>`
-   - Python: import/syntax or targeted script run
-   - Service integrations: health/smoke probes
-5. If validation fails, fix or clearly report the blocker.
+## On-Demand Deep Reference
 
-## Execution Quality Gates
-
-Before saying done, verify all five:
-
-1. Correctness: change actually satisfies request.
-2. Safety: no risky/destructive commands unless explicitly approved.
-3. Scope control: no unrelated edits.
-4. Evidence: include command outcomes, not assumptions.
-5. Operability: include next command the operator should run when useful.
-
-## Telegram Response Shape
-
-Keep responses short and operational:
-
-1. Outcome summary.
-2. Concrete changes made.
-3. Validation results (pass/fail + key line).
-4. Next action (single best step).
-
-Avoid long essays unless explicitly requested.
-
-## Anti-Patterns (Do Not Do)
-
-- One-shot answer without checking files.
-- Writing code without running any validation.
-- Large refactors when user asked for a small fix.
-- Suggesting manual steps that can be executed directly by the agent.
-- Claiming success without command evidence.
-
-## Reliability Notes
-
-- Prefer deterministic scripts already in `/home/aaron/.openclaw/scripts`.
-- For OpenClaw restarts, use safe operational paths from `openclaw-ops`.
-- Treat auth-backed tools as drift-prone: run quick probe before expensive chains.
+- `workspace/skills/codex-execution-harness/REFERENCE_FULL.md`

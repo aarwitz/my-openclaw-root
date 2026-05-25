@@ -56,10 +56,6 @@
       ]
     },
     "profiles": {
-      "openai-codex:default": {
-        "provider": "openai-codex",
-        "mode": "oauth"
-      },
       "openai:default": {
         "provider": "openai",
         "mode": "token"
@@ -141,7 +137,7 @@
         "model": "openai/gpt-5.4",
         "identity": {
           "name": "Jerry",
-          "emoji": "🦞"
+          "emoji": "\ud83e\udd9e"
         }
       },
       {
@@ -155,7 +151,7 @@
         },
         "identity": {
           "name": "Resi",
-          "emoji": "🏗️"
+          "emoji": "\ud83c\udfd7\ufe0f"
         }
       },
       {
@@ -173,21 +169,17 @@
           ]
         },
         "skills": [
-          "codex-execution-harness",
-          "task-manager",
           "newsapi-ai",
           "finnhub",
           "massive",
           "schwab",
           "alpaca",
-          "gog",
-          "github-ssh",
           "druck-research",
           "financialmodeling-prep-api"
         ],
         "identity": {
           "name": "Druck",
-          "emoji": "📈"
+          "emoji": "\ud83d\udcc8"
         }
       },
       {
@@ -205,8 +197,6 @@
           ]
         },
         "skills": [
-          "codex-execution-harness",
-          "task-manager",
           "task-manager-maintainer",
           "resilife-product",
           "ewag-visual-qa",
@@ -214,15 +204,12 @@
           "ewag_capture",
           "ewag_test",
           "ewag_testing_menu",
-          "github-ssh",
-          "openclaw-ops",
-          "gog",
           "newsapi-ai",
           "cloudflare"
         ],
         "identity": {
           "name": "Dwight",
-          "emoji": "📋"
+          "emoji": "\ud83d\udccb"
         }
       }
     ]
@@ -376,7 +363,7 @@
             "github-ssh",
             "task-manager"
           ],
-          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker — route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
+          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker \u2014 route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
         },
         "-1003910955362": {
           "requireMention": false,
@@ -386,7 +373,7 @@
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are Dwight for Project Management and Task Manager execution at http://127.0.0.1:8000.\n\nCore rules:\n- Apply task-manager quality gates; update existing issues before creating new ones.\n- Add branch field issue-<id>-<short-slug> for code stories.\n- Assign first blocking owner (Jerry, Resi, Druck, Dwight, Aaron).\n\nCoding run contract:\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute exactly:\n  /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute\n- Auto-launch actionable coding issues for Jerry/Resi/Druck/Dwight when repo path is known.\n- If repo missing, ask one follow-up for absolute path.\n- Return lane, ownerAgent, taskId, metadata path, and terminal summary.\n\nSafety invariants:\n- EWAG iOS validation routes through ios-build-node scripts.\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Prefer hot reload for config edits.\n\nReference files: EWAG_INFRA.md, AGENTS.md, HEARTBEAT.md"
+          "systemPrompt": "You are Dwight for project management and Task Manager execution at http://127.0.0.1:8000.\n\nRules:\n- Apply task-manager quality gates and update existing issues before opening new ones.\n- For code stories, set branch field: issue-<id>-<short-slug>.\n- Assign first blocking owner (Jerry, Resi, Druck, Dwight, Aaron).\n\nRun contract:\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute:\n  /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute\n- Auto-launch actionable coding issues when repo path is known; if missing, ask one follow-up for absolute path.\n- Return lane, ownerAgent, taskId, metadata path, and terminal summary.\n\nSafety:\n- Route EWAG iOS validation through ios-build-node scripts.\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Prefer hot reload for config edits.\n\nRefs: EWAG_INFRA.md, AGENTS.md, HEARTBEAT.md"
         },
         "-1003643056525": {
           "requireMention": true,
@@ -401,7 +388,7 @@
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution — requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift — route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
+          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution \u2014 requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift \u2014 route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
           "topics": {
             "1": {
               "agentId": "resi",
@@ -428,7 +415,7 @@
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are in the OpenClaw Admin group. Focus: gateway operations, reliability, config, security, runbooks. Prefer exact commands and verifiable checks. Hot reload first for config changes; never `systemctl restart` — if a restart is truly required, only use `~/.openclaw/scripts/safe-restart.sh`."
+          "systemPrompt": "You are in the OpenClaw Admin group. Focus: gateway operations, reliability, config, security, runbooks. Prefer exact commands and verifiable checks. Hot reload first for config changes; never `systemctl restart` \u2014 if a restart is truly required, only use `~/.openclaw/scripts/safe-restart.sh`."
         },
         "-1003846579956": {
           "requireMention": true,
@@ -467,7 +454,7 @@
                 "druck-research",
                 "financialmodeling-prep-api"
               ],
-              "systemPrompt": "You are Druck running Phase II market/trading research execution.\n\nAuthority:\n- Plan: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md\n- Skill: druck-research\n- ACTION_REQUEST_DRUCK directives are authorized unless they violate hard risk/fact constraints.\n\nProtocol:\n- @druck_rsl_bot => reply expected unless prefixed FYI/cc.\n- FYI/cc => listen-only.\n\nHard rules:\n- Catalyst gate required for buy_ready/conditional_buy.\n- Label setup state before scoring.\n- Apply penalties separately and enforce recommendation caps.\n- Allowed classes: buy_ready, conditional_buy, watch_only, avoid.\n- Apply macro regime overlay last.\n- Fail closed on missing data and cite sources.\n- If expected edge does not clear 3% cash hurdle, default watch_only/no-trade.\n\nOutput:\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: {daily: x, weekly: y, monthly: z, yearly: q}\nexpected_edge_vs_cash_3pct: <pass|fail + brief math>\nfalsifier: <condition>\nnext_action: <next step + when>\n\nWrite protocol: idempotent writes + read-back verification; on mismatch log to Notes and do not claim success."
+              "systemPrompt": "You are Druck for Phase II trading research execution.\n\nAuthority:\n- Plan: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md\n- Skill: druck-research\n\nProtocol:\n- @druck_rsl_bot => reply expected unless prefixed FYI/cc.\n- FYI/cc => listen-only.\n\nHard rules:\n- Catalyst gate required for buy_ready/conditional_buy.\n- Label setup before scoring; apply penalties separately; enforce recommendation caps.\n- Allowed classes: buy_ready, conditional_buy, watch_only, avoid.\n- Apply macro overlay last; fail closed on missing data with citations.\n- If expected edge <= 3% cash hurdle, default watch_only/no-trade.\n\nOutput:\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: <daily/weekly/monthly/yearly>\nexpected_edge_vs_cash_3pct: <pass|fail + math>\nfalsifier: <condition>\nnext_action: <step + when>\n\nWrite protocol: idempotent writes + read-back verification; on mismatch log to Notes and do not claim success."
             }
           }
         }
@@ -633,8 +620,8 @@
       }
     },
     "limits": {
-      "maxSkillsInPrompt": 24,
-      "maxSkillsPromptChars": 4000
+      "maxSkillsInPrompt": 18,
+      "maxSkillsPromptChars": 3400
     }
   },
   "plugins": {

@@ -15,11 +15,16 @@ GH_ROUTER_BIN="/home/aaron/.openclaw/scripts/gh-account-router.sh"
 GOG_ROUTER_BIN="/home/aaron/.openclaw/scripts/gog-account-router.sh"
 GH_MCP_VALIDATE_BIN="/home/aaron/.openclaw/scripts/validate-github-mcp-official.sh"
 GOOGLE_MCP_VALIDATE_BIN="/home/aaron/.openclaw/scripts/validate-google-workspace-mcp-readonly.sh"
+OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 
 failures=0
 GOOGLE_AUTH_OK=0
 
 mkdir -p "$PREFLIGHT_CACHE_DIR"
+
+if [[ -z "$OPENCLAW_BIN" ]]; then
+  OPENCLAW_BIN="$(/home/aaron/.openclaw/scripts/resolve-openclaw-bin.sh)"
+fi
 
 check() {
   local label="$1"
@@ -89,8 +94,8 @@ check_google_service() {
 }
 
 # --- OpenClaw core ---
-check "gateway health" openclaw health
-check "model auth" openclaw models status --check
+check "gateway health" "$OPENCLAW_BIN" health
+check "model auth" "$OPENCLAW_BIN" models status --check
 
 # --- Gateway bind verification (prevents loopback/tailnet drift) ---
 check_output "gateway bind (listening on 0.0.0.0)" "(0\.0\.0\.0|\[::\]|:::?)?\s*:18789" ss -ltnp

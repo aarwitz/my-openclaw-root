@@ -1,73 +1,49 @@
 ---
 name: openclaw-ops
-description: Manage OpenClaw gateway operations, configuration changes, health checks, reliability, and safe restarts. Use when editing openclaw.json, validating plugin/channel status, applying config updates, handling auth/token safety, or restarting the gateway safely.
+description: Deterministic OpenClaw operations router for config changes, health checks, and safe restart policy enforcement.
 metadata: {"clawdbot":{"emoji":"🛠️"}}
 ---
 
-# OpenClaw Operations
+# OpenClaw Ops Router (Lean + Deterministic)
 
-This skill defines how Jerry manages OpenClaw safely on the RSL Linux host.
+Use this skill for gateway/runtime operations and configuration safety.
 
-## Critical Restart Policy
+## Operation Table
 
-1. Do not run systemctl restart for OpenClaw.
-2. Do not use forceful restarts for routine config changes.
-3. OpenClaw supports hot reload for config updates in normal operation.
-4. If a restart is truly required, use only:
+| Operation | Deterministic Action | Fail-Closed Rule |
+|---|---|---|
+| Config update | edit config or use `openclaw config set` | if invalid, stop and revert the specific change |
+| Runtime verification | run status/health checks after change | if checks fail, treat as unresolved |
+| Restart decision | prefer hybrid/hot reload behavior first | no restart for routine config edits |
+| Required restart | use `/home/aaron/.openclaw/scripts/safe-restart.sh` only | never use `systemctl restart` for OpenClaw |
 
-```bash
-/home/aaron/.openclaw/scripts/safe-restart.sh
-```
+## Critical Safety Rules
 
-Why: some providers use fragile refresh-token flows. Unsafe restarts can corrupt auth sessions.
+- Never run `systemctl --user restart openclaw` or force-kill gateway process.
+- Assume token fragility for auth-backed providers.
+- Validate after every operational change.
 
-## Default Workflow For Config Changes
+## Verification Commands
 
-1. Edit config file or use config-set command.
-2. Gateway auto-applies via hybrid reload (hot-reloads safe changes, auto-restarts only for gateway infrastructure changes like port/bind/auth).
-3. Validate with health checks.
-4. If hybrid reload didn't pick it up, use safe-restart.sh.
-
-Preferred checks:
-
-```bash
-openclaw gateway status
-openclaw status --deep
-openclaw health
-```
-
-## Allowed vs Disallowed Commands
-
-Allowed:
-
-```bash
-openclaw gateway status
-openclaw status --deep
-openclaw health
-openclaw config set <path> <value>
-/home/aaron/.openclaw/scripts/safe-restart.sh
-```
-
-Disallowed:
-
-```bash
-systemctl --user restart openclaw
-systemctl restart openclaw
-kill -9 <openclaw-pid>
-```
+- `openclaw gateway status`
+- `openclaw status --deep`
+- `openclaw health`
 
 ## Incident Pattern
 
-When OpenClaw behavior appears broken:
+1. run status + health checks
+2. verify credential preflight/recent config edits
+3. perform safe restart only if needed
+4. re-run checks and confirm recovery
 
-1. Run status and health checks.
-2. Confirm credentials are still valid (use credential-preflight if relevant).
-3. Verify recent config edits and expected hot reload behavior.
-4. Only then run safe restart script.
-5. Re-run health checks and confirm channels/plugins recovered.
+## Output Contract
 
-## Response Style
+Return:
+1. action taken
+2. checks run + outcomes
+3. any unresolved risk
+4. next safe command
 
-- Be concise and operational.
-- Provide exact commands and expected verification checks.
-- For risky actions, explicitly state risk and safer alternative.
+## On-Demand Deep Reference
+
+- `workspace/skills/openclaw-ops/REFERENCE_FULL.md`

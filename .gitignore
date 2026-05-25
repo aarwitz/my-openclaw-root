@@ -30,6 +30,7 @@ scripts/*.pyd
 !acpx/
 !acpx/**
 acpx/codex-home/
+acpx/*.log
 
 !completions/
 !completions/**

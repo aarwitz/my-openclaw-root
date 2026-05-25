@@ -6,6 +6,7 @@ CFG="/home/aaron/.openclaw/openclaw.json"
 SCHWAB_TOKEN="/home/aaron/.openclaw/credentials/schwab-dev-token.json"
 GITHUB_PREFLIGHT="/home/aaron/.openclaw/scripts/github-ssh-preflight.sh"
 REPORT_FILE="/tmp/openclaw-daily-health-report.txt"
+OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 
 PASS_COUNT=0
 WARN_COUNT=0
@@ -34,6 +35,10 @@ add_fail() {
 add_manual() {
   MANUAL_LINES+=("$1")
 }
+
+if [[ -z "$OPENCLAW_BIN" ]]; then
+  OPENCLAW_BIN="$(/home/aaron/.openclaw/scripts/resolve-openclaw-bin.sh)"
+fi
 
 classify_error() {
   local s
@@ -69,7 +74,7 @@ fail_with_reason() {
 }
 
 # 1) Gateway and Telegram channel health
-GW_STATUS="$(openclaw gateway status 2>&1 || true)"
+GW_STATUS="$("$OPENCLAW_BIN" gateway status 2>&1 || true)"
 if echo "$GW_STATUS" | rg -q "RPC probe: ok"; then
   add_pass "gateway: rpc probe ok"
 else
@@ -77,7 +82,7 @@ else
   add_manual "Gateway RPC probe is not healthy. Run: openclaw gateway status and ~/.openclaw/scripts/safe-restart.sh if needed."
 fi
 
-CHANNEL_STATUS="$(openclaw channels status --probe 2>&1 || true)"
+CHANNEL_STATUS="$("$OPENCLAW_BIN" channels status --probe 2>&1 || true)"
 for acct in default druck dwight resi; do
   if echo "$CHANNEL_STATUS" | rg -q -- "- Telegram ${acct}: .* works"; then
     add_pass "telegram/${acct}: works"
@@ -89,7 +94,7 @@ done
 
 # 2) Per-bot model handshake
 for agent in main resi druck dwight; do
-  AGENT_OUT="$(openclaw agent --agent "$agent" --message "Reply exactly: HEALTH_OK" --json 2>&1 || true)"
+  AGENT_OUT="$("$OPENCLAW_BIN" agent --agent "$agent" --message "Reply exactly: HEALTH_OK" --json 2>&1 || true)"
   AGENT_TEXT="$(echo "$AGENT_OUT" | jq -r '.result.payloads[0].text // empty' 2>/dev/null || true)"
   if echo "$AGENT_TEXT" | rg -q "HEALTH_OK"; then
     add_pass "agent/${agent}: model handshake ok"
@@ -111,7 +116,7 @@ ALL_SKILLS="$(jq -r '[.agents.defaults.skills[]] + [.agents.list[] | (.skills //
 if [[ -n "$ALL_SKILLS" ]]; then
   while IFS= read -r skill; do
     [[ -z "$skill" ]] && continue
-    SK_OUT="$(openclaw skills info "$skill" 2>&1 || true)"
+    SK_OUT="$("$OPENCLAW_BIN" skills info "$skill" 2>&1 || true)"
     if echo "$SK_OUT" | rg -q "✓ Ready"; then
       add_pass "skill/${skill}: ready"
     else
@@ -207,7 +212,7 @@ else
 fi
 
 # 5) Taylor's Mac node health (JSON for deterministic parsing)
-NODES_JSON="$(openclaw nodes status --json 2>/dev/null || true)"
+NODES_JSON="$("$OPENCLAW_BIN" nodes status --json 2>/dev/null || true)"
 NODE_CONNECTED="$(echo "$NODES_JSON" | jq -r '.nodes[]? | select(.displayName=="ios-build-node") | .connected' 2>/dev/null | head -1)"
 if [[ "$NODE_CONNECTED" == "true" ]]; then
   add_pass "node/ios-build-node: connected"
