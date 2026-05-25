@@ -1,135 +1,60 @@
 ---
 name: task-manager-maintainer
-description: "Use when editing Task Manager source code or changing Task Manager issue creation, sprint assignment, backlog behavior, issue metadata fields, FastAPI endpoints, backend/main.py, backend/models.py, backend/schemas.py, or matching frontend modals/scripts. Do not use for infra, CI, deployment, unrelated refactors, or routine story/sprint management through the API."
+description: "Deterministic maintainer workflow for Task Manager source changes across backend model/schema/API and frontend issue/sprint surfaces."
 metadata: {"clawdbot":{"emoji":"🔧"}}
 ---
 
-# Task Manager Maintainer
+# Task Manager Maintainer Router (Lean + Deterministic)
 
-## Purpose
-Apply safe, end-to-end changes to the Task Manager repo where backend API, DB model/migrations, and frontend issue workflows must stay in sync.
+Use this skill only for Task Manager source-code changes in `~/repos/Task-Manager/`.
+For routine issue/sprint operations through API, use `task-manager`.
 
-**Source code:** `~/repos/Task-Manager/`
-**Database:** `~/repos/Task-Manager/backend/taskmanager.db` (SQLite, persists across restarts)
-**Tech stack:** FastAPI + SQLAlchemy + SQLite + vanilla JS
+## Operation Table
 
-## Use When
-- Adding or changing issue fields (example: assignee, sprint, branch).
-- Changing issue creation defaults (backlog vs active sprint).
-- Updating sprint lifecycle behavior affecting issues.
-- Updating create-issue modals or issue detail metadata rendering.
-- Fixing backend/frontend contract drift for issue or sprint flows.
+| Operation | Deterministic Steps | Required Validation |
+|---|---|---|
+| Add/change issue field | update `backend/models.py` -> additive migration in `backend/main.py` -> schema updates in `backend/schemas.py` -> route wiring | `py_compile` + create/update API smoke |
+| Change issue create defaults | update create handler logic + schema/default handling + all create modals (`backlog/sprint/issue`) | create issue from each UI path |
+| Change sprint/backlog behavior | backend sprint route + issue assignment flow + affected labels/UI text | sprint list/active/end behavior smoke |
+| Change metadata rendering | backend response fields + frontend issue/backlog/sprint renderers | field visible in all relevant views |
 
-## Do Not Use
-- CI/CD, Docker, infrastructure, or deployment tasks.
-- Broad UI redesign unrelated to issue/sprint workflows.
-- Auth architecture changes unless explicitly requested.
-- Using the TM API to manage stories/sprints (use `task-manager` skill for that).
+## Hard Rules
 
-## Repository Map
+1. Keep backend model, migration, schema, API, and UI payloads in sync in one change set.
+2. SQLite migrations must be additive and safe for existing DB.
+3. Preserve behavior unless request explicitly changes behavior.
+4. Never touch unrelated infra/deploy/auth architecture here unless requested.
 
-### Backend (Python/FastAPI)
+## Invariants
 
-| File | Purpose |
-|------|---------|
-| `backend/main.py` | API routes, additive SQLite migrations (`run_safe_migrations()`), startup |
-| `backend/models.py` | SQLAlchemy ORM models (source of truth for DB schema) |
-| `backend/schemas.py` | Pydantic request/response contracts |
-| `backend/database.py` | Engine and session setup |
+- statuses: `to_do`, `in_progress`, `in_review`, `done`
+- `sprint_id` nullable means backlog
+- optional text fields should trim; empty string -> null
 
-### Frontend (vanilla JS + HTML)
+## Execution Sequence
 
-| File | Purpose |
-|------|---------|
-| `frontend/backlog.html` + `frontend/js/backlog.js` | Backlog view + create-issue modal |
-| `frontend/sprint.html` + `frontend/js/sprint.js` | Sprint board + create-issue modal |
-| `frontend/issue.html` + `frontend/js/issue.js` | Issue detail view + metadata display |
-| `frontend/search.html` + `frontend/js/search.js` | Search view |
-| `frontend/css/styles.css` | Shared styling |
-| `frontend/index.html` | Main Kanban board |
+1. Plan affected layers.
+2. Backend first: model -> migration -> schemas -> endpoints.
+3. Frontend second: all create/edit entry points and metadata displays.
+4. Validate and report.
 
-### Other
+Validation commands:
 
-| File | Purpose |
-|------|---------|
-| `start.sh` | Server startup script |
-| `requirements.txt` | Python dependencies |
+```bash
+python3 -m py_compile backend/main.py backend/models.py backend/schemas.py
+pkill -f "uvicorn main:app" || true
+cd ~/repos/Task-Manager && nohup bash start.sh > /tmp/task-manager.log 2>&1 &
+```
 
-## Hard Requirements
-- Keep model, schema, API, and UI payloads synchronized in one change.
-- Use additive migrations only (`ALTER TABLE ... ADD COLUMN`) for SQLite compatibility with existing data.
-- Preserve existing behavior unless task requires behavior changes.
-- Prefer minimal diffs; avoid unrelated formatting.
-- Never revert unrelated dirty worktree changes.
+## Output Contract
 
-## Domain Invariants
-- Issue status values: `to_do`, `in_progress`, `in_review`, `done`.
-- `sprint_id` is nullable; null means backlog.
-- New issue creation should support explicit sprint selection.
-- If no sprint is provided, default behavior should use active sprint when policy requires it.
-- Optional text fields (e.g. `branch`) must be trimmed; empty string becomes null.
+Return:
+1. behavior change summary
+2. file list by layer (model/migration/schema/api/ui)
+3. validation results
+4. residual risks
 
-## Required Workflow
+## On-Demand Deep Reference
 
-### 1. Plan before editing
-Read the full request and identify all affected layers before touching code:
-- DB model + migration
-- Pydantic schemas (create, update, response)
-- API handlers
-- All issue creation entry points in frontend (there are 3 modals)
-
-### 2. Implement backend first
-1. Add field to `models.py` (ORM model)
-2. Add additive migration in `run_safe_migrations()` in `main.py`
-3. Add field to schemas in `schemas.py` (IssueCreate, IssueUpdate, IssueResponse as needed)
-4. Wire field in endpoint logic (create handler, update handler via `setattr` loop)
-
-### 3. Implement frontend second
-1. Add/adjust form fields in **all** relevant modals (backlog, sprint, issue detail)
-2. Update submission payloads in **all** related JS files
-3. Update display surfaces for any new metadata
-
-### 4. Validate
-- Python syntax: `python3 -m py_compile backend/main.py backend/models.py backend/schemas.py`
-- Restart server and verify:
-  ```bash
-  pkill -f "uvicorn main:app" || true
-  cd ~/repos/Task-Manager && nohup bash start.sh > /tmp/task-manager.log 2>&1 &
-  ```
-- Smoke test API endpoints with curl
-
-### 5. Report
-Summarize: behavior changes, files changed, validation results, residual risks.
-
-## API Contract Checklist
-
-When issue creation/update changes, verify all are true:
-- [ ] `POST /api/issues` accepts expected fields
-- [ ] `POST /api/issues` applies defaulting rules correctly
-- [ ] `POST /api/issues` validates explicit sprint IDs
-- [ ] `PATCH /api/issues/{id}` accepts the changed editable fields
-- [ ] `IssueResponse` includes newly added fields used by UI
-- [ ] Search/list behavior remains consistent for sprint/backlog filters
-
-## Frontend Sync Checklist
-
-For issue creation changes, verify all are true:
-- [ ] Backlog modal updated: `frontend/backlog.html` + `frontend/js/backlog.js`
-- [ ] Sprint modal updated: `frontend/sprint.html` + `frontend/js/sprint.js`
-- [ ] Issue detail updated: `frontend/issue.html` + `frontend/js/issue.js`
-- [ ] Sprint selector options load from API and handle active sprint preselection
-- [ ] Payload keys match backend schema exactly
-- [ ] New metadata is rendered where users expect it
-
-## Common Pitfalls
-- Adding schema field but forgetting ORM model + migration.
-- Updating one create-issue modal and missing the other two.
-- Updating create endpoint but not response schema.
-- Not trimming optional inputs before persistence.
-- Failing to validate explicit sprint_id.
-- Changing sprint behavior without updating user-visible labels.
-
-## Decision Rules
-- If request is ambiguous between "auto active sprint" and "force backlog option", ask once and proceed.
-- If explicit user policy conflicts with existing behavior, implement policy and note migration/UX impact.
-- If a patch corrupts a file, stop and repair immediately before further edits.
+For complete repository map, full checklists, pitfalls, and decision rules:
+- `workspace/skills/task-manager-maintainer/REFERENCE_FULL.md`

@@ -1,132 +1,51 @@
 ---
 name: github-ssh
-description: Deterministic GitHub access with SSH-first transport and path-based HTTPS credential routing.
+description: Deterministic GitHub router with SSH-first transport and explicit HTTPS credential routing fallback.
 metadata:
   openclaw:
-    emoji: "🔐"
     os: ["linux"]
     requires:
       bins: ["git", "ssh", "ssh-keygen", "rg"]
     primaryEnv: "github-ssh"
 ---
 
-# GitHub Access (Deterministic)
+# GitHub SSH Router (Lean + Deterministic)
 
-## Primary path
+Primary path is official GitHub MCP.
+Use this skill only when MCP is unavailable or for break-glass git auth recovery.
 
-Primary integration path is official GitHub MCP (container `ghcr.io/github/github-mcp-server`).
+## Operation Table
 
-Use this skill as fallback-only when MCP is unavailable or in break-glass recovery.
-
-Use this skill whenever a bot needs to clone, fetch, pull, push, or inspect GitHub repositories.
+| Operation | Deterministic Action | Fail-Closed Rule |
+|---|---|---|
+| Preflight | run `/home/aaron/.openclaw/scripts/github-ssh-preflight.sh` | if any check fails, stop before mutation |
+| Repo transport | prefer `git@github.com:ORG/REPO.git` SSH remotes | if SSH blocked, use HTTPS with router only |
+| HTTPS credential routing | use `credential.helper` router + `credential.useHttpPath=true` | if routing ambiguous, stop and report |
+| CLI mutations | run `gh` only via `/home/aaron/.openclaw/scripts/gh-account-router.sh --agent ...` | never run raw `gh` mutation commands |
 
 ## Hard Rules
 
-- Prefer SSH transport for all GitHub operations.
-- HTTPS remotes are allowed when required; credential routing must stay deterministic.
-- Before important GitHub operations, run preflight:
+- Never output credentials or tokens.
+- For personal `aarwitz/*` repositories, do not use raw `gh` when bot token is active; use git over SSH.
+- Do not continue after preflight failure.
+- Keep auth/account selection deterministic by path or agent router.
 
-```bash
-/home/aaron/.openclaw/scripts/github-ssh-preflight.sh
-```
+## Deterministic Routing
 
-- If preflight fails, do not continue with repo mutation; report the exact failing check.
+- SSH is default for GitHub repository operations.
+- HTTPS fallback must use helper: `/home/aaron/.openclaw/scripts/github-credential-router.sh`.
+- `credential.useHttpPath=true` is required so `ORG/REPO` maps to the right profile.
+- Agent-based `gh` wrapper is mandatory for mutations.
 
-## Deterministic Auth Setup
+## Output Contract
 
-These host-level settings are required and maintained globally:
+Return:
+1. selected transport/auth route
+2. preflight outcome
+3. executed command class (read-only or mutation)
+4. any auth/routing discrepancy and exact failing check
+5. safe next action
 
-- SSH host block for `github.com` in `~/.ssh/config`
-- Key pinning to `/home/aaron/.ssh/id_rsa`
-- Git URL rewrite from `http://github.com/...` to SSH
-- Git credential helper router at `/home/aaron/.openclaw/scripts/github-credential-router.sh`
-- `credential.useHttpPath=true` so helper can route by `ORG/REPO`
+## On-Demand Deep Reference
 
-## Deterministic HTTPS Credential Routing
-
-When Git uses HTTPS for `github.com`, profile selection is path-based:
-
-- `EWAG-dev/*` -> `ewag` profile (`EWAG-dev` username)
-- all other repos -> `rsl-bot` profile (`aaronclawrsl-bot` username)
-
-Credential source of truth:
-
-- `/home/aaron/.openclaw/credentials/github_credentials.json`
-
-## Verified Commands
-
-Connectivity/auth test:
-
-```bash
-ssh -T git@github.com -o BatchMode=yes -o ConnectTimeout=10
-```
-
-Remote reachability test:
-
-```bash
-git ls-remote https://github.com/aarwitz/lidi-solutions.git HEAD
-```
-
-Clone/pull examples:
-
-```bash
-git clone https://github.com/OWNER/REPO.git
-git -C REPO pull --ff-only
-```
-
-## Failure Handling
-
-If GitHub returns `Permission denied (publickey)`:
-
-1. Confirm key exists and permissions are correct (`600` on private key).
-2. Re-run preflight script.
-3. If preflight auth still fails, the public key is not authorized in the GitHub account/org for that repo.
-
-If Git HTTPS auth fails:
-
-1. Confirm helper wiring (`git config --global --get credential.helper`).
-2. Confirm path routing is enabled (`git config --global --get credential.useHttpPath`).
-3. Validate helper output with `git credential fill` for the exact repo path.
-
-## `gh` CLI Caveat — Bot Token Conflict
-
-The shell environment has `GITHUB_TOKEN` set to the `aaronclawrsl-bot` token. This means `gh` CLI authenticates as the bot, not as `aarwitz`.
-
-**Consequence**: `gh repo view aarwitz/lidi-solutions` (and any other personal `aarwitz/*` repo) will fail because the bot does not have access to Aaron's personal repos.
-
-**Rule**: For any operation on personal `aarwitz/*` repos, use `git` over SSH (which uses `~/.ssh/id_rsa`) — do **not** use `gh` CLI commands. SSH transport works correctly regardless of the `GITHUB_TOKEN` env var.
-
-## Mandatory `gh` Wrapper
-
-All `gh` commands must run through the router so account selection is deterministic by agent:
-
-```bash
-/home/aaron/.openclaw/scripts/gh-account-router.sh --agent <main|resi|dwight|druck> <gh args...>
-```
-
-Examples:
-
-```bash
-# Jerry/Dwight/Druck -> aaronclawrsl-bot
-/home/aaron/.openclaw/scripts/gh-account-router.sh --agent main pr create --fill
-
-# Resi -> EWAG-dev
-/home/aaron/.openclaw/scripts/gh-account-router.sh --agent resi pr list --repo EWAG-dev/iosApp
-```
-
-Never call raw `gh ...` for mutations from bot workflows.
-
-```bash
-# Works (SSH):
-git ls-remote git@github.com:aarwitz/lidi-solutions.git HEAD
-git -C /path/to/repo pull --ff-only
-
-# Does NOT work for personal repos (bot token active):
-gh repo view aarwitz/lidi-solutions
-```
-
-## Scope
-
-This skill is intended to be present for all bots (existing and future) to keep GitHub access reliable and uniform.
-
-Status: fallback-only while official GitHub MCP is promoted.
+- `/home/aaron/.openclaw/workspace/skills/github-ssh/REFERENCE_FULL.md`
