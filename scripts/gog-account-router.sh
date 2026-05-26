@@ -3,34 +3,47 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: gog-account-router.sh [--agent <main|resi|dwight|druck>] <gog args...>
+Usage: gog-account-router.sh [--agent <main|resi|dwight|druck>] [--print-account] <gog args...>
 
 Routes gog account deterministically by agent and enforces non-interactive mode.
 
 Account mapping (override via env vars):
-  - main   -> GOG_ACCOUNT_MAIN   (default: aaronhorowitz97@gmail.com)
-  - resi   -> GOG_ACCOUNT_RESI   (default: aaronhorowitz97@gmail.com)
-  - dwight -> GOG_ACCOUNT_DWIGHT (default: aaronhorowitz97@gmail.com)
-  - druck  -> GOG_ACCOUNT_DRUCK  (default: aaronhorowitz97@gmail.com)
+  - main   -> GOG_ACCOUNT_MAIN   (default: aaronclawrsl@gmail.com)
+  - resi   -> GOG_ACCOUNT_RESI   (default: aaronclawrsl@gmail.com)
+  - dwight -> GOG_ACCOUNT_DWIGHT (default: aaronclawrsl@gmail.com)
+  - druck  -> GOG_ACCOUNT_DRUCK  (default: aaronclawrsl@gmail.com)
 
 You can also set OPENCLAW_AGENT_ID, OPENCLAW_AGENT, or AGENT_ID.
 EOF
 }
 
 agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-main}}}"
-if [[ "${1:-}" == "--agent" ]]; then
-  [[ $# -ge 3 ]] || {
-    usage
-    exit 2
-  }
-  agent="$2"
-  shift 2
-fi
+print_account=0
 
-[[ $# -gt 0 ]] || {
+while [[ $# -gt 0 ]]; do
+  case "${1:-}" in
+    --agent)
+      [[ $# -ge 3 ]] || {
+        usage
+        exit 2
+      }
+      agent="$2"
+      shift 2
+      ;;
+    --print-account)
+      print_account=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ "$print_account" -eq 0 && $# -eq 0 ]]; then
   usage
   exit 2
-}
+fi
 
 if ! command -v gog >/dev/null 2>&1; then
   echo "[gog-account-router] gog CLI not found in PATH" >&2
@@ -38,15 +51,20 @@ if ! command -v gog >/dev/null 2>&1; then
 fi
 
 case "$agent" in
-  main) account="${GOG_ACCOUNT_MAIN:-aaronhorowitz97@gmail.com}" ;;
-  resi) account="${GOG_ACCOUNT_RESI:-aaronhorowitz97@gmail.com}" ;;
-  dwight) account="${GOG_ACCOUNT_DWIGHT:-aaronhorowitz97@gmail.com}" ;;
-  druck) account="${GOG_ACCOUNT_DRUCK:-aaronhorowitz97@gmail.com}" ;;
+  main) account="${GOG_ACCOUNT_MAIN:-aaronclawrsl@gmail.com}" ;;
+  resi) account="${GOG_ACCOUNT_RESI:-aaronclawrsl@gmail.com}" ;;
+  dwight) account="${GOG_ACCOUNT_DWIGHT:-aaronclawrsl@gmail.com}" ;;
+  druck) account="${GOG_ACCOUNT_DRUCK:-aaronclawrsl@gmail.com}" ;;
   *)
     echo "[gog-account-router] unknown agent '$agent'" >&2
     exit 2
     ;;
 esac
+
+if [[ "$print_account" -eq 1 ]]; then
+  printf '%s\n' "$account"
+  exit 0
+fi
 
 # Global auth health check first.
 if ! gog auth list --check --no-input >/dev/null 2>&1; then

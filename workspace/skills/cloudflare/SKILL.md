@@ -32,7 +32,28 @@ Use this skill for Cloudflare DNS, Pages, token verification, and controlled mig
 ## Runtime Inputs
 
 - token file: `~/.openclaw/credentials/cloudflare/account-token`
+- worker deploy token file: `~/.openclaw/credentials/cloudflare/account-token.bak`
 - metadata file: `~/.openclaw/credentials/cloudflare/account-meta.json`
+
+## Mandatory Wrapper
+
+Use the router instead of exporting token files manually:
+
+```bash
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto -- <command ...>
+```
+
+Useful checks:
+
+```bash
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode default --verify
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode worker-mutate --print-token-path
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto --print-token-path
+```
+
+`auto` selects:
+- `account-token.bak` for known Wrangler Worker mutation commands
+- `account-token` for default/read operations
 
 ## Output Contract
 

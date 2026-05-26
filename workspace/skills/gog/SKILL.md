@@ -27,7 +27,14 @@ Examples:
 ```bash
 /home/aaron/.openclaw/scripts/gog-account-router.sh --agent main drive search "owner:me" --max 5
 /home/aaron/.openclaw/scripts/gog-account-router.sh --agent dwight gmail search "newer_than:7d" --max 10
+/home/aaron/.openclaw/scripts/gog-account-router.sh --agent main --print-account
 ```
+
+Current default account mapping:
+- `main` -> `aaronclawrsl@gmail.com`
+- `resi` -> `aaronclawrsl@gmail.com`
+- `dwight` -> `aaronclawrsl@gmail.com`
+- `druck` -> `aaronclawrsl@gmail.com`
 
 Setup (once)
 - `gog auth credentials /path/to/client_secret.json`

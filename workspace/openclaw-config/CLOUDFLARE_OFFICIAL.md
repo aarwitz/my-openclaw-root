@@ -21,7 +21,9 @@ Managed domains and projects:
 ## Credential Storage (Do Not Inline Secrets)
 
 - Cloudflare API token file: `~/.openclaw/credentials/cloudflare/account-token`
+- Cloudflare Worker deploy token file: `~/.openclaw/credentials/cloudflare/account-token.bak`
 - Cloudflare account metadata: `~/.openclaw/credentials/cloudflare/account-meta.json`
+- Cloudflare router script: `/home/aaron/.openclaw/scripts/cloudflare-account-router.sh`
 - Origin cert (redstonelabs): `~/.openclaw/credentials/cloudflare/redstonelabs-origin-cert.pem`
 - Origin key (redstonelabs): `~/.openclaw/credentials/cloudflare/redstonelabs-origin-key.pem`
 
@@ -32,6 +34,12 @@ Permissions on credential files must remain `600`.
 - Cloudflare tunnel `vision-app.redstonelabs.us` is decommissioned.
 - `cloudflared` binary is installed at `/usr/bin/cloudflared` and symlinked from `/usr/local/bin/cloudflared`.
 - No active local cloudflared config was found under `~/.cloudflared/`.
+- As of `2026-05-26`, the nominal active token at `account-token` verifies as active but fails Cloudflare Worker service mutation calls with auth error `10000`.
+- As of `2026-05-26`, Worker publish for `tm.lidisolutions.ai` succeeded only with `~/.openclaw/credentials/cloudflare/account-token.bak`.
+- Treat token routing as split until fixed:
+  - `account-token.bak` for Worker deploy mutations
+  - `account-token` may still work for some read/D1 operations, but do not trust it for Worker publish
+- Use `/home/aaron/.openclaw/scripts/cloudflare-account-router.sh` instead of exporting token files manually.
 
 ## Cleanup Completed (2026-05-10)
 
@@ -42,9 +50,9 @@ Permissions on credential files must remain `600`.
 ## Verification Commands
 
 ```bash
-export CLOUDFLARE_API_TOKEN="$(cat ~/.openclaw/credentials/cloudflare/account-token)"
-curl -sS -X GET "https://api.cloudflare.com/client/v4/accounts/6729a939101c819b5a656b06c3bb0d0b/tokens/verify" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode default --verify
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode worker-mutate --print-token-path
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto --print-token-path
 ```
 
 ## Known Blockers (2026-05-10)

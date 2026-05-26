@@ -32,20 +32,46 @@ Never place raw Cloudflare tokens in markdown, commits, or chat outputs.
 
 Read secrets at runtime from:
 - `~/.openclaw/credentials/cloudflare/account-token`
+- `~/.openclaw/credentials/cloudflare/account-token.bak`
 - `~/.openclaw/credentials/cloudflare/account-meta.json`
+
+## Mandatory Wrapper
+
+Use the router instead of exporting token files manually:
+
+```bash
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto -- <command ...>
+```
+
+Profile selection:
+- `default` -> `account-token`
+- `worker-mutate` -> `account-token.bak`
+- `auto` -> `worker-mutate` for known Wrangler Worker mutation commands; otherwise `default`
+
+Inspection / verification:
+
+```bash
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode default --verify
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode worker-mutate --print-token-path
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto --print-token-path
+```
 
 ## Standard Runtime Setup
 
 ```bash
-export CLOUDFLARE_API_TOKEN="$(cat ~/.openclaw/credentials/cloudflare/account-token)"
-export CLOUDFLARE_ACCOUNT_ID="6729a939101c819b5a656b06c3bb0d0b"
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode auto -- <command ...>
 ```
 
 ## Verify Token
 
 ```bash
-curl -sS -X GET "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/tokens/verify" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode default --verify
+```
+
+For the worker-mutate profile, verify deterministic routing by checking the selected token path:
+
+```bash
+/home/aaron/.openclaw/scripts/cloudflare-account-router.sh --mode worker-mutate --print-token-path
 ```
 
 ## DNS Operations Pattern
