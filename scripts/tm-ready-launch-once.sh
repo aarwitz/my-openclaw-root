@@ -13,11 +13,11 @@ Usage:
   tm-ready-launch-once.sh --issue-id <id> [--help]
 
 Purpose:
-  Run one controlled execute-mode watcher pass against a single opted-in issue.
+  Run one controlled execute-mode watcher pass against a single Task Manager auto-launch issue.
 
 Requirements:
-  - issue must satisfy watcher readiness contract
-  - issue description must contain AUTO_LAUNCH_READY
+  - issue must satisfy Task Manager auto-launch readiness
+  - auto_launch_enabled=true and launch_state=ready are expected
 
 Behavior:
   - enables execute mode explicitly for this invocation only

@@ -23,7 +23,7 @@ risk="low"
 heavy_tag="false"
 acp_available="false"
 run_timeout="1800"
-agent_timeout="120"
+agent_timeout="300"
 execute="false"
 requested_lane=""
 selected_lane=""
@@ -35,6 +35,14 @@ acp_preflight_detail=""
 should_trigger_acp_runtime_fallback() {
   local output="$1"
   if echo "$output" | grep -Eq 'Failed to spawn agent command|spawn [^ ]+ ENOENT|AcpRuntimeError|Permission prompt unavailable in non-interactive mode'; then
+    return 0
+  fi
+  return 1
+}
+
+should_retry_codex_timeout() {
+  local output="$1"
+  if echo "$output" | grep -Eq 'Request timed out before a response was generated|GatewayTransportError: gateway timeout|codex app-server turn idle timed out|Profile [^ ]+ timed out'; then
     return 0
   fi
   return 1
@@ -92,7 +100,7 @@ Execution options:
   --coder-codex-agent <id>       Default: main (Jerry)
   --acp-agent <id>               Default: cursor
   --timeout <seconds>            ACP run timeout hint. Default: 1800
-  --agent-timeout <seconds>      openclaw agent timeout. Default: 120
+  --agent-timeout <seconds>      openclaw agent timeout. Default: 300
   --execute                      Actually invoke OpenClaw command (default is dry-run)
   --help
 
@@ -423,46 +431,222 @@ mkdir -p "$RUNS_DIR"
 run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 meta_path="$RUNS_DIR/${task_id}.${run_stamp}.json"
 
-if [[ -n "$acceptance" ]]; then
-  acceptance_line="\n  \"acceptance\": \"${acceptance//\"/\\\"}\","
-else
-  acceptance_line=""
-fi
+write_metadata_file() {
+  META_TASK_ID="$task_id" \
+  META_TIMESTAMP="$run_stamp" \
+  META_OWNER_AGENT="$owner_agent" \
+  META_CODER_CODEX_AGENT="$coder_codex_agent" \
+  META_ORCHESTRATOR_AGENT="$orchestrator_agent" \
+  META_REPO="$repo_path" \
+  META_GOAL="$goals" \
+  META_ACCEPTANCE="$acceptance" \
+  META_REQUESTED_LANE="$requested_lane" \
+  META_SELECTED_LANE="$selected_lane" \
+  META_REASON="$reason" \
+  META_FALLBACK_LANE="$fallback_lane" \
+  META_FALLBACK_APPLIED="$fallback_applied" \
+  META_FALLBACK_REASON="$fallback_reason" \
+  META_SCOPE="$scope" \
+  META_EXPECTED_FILES="$expected_files" \
+  META_RISK="$risk" \
+  META_HEAVY_TAG="$heavy_tag" \
+  META_ACP_AVAILABLE="$acp_available" \
+  META_ACP_AGENT="$acp_agent" \
+  META_ACP_PREFLIGHT_STATUS="$acp_preflight_status" \
+  META_ACP_PREFLIGHT_DETAIL="$acp_preflight_detail" \
+  python3 - "$meta_path" <<'PY'
+import json
+import os
+import sys
 
-safe_reason="${reason//\"/\\\"}"
-safe_fallback_reason="${fallback_reason//\"/\\\"}"
-safe_preflight_status="${acp_preflight_status//\"/\\\"}"
-safe_preflight_detail="${acp_preflight_detail//\"/\\\"}"
-
-cat > "$meta_path" <<EOF
-{
-  "taskId": "${task_id}",
-  "timestamp": "${run_stamp}",
-  "ownerAgent": "${owner_agent}",
-  "coderCodexAgent": "${coder_codex_agent}",
-  "orchestratorAgent": "${orchestrator_agent}",
-  "repo": "${repo_path}",
-  "goal": "${goals//\"/\\\"}",${acceptance_line}
-  "routing": {
-    "requestedLane": "${requested_lane}",
-    "lane": "${selected_lane}",
-    "reason": "${safe_reason}",
-    "fallbackLane": "${fallback_lane}",
-    "fallbackApplied": ${fallback_applied},
-    "fallbackReason": "${safe_fallback_reason}",
-    "scope": "${scope}",
-    "expectedFiles": ${expected_files},
-    "risk": "${risk}",
-    "heavyTag": ${heavy_tag},
-    "acpAvailable": ${acp_available},
-    "acpAgent": "${acp_agent}",
-    "acpPreflight": {
-      "status": "${safe_preflight_status}",
-      "detail": "${safe_preflight_detail}"
-    }
-  }
+path = sys.argv[1]
+data = {
+    "taskId": os.environ["META_TASK_ID"],
+    "timestamp": os.environ["META_TIMESTAMP"],
+    "ownerAgent": os.environ["META_OWNER_AGENT"],
+    "coderCodexAgent": os.environ["META_CODER_CODEX_AGENT"],
+    "orchestratorAgent": os.environ["META_ORCHESTRATOR_AGENT"],
+    "repo": os.environ["META_REPO"],
+    "goal": os.environ["META_GOAL"],
+    "routing": {
+        "requestedLane": os.environ["META_REQUESTED_LANE"],
+        "lane": os.environ["META_SELECTED_LANE"],
+        "reason": os.environ["META_REASON"],
+        "fallbackLane": os.environ["META_FALLBACK_LANE"],
+        "fallbackApplied": os.environ["META_FALLBACK_APPLIED"] == "true",
+        "fallbackReason": os.environ["META_FALLBACK_REASON"],
+        "scope": os.environ["META_SCOPE"],
+        "expectedFiles": int(os.environ["META_EXPECTED_FILES"]),
+        "risk": os.environ["META_RISK"],
+        "heavyTag": os.environ["META_HEAVY_TAG"] == "true",
+        "acpAvailable": os.environ["META_ACP_AVAILABLE"] == "true",
+        "acpAgent": os.environ["META_ACP_AGENT"],
+        "acpPreflight": {
+            "status": os.environ["META_ACP_PREFLIGHT_STATUS"],
+            "detail": os.environ["META_ACP_PREFLIGHT_DETAIL"],
+        },
+    },
 }
-EOF
+if os.environ.get("META_ACCEPTANCE"):
+    data["acceptance"] = os.environ["META_ACCEPTANCE"]
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
+PY
+}
+
+update_metadata_execution() {
+  local execution_mode="$1"
+  local execution_rc="$2"
+  local contract_json="${3:-}"
+  META_EXECUTION_MODE="$execution_mode" \
+  META_EXECUTION_RC="$execution_rc" \
+  META_CONTRACT_JSON="$contract_json" \
+  META_OUTPUT="$cmd_output" \
+  python3 - "$meta_path" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+execution = {
+    "mode": os.environ["META_EXECUTION_MODE"],
+    "returnCode": int(os.environ["META_EXECUTION_RC"]),
+    "completedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    "outputSnippet": os.environ["META_OUTPUT"][:4000],
+}
+contract_json = os.environ.get("META_CONTRACT_JSON", "").strip()
+if contract_json:
+    try:
+        execution["contract"] = json.loads(contract_json)
+    except json.JSONDecodeError:
+        execution["contractRaw"] = contract_json
+data["execution"] = execution
+
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
+PY
+}
+
+extract_codex_contract_json() {
+  CONTRACT_INPUT="${1:-}" python3 - "$task_id" <<'PY'
+import json
+import os
+import re
+import sys
+
+task_id = sys.argv[1]
+text = os.environ.get("CONTRACT_INPUT", "")
+
+ALLOWED_PR_STATUSES = {"opened", "not-opened", "not-needed", "unknown"}
+
+def validate_obj(obj):
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("lane") != "codex-subagent":
+        return None
+    if obj.get("taskId") != task_id:
+        return None
+    if obj.get("spawnAgentUsed") is not True:
+        return None
+    if obj.get("status") not in {"succeeded", "failed"}:
+        return None
+    branch = obj.get("branch")
+    if not isinstance(branch, str) or not branch.strip():
+        return None
+    pr = obj.get("pr")
+    if not isinstance(pr, dict):
+        return None
+    pr_status = pr.get("status")
+    if pr_status not in ALLOWED_PR_STATUSES:
+        return None
+    pr_url = pr.get("url")
+    if pr_url is not None and not isinstance(pr_url, str):
+        return None
+    if pr_status == "opened" and not (isinstance(pr_url, str) and pr_url.strip()):
+        return None
+    if not isinstance(obj.get("evidence"), list):
+        return None
+    return json.dumps(obj, separators=(",", ":"))
+
+def visit(value):
+    if isinstance(value, dict):
+        normalized = validate_obj(value)
+        if normalized:
+            return normalized
+        for nested in value.values():
+            found = visit(nested)
+            if found:
+                return found
+        return None
+    if isinstance(value, list):
+        for nested in value:
+            found = visit(nested)
+            if found:
+                return found
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                return None
+            return visit(parsed)
+    return None
+
+for candidate in (text, *text.splitlines()):
+    candidate = candidate.strip()
+    if not candidate:
+        continue
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        continue
+    normalized = visit(parsed)
+    if normalized:
+        print(normalized)
+        raise SystemExit(0)
+
+for key in ("finalAssistantVisibleText", "finalAssistantRawText", "text"):
+    pattern = re.compile(r'"' + re.escape(key) + r'"\s*:\s*"((?:\\.|[^"])*)"')
+    for match in pattern.finditer(text):
+        try:
+            candidate = json.loads('"' + match.group(1) + '"')
+        except json.JSONDecodeError:
+            continue
+        normalized = visit(candidate)
+        if normalized:
+            print(normalized)
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+extract_contract_status() {
+  CONTRACT_JSON_INPUT="${1:-}" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    obj = json.loads(os.environ.get("CONTRACT_JSON_INPUT", ""))
+except json.JSONDecodeError:
+    raise SystemExit(1)
+status = obj.get("status")
+if not isinstance(status, str):
+    raise SystemExit(1)
+print(status)
+PY
+}
+
+write_metadata_file
 
 if [[ "$selected_lane" == "acp-external" ]]; then
   prompt="Use sessions_spawn with runtime=\"acp\", agentId=\"${acp_agent}\", mode=\"run\", cwd=\"${repo_path}\", runTimeoutSeconds=${run_timeout}."
@@ -473,7 +657,7 @@ if [[ "$selected_lane" == "acp-external" ]]; then
   if [[ -n "$acceptance" ]]; then
     prompt+=" Acceptance criteria: ${acceptance}."
   fi
-  prompt+=" Return task id, lane, and completion evidence."
+  prompt+=" Return task id, lane, branch, explicit PR status/url, and completion evidence."
   if [[ -z "$OPENCLAW_BIN" || ! -x "$OPENCLAW_BIN" ]]; then
     echo "OpenClaw CLI not found. Set OPENCLAW_BIN or install openclaw on PATH." >&2
     exit 2
@@ -490,7 +674,8 @@ elif [[ "$selected_lane" == "codex-subagent" ]]; then
   fi
   prompt+=" Work in repo ${repo_path}."
   prompt+=" Execute this as a native Codex subagent task (spawn_agent)."
-  prompt+=" Return JSON only with this exact schema: {\"lane\":\"codex-subagent\",\"taskId\":\"${task_id}\",\"spawnAgentUsed\":true,\"status\":\"succeeded|failed\",\"evidence\":[\"...\"]}."
+  prompt+=" Return JSON only with this exact schema: {\"lane\":\"codex-subagent\",\"taskId\":\"${task_id}\",\"spawnAgentUsed\":true,\"status\":\"succeeded|failed\",\"branch\":\"<branch-name>\",\"pr\":{\"status\":\"opened|not-opened|not-needed|unknown\",\"url\":\"https://...\"|null},\"evidence\":[\"...\"]}."
+  prompt+=" If no PR is opened, state why in evidence and use pr.status=\"not-opened\" or \"not-needed\"."
   if [[ -z "$OPENCLAW_BIN" || ! -x "$OPENCLAW_BIN" ]]; then
     echo "OpenClaw CLI not found. Set OPENCLAW_BIN or install openclaw on PATH." >&2
     exit 2
@@ -527,6 +712,37 @@ if [[ "$execute" == "true" ]]; then
   cmd_output="$("${cmd[@]}" 2>&1)"
   cmd_rc=$?
   set -e
+
+  if [[ "$selected_lane" == "codex-subagent" && $cmd_rc -ne 0 ]] && should_retry_codex_timeout "$cmd_output"; then
+    retry_timeout="$agent_timeout"
+    if [[ "$retry_timeout" -lt 300 ]]; then
+      retry_timeout=300
+    fi
+    retry_timeout=$((retry_timeout * 2))
+    if [[ "$retry_timeout" -gt 900 ]]; then
+      retry_timeout=900
+    fi
+
+    retry_cmd=("${cmd[@]}")
+    for ((i=0; i<${#retry_cmd[@]}; i++)); do
+      if [[ "${retry_cmd[$i]}" == "--timeout" && $((i + 1)) -lt ${#retry_cmd[@]} ]]; then
+        retry_cmd[$((i + 1))]="$retry_timeout"
+        break
+      fi
+    done
+
+    echo "Codex subagent timed out; retrying once with --timeout ${retry_timeout}." >&2
+    set +e
+    retry_output="$("${retry_cmd[@]}" 2>&1)"
+    retry_rc=$?
+    set -e
+
+    cmd_output="$cmd_output
+
+--- codex-timeout-retry(timeout=${retry_timeout}) ---
+$retry_output"
+    cmd_rc=$retry_rc
+  fi
 
   printf '%s\n' "$cmd_output"
 
@@ -569,16 +785,27 @@ if [[ "$execute" == "true" ]]; then
   fi
 
   if [[ $cmd_rc -ne 0 ]]; then
+    update_metadata_execution "execute" "$cmd_rc"
     exit $cmd_rc
   fi
 
   if [[ "$selected_lane" == "codex-subagent" ]]; then
-    if ! echo "$cmd_output" | grep -Eq '"lane"[[:space:]]*:[[:space:]]*"codex-subagent"' || \
-       ! echo "$cmd_output" | grep -Eq '"spawnAgentUsed"[[:space:]]*:[[:space:]]*true'; then
-      echo "Codex-subagent contract validation failed: missing lane/spawnAgentUsed markers in response." >&2
-      exit 3
+    contract_json=""
+    if ! contract_json="$(extract_codex_contract_json "$cmd_output")"; then
+      update_metadata_execution "execute" "$cmd_rc"
+      echo "WARNING: codex-subagent contract validation failed inside launch-coding-task.sh; raw output was preserved for higher-level parsing." >&2
+      exit "$cmd_rc"
     fi
+    update_metadata_execution "execute" "$cmd_rc" "$contract_json"
+    printf 'Validated codex-subagent contract: %s\n' "$contract_json"
+    contract_status="$(extract_contract_status "$contract_json")"
+    if [[ "$contract_status" == "failed" ]]; then
+      exit 4
+    fi
+  else
+    update_metadata_execution "execute" "$cmd_rc"
   fi
 else
+  cmd_output=""
   echo "Dry-run only. Re-run with --execute to launch."
 fi

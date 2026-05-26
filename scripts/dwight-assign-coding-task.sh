@@ -14,7 +14,7 @@ auto_risk="low"
 auto_heavy_tag="false"
 auto_acp_available="false"
 auto_acp_agent=""
-auto_agent_timeout="120"
+auto_agent_timeout="300"
 
 task_id=""
 repo_path=""
@@ -41,7 +41,7 @@ Optional:
   --tag-heavy <true|false>         Default: false
   --acp-available <true|false>     Default: false
   --acp-agent <id>                 Optional ACP harness override
-  --agent-timeout <seconds>        openclaw agent timeout. Default: 120
+  --agent-timeout <seconds>        openclaw agent timeout. Default: 300
   --execute                         Actually launch (default dry-run)
   --help
 EOF
