@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from . import db
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 SQL_SCHEMA_PATH = ROOT / "sql" / "SQLITE_SCHEMA_V1.sql"
@@ -20,6 +22,7 @@ REQUIRED_TABLES = {
     "trade_attribution",
     "positions",
     "trade_intents",
+    "checkpoint_runs",
     "signals",
     "ideas",
     "regime_states",
@@ -69,11 +72,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def load_runtime_config() -> dict[str, Any]:
     risk = _load_yaml(CONFIG_DIR / "risk.yaml")
     strategies = _load_yaml(CONFIG_DIR / "strategies.yaml")
+    runtime_risk = risk.get("runtime", {})
     runtime = {
         "schema_version": 1,
-        "broker_mode": "alpaca_paper",
-        "allowed_instruments": ["stocks"],
-        "engine_types": ["conviction", "opportunistic"],
+        "portfolio_size_usd": runtime_risk.get("portfolio_size_usd"),
+        "broker_mode": runtime_risk.get("broker_mode"),
+        "allowed_instruments": runtime_risk.get("allowed_instruments", []),
+        "engine_types": runtime_risk.get("engine_types", []),
         "storage_paths": {
             "sqlite_db": str(DEFAULT_DB_PATH),
             "schema_sql": str(SQL_SCHEMA_PATH),
@@ -88,18 +93,16 @@ def load_runtime_config() -> dict[str, Any]:
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return db.connect(db_path)
 
 
 def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     schema_sql = SQL_SCHEMA_PATH.read_text(encoding="utf-8")
-    with _connect(db_path) as conn:
+    with db.connect(db_path, write=True) as conn:
         conn.executescript(schema_sql)
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        conn.commit()
     return {"db_path": str(db_path), "tables": tables}
 
 
@@ -240,17 +243,33 @@ def _report_preview(conn: sqlite3.Connection) -> dict[str, Any]:
     attribution_rows = conn.execute(
         "SELECT ROUND(SUM(signal_return), 4) AS signal_return_sum, ROUND(SUM(management_return), 4) AS management_return_sum, ROUND(SUM(sizing_return), 4) AS sizing_return_sum FROM trade_attribution"
     ).fetchone()
+    json_probe = conn.execute(
+        """
+        SELECT
+          trade_id,
+          CAST(json_extract(entry_conditions_json, '$.spread_bps') AS REAL) AS spread_bps,
+          CAST(json_extract(entry_conditions_json, '$.atr_pct') AS REAL) AS atr_pct,
+          EXISTS (
+            SELECT 1
+            FROM json_each(data_quality_flags_json)
+            WHERE value = 'stale_quote'
+          ) AS has_stale_quote_flag
+        FROM trades
+        WHERE trade_id = 'trade-opp-001'
+        """
+    ).fetchone()
     return {
         "engine_summary": [dict(r) for r in strategy_rows],
         "candidate_decision_summary": [dict(r) for r in candidate_rows],
         "attribution_summary": dict(attribution_rows),
+        "json_query_probe": dict(json_probe) if json_probe else {},
     }
 
 
 def validate_schema(db_path: Path = DEFAULT_DB_PATH) -> ValidationResult:
     config = load_runtime_config()
     initialize_database(db_path)
-    with _connect(db_path) as conn:
+    with db.connect(db_path, write=True) as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         missing = REQUIRED_TABLES - tables
         if missing:
@@ -277,10 +296,23 @@ def validate_schema(db_path: Path = DEFAULT_DB_PATH) -> ValidationResult:
         pause = conn.execute("SELECT pause_id, reason FROM system_pauses WHERE pause_id='pause-001'").fetchone()
         thesis = conn.execute("SELECT thesis_id, version FROM thesis_versions WHERE thesis_id='thesis-goog-001'").fetchone()
         report_preview = _report_preview(conn)
+        json_validity = conn.execute(
+            """
+            SELECT
+              json_valid(entry_conditions_json) AS entry_conditions_valid,
+              json_valid(data_quality_flags_json) AS data_quality_flags_valid
+            FROM trades
+            WHERE trade_id = ?
+            """,
+            (opportunistic_trade_id,),
+        ).fetchone()
 
         assert opp_trade and candidate and attribution, "opportunistic roundtrip inserts missing"
         assert conv_trade and thesis, "conviction roundtrip inserts missing"
         assert reconciliation and pause, "ops smoke rows missing"
+        assert json_validity, "json validity probe missing"
+        assert json_validity["entry_conditions_valid"] == 1, "entry_conditions_json must be valid JSON"
+        assert json_validity["data_quality_flags_valid"] == 1, "data_quality_flags_json must be valid JSON"
 
     return ValidationResult(
         db_path=str(db_path),
@@ -289,6 +321,11 @@ def validate_schema(db_path: Path = DEFAULT_DB_PATH) -> ValidationResult:
         sample_candidate_id=candidate["candidate_id"],
         sample_attribution_trade_id=attribution["trade_id"],
         config_summary={
+            "portfolio_size_usd": config.get("portfolio_size_usd"),
+            "broker_mode": config.get("broker_mode"),
+            "allowed_instruments": config.get("allowed_instruments"),
+            "engine_types": config.get("engine_types"),
+            "storage_paths": config.get("storage_paths"),
             "startup_mode": config["risk"].get("runtime", {}).get("startup_mode"),
             "capital_allocation": config["strategies"].get("allocation_policy", {}).get("capital_allocation_pct"),
             "correlation_thresholds": config["risk"].get("portfolio_controls", {}).get("correlation"),
