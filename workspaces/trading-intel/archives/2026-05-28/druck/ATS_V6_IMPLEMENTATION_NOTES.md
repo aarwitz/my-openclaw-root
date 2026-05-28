@@ -15,6 +15,8 @@ Status: implementation companion for issues #120 and #125
 ## JSON vs normalized choices
 
 - Keep `entry_conditions_json` and `data_quality_flags_json` on `trades` so the exact trade-time snapshot remains durable and replayable.
+- Enforce `json_valid(...)` at schema creation for `entry_conditions_json` and `data_quality_flags_json` so malformed payloads fail closed instead of silently polluting attribution or post-trade analytics.
+- Query trade-time JSON with SQLite JSON1 functions. `json_extract(entry_conditions_json, '$.spread_bps')` and `json_extract(entry_conditions_json, '$.atr_pct')` are indexed now for common execution-quality filters, while `json_each(data_quality_flags_json)` supports flag membership queries.
 - Keep `score_components_json`, `factor_tags_json`, `regime_tag_json`, `targets_json`, and exposure breakdown fields in JSON for flexible evolution without premature table explosion.
 - Normalize only entities that need lifecycle joins or primary-key accountability: signals, ideas, intents, trades, attribution, positions, and risk snapshots.
 - Queryability comes from stable top-level columns plus JSON payload preservation. If a JSON key becomes operationally critical across many reports, promote it later into a first-class column with migration evidence.
@@ -23,6 +25,7 @@ Status: implementation companion for issues #120 and #125
 
 - `config/risk.yaml` is the risk authority for startup mode, hard gates, correlation caps, and reporting cadence.
 - `config/strategies.yaml` is the strategy/allocation authority for conviction vs opportunistic capital buckets and per-strategy limits.
+- Runtime config explicitly exposes `portfolio_size_usd`, `broker_mode`, `allowed_instruments`, `engine_types`, and `storage_paths` through `phase2.ats_v6.load_runtime_config()`.
 - Runtime DB path: `sql/ats_v6.db`
 - Runtime validation entrypoint: `python3 -m phase2.cli validate-ats-v6`
 

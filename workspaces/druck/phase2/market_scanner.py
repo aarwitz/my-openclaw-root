@@ -171,49 +171,82 @@ def _unusual_volume_from_all(min_vol_ratio: float = 3.0, min_dollar_m: float = 2
 # Enrichment — fill LiquidMover fields from daily aggs + snapshot + ref.
 # ===================================================================
 
-def _enrich(ticker: str, source_tags: list[str]) -> Optional[LiquidMover]:
+def _enrich(
+    ticker: str,
+    source_tags: list[str],
+    grouped_today_map: Optional[dict[str, dict]] = None,
+    grouped_prev_map: Optional[dict[str, dict]] = None,
+) -> Optional[LiquidMover]:
     """Pull daily bars + snapshot + reference data; build LiquidMover or return None on failure."""
+    grouped_bar = (grouped_today_map or {}).get(ticker)
+    prev_grouped = (grouped_prev_map or {}).get(ticker)
     try:
         bars = massive.daily_aggregates(ticker, lookback_days=300)
-        if not bars or len(bars) < 21:
+    except Exception:
+        bars = []
+    if bars and len(bars) >= 21:
+        last = bars[-1]
+        prev = bars[-2] if len(bars) >= 2 else None
+
+        last_close = float(last.get("c") or 0)
+        if last_close < DEFAULT_MIN_PRICE:
             return None
-    except Exception as e:
-        return None
 
-    last = bars[-1]
-    prev = bars[-2] if len(bars) >= 2 else None
+        open_ = float(last.get("o") or 0)
+        high = float(last.get("h") or 0)
+        low = float(last.get("l") or 0)
+        vol = float(last.get("v") or 0)
 
-    last_close = float(last.get("c") or 0)
-    if last_close < DEFAULT_MIN_PRICE:
-        return None
+        avg_v_20 = massive.avg_volume(bars, 20) or 0
+        dollar_vol = (vol * last_close) / 1e6  # millions
+        if dollar_vol < DEFAULT_MIN_DOLLAR_VOL_M:
+            return None
 
-    open_ = float(last.get("o") or 0)
-    high = float(last.get("h") or 0)
-    low = float(last.get("l") or 0)
-    vol = float(last.get("v") or 0)
+        atr = massive.wilder_atr(bars, 14)
+        atr_pct = (atr / last_close) if (atr and last_close > 0) else None
+        sma20 = massive.sma(bars, 20)
+        sma50 = massive.sma(bars, 50)
+        sma200 = massive.sma(bars, 200)
 
-    avg_v_20 = massive.avg_volume(bars, 20) or 0
-    dollar_vol = (vol * last_close) / 1e6  # millions
-    if dollar_vol < DEFAULT_MIN_DOLLAR_VOL_M:
-        return None
+        pct_1d = ((last_close / float(prev["c"])) - 1) if prev and float(prev.get("c") or 0) > 0 else None
+        pct_5d = massive.pct_change(bars, 5)
+        pct_from_open = ((last_close / open_) - 1) if open_ > 0 else None
+        gap = ((open_ / float(prev["c"])) - 1) if prev and float(prev.get("c") or 0) > 0 else None
+        hod_dist = ((high - last_close) / last_close) if last_close > 0 else None
+        lod_dist = ((last_close - low) / last_close) if last_close > 0 else None
+        vol_ratio = (vol / avg_v_20) if avg_v_20 > 0 else None
 
-    atr = massive.wilder_atr(bars, 14)
-    atr_pct = (atr / last_close) if (atr and last_close > 0) else None
-    sma20 = massive.sma(bars, 20)
-    sma50 = massive.sma(bars, 50)
-    sma200 = massive.sma(bars, 200)
-
-    pct_1d = ((last_close / float(prev["c"])) - 1) if prev and float(prev.get("c") or 0) > 0 else None
-    pct_5d = massive.pct_change(bars, 5)
-    pct_from_open = ((last_close / open_) - 1) if open_ > 0 else None
-    gap = ((open_ / float(prev["c"])) - 1) if prev and float(prev.get("c") or 0) > 0 else None
-    hod_dist = ((high - last_close) / last_close) if last_close > 0 else None
-    lod_dist = ((last_close - low) / last_close) if last_close > 0 else None
-    vol_ratio = (vol / avg_v_20) if avg_v_20 > 0 else None
-
-    extension = False
-    if atr and sma20 and atr > 0:
-        extension = (last_close - sma20) / atr > 2.0
+        extension = False
+        if atr and sma20 and atr > 0:
+            extension = (last_close - sma20) / atr > 2.0
+    else:
+        if not grouped_bar:
+            return None
+        last_close = float(grouped_bar.get("c") or 0)
+        if last_close < DEFAULT_MIN_PRICE:
+            return None
+        open_ = float(grouped_bar.get("o") or 0)
+        high = float(grouped_bar.get("h") or 0)
+        low = float(grouped_bar.get("l") or 0)
+        vol = float(grouped_bar.get("v") or 0)
+        dollar_vol = (vol * last_close) / 1e6
+        if dollar_vol < DEFAULT_MIN_DOLLAR_VOL_M:
+            return None
+        prev_close = float(prev_grouped.get("c") or 0) if prev_grouped else 0
+        prev_vol = float(prev_grouped.get("v") or 0) if prev_grouped else 0
+        pct_1d = ((last_close / prev_close) - 1) if prev_close > 0 else None
+        pct_5d = None
+        pct_from_open = ((last_close / open_) - 1) if open_ > 0 else None
+        gap = ((open_ / prev_close) - 1) if prev_close > 0 else None
+        hod_dist = ((high - last_close) / last_close) if last_close > 0 else None
+        lod_dist = ((last_close - low) / last_close) if last_close > 0 else None
+        vol_ratio = (vol / prev_vol) if prev_vol > 0 else None
+        atr = None
+        atr_pct = None
+        sma20 = None
+        sma50 = None
+        sma200 = None
+        extension = False
 
     # --- snapshot for spread (best-effort, may fail in off-hours or unauthorized tier) ---
     spread_pct = None
@@ -305,12 +338,19 @@ def scan_market(
     """
     # ---- discovery ----
     src_to_tickers: dict[str, list[str]] = {}
+    grouped_gainers, grouped_unusual, grouped_today = _discover_from_grouped()
+    prev_day = _last_trading_day(1)
+    try:
+        grouped_prev_rows = massive.grouped_daily(prev_day)
+    except Exception:
+        grouped_prev_rows = []
+    grouped_prev_map = {b.get("T"): b for b in grouped_prev_rows if b.get("T")}
 
-    snaps = _discover_from_snapshots()
+    snaps = {"top_gainer": grouped_gainers, "high_volume_breakout": grouped_unusual}
     src_to_tickers.update(snaps)
 
     if include_unusual_vol:
-        src_to_tickers["unusual_volume"] = _unusual_volume_from_all()
+        src_to_tickers["unusual_volume"] = grouped_unusual
 
     if include_etfs:
         src_to_tickers["etf_universe"] = etf_universe()
@@ -334,7 +374,10 @@ def scan_market(
     # ---- enrichment ----
     out: list[LiquidMover] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_enrich, t, tags): t for t, tags in ticker_tags.items()}
+        futures = {
+            pool.submit(_enrich, t, tags, grouped_today, grouped_prev_map): t
+            for t, tags in ticker_tags.items()
+        }
         try:
             completed = as_completed(futures, timeout=120)
             for f in completed:

@@ -131,31 +131,51 @@ Current implemented behavior:
 - Repo can be inferred from `repo_path`, `repository_path`, `repo`, `repository`, `workspace`, or `repo_slug`.
 - Goal is inferred from title/summary/description.
 - Acceptance criteria is passed through when present.
-- Launch is currently policy-driven and script-backed, not yet enforced by a deterministic Task Manager state transition.
-- Initial watcher implementation now exists at:
+- Task Manager now owns the auto-launch readiness queue through `auto_launch_enabled`, `launch_state`, `launch_error`, `last_launch_at`, and the internal `launch_signature`.
+- Task Manager now performs the first deterministic queue step itself when a code-backed issue becomes ready.
+- The canonical launch path is:
+  - Task Manager issue update
+  - detached spawn of `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --execute`
+  - lane routing through `/home/aaron/.openclaw/scripts/launch-coding-task.sh`
+  - launcher result postback to Task Manager via `POST /api/issues/{id}/launch-result`
+- Optional observer/backup watcher still exists at:
   - `/home/aaron/.openclaw/scripts/tm-ready-watcher.sh`
-  - current mode: safe polling with persistent launch-signature state
+  - current mode: safe polling that consumes Task Manager readiness state, adopts externally queued launches without duplicating them, and can still perform controlled execute-mode launches when explicitly invoked
   - current default: dry-run unless `--execute`
 
 Readiness contract for automatic launch:
+- `auto_launch_enabled = true`
+- `launch_state = ready` for Task Manager queueing
+- `launch_state = queued` once Task Manager has detached the canonical launcher
+- `launch_state = launched|failed` after launcher postback records the real execution outcome
 - `assigned_to` present and maps to `Jerry|Resi|Druck|Dwight`
 - repo path resolvable to an absolute local checkout
 - branch present for code-bearing stories
 - goal/title concrete enough to execute
 - acceptance criteria present
-- issue description contains explicit opt-in marker `AUTO_LAUNCH_READY`
 - story is code-backed, not admin-only
+- no approval-gated language such as "awaiting approval" or "requires sign-off"
 
 Automation boundary:
 - Auto-start is appropriate once readiness contract is satisfied.
 - Auto-PR creation is appropriate after code/tests/evidence exist.
 - Auto-merge, deploy, external sends, account changes, and destructive operations remain approval-gated.
 
+Current operator visibility:
+- Task Manager Search now exposes preset operator views for:
+  - ready but not queued
+  - queued/launched without recent evidence
+  - in progress without PR-open evidence
+- this is now the primary operator surface for backlog/launch hygiene before adding more automation
+
 Watcher re-entry rule:
 - initial watcher behavior is conservative
-- one ready signature launches once
+- one Task Manager launch signature launches once per watcher mode
+- `launch_state=queued` is treated as already queued/launched by Task Manager and is recorded, not relaunched
 - comment-only progress does not requeue work
 - a real issue edit in Task Manager can create a new ready signature and permit re-launch
+- queue discipline default is one active `queued|launched` code task per executing agent at a time
+- structured completion evidence now requires explicit branch and PR status, even when no PR is opened
 
 ## 10) ASCII architecture diagram
 
@@ -208,12 +228,12 @@ Watcher re-entry rule:
 
 - ACP-ready lane selection can still fail in some runtime contexts if harness binary is unavailable in that execution environment (example observed: `spawn copilot ENOENT`).
 - This is mitigated by implemented runtime fallback to `codex-subagent`, but root environment parity should still be fixed.
-- Task Manager launch is not yet enforced by a deterministic server-side trigger; it still depends on Dwight following policy or Aaron invoking `run issue ...`.
-- PR creation/update is not yet described as a first-class completion contract in the launcher path.
+- Queue discipline is still loose when several ready issues for the same agent become valid at once; a per-agent ordering policy would make operations cleaner.
+- Evidence postback now exists, but the broader completion contract still needs stronger standardization around PR creation/update and end-state hygiene.
 
 ## 13) Decision boundary
 
 - Use Task Flow only for multi-step pipelines.
 - Use single detached task for one coding outcome.
 - Keep lane vocabulary, preflight checks, and fallback semantics unchanged unless script behavior is intentionally revised in the same change set.
-- Use `workspace/docs/task-manager-execution-automation-plan.md` as the rollout source of truth for moving from policy-driven launch to deterministic launch.
+- Use `workspace/docs/task-manager-execution-automation-plan.md` as the rollout source of truth for the remaining cleanup and hardening after deterministic launch.

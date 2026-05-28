@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timezone, date as _dt_date
 from typing import Optional
 
-from . import scoring
-from .adapters import alpaca, finnhub, fmp, massive, schwab
+from . import catalyst_verifier, scoring
+from .adapters import alpaca, finnhub, fmp, massive
 from .http_util import now_iso
 from .regime import RegimeResult
 from .schema import CandidateRecord, CatalystType
@@ -56,6 +56,16 @@ def _date_str(d: Optional[str] = None) -> str:
 
 def _resolve_catalyst(ticker: str, r: CandidateRecord) -> tuple[bool, str, Optional[dict]]:
     """Return (catalyst_pass, catalyst_type, supporting_payload)."""
+    verified = catalyst_verifier.verify(ticker, days_back=14, allow_sympathy=True)
+    if verified.catalyst_type != CatalystType.NONE.value:
+        if verified.catalyst_type == CatalystType.SECTOR_SYMPATHY_CONFIRMED.value:
+            r.sector_sympathy_flag = True
+        elif verified.catalyst_type == CatalystType.GUIDANCE_RAISE.value:
+            r.guidance_raise_flag = True
+        elif verified.catalyst_type == CatalystType.MAJOR_CORPORATE_EVENT.value:
+            r.major_event_flag = True
+        r.catalyst_notes = verified.catalyst_headline
+
     try:
         ec = finnhub.earnings_calendar(ticker, days_back=14)
     except Exception as e:
@@ -77,6 +87,14 @@ def _resolve_catalyst(ticker: str, r: CandidateRecord) -> tuple[bool, str, Optio
             r.guidance_raise_flag = True
         return True, CatalystType.EARNINGS_DOUBLE_BEAT.value, db
 
+    if verified.catalyst_type == CatalystType.SECTOR_SYMPATHY_CONFIRMED.value:
+        return True, verified.catalyst_type, {
+            "headline": verified.catalyst_headline,
+            "date": verified.catalyst_date,
+            "source": verified.catalyst_source,
+            "confidence": verified.catalyst_confidence,
+        }
+
     if finnhub.detect_guidance_raise(news):
         r.guidance_raise_flag = True
         return True, CatalystType.GUIDANCE_RAISE.value, None
@@ -86,6 +104,14 @@ def _resolve_catalyst(ticker: str, r: CandidateRecord) -> tuple[bool, str, Optio
         r.major_event_flag = True
         r.catalyst_notes = f"{ev.get('_event_category')}: {ev.get('headline')}"
         return True, CatalystType.MAJOR_CORPORATE_EVENT.value, ev
+
+    if verified.catalyst_type != CatalystType.NONE.value:
+        return True, verified.catalyst_type, {
+            "headline": verified.catalyst_headline,
+            "date": verified.catalyst_date,
+            "source": verified.catalyst_source,
+            "confidence": verified.catalyst_confidence,
+        }
 
     return False, CatalystType.NONE.value, None
 
@@ -231,7 +257,11 @@ def _populate_alpaca_live(ticker: str, r: CandidateRecord) -> None:
 # ---------- portfolio fit ----------
 
 def _populate_portfolio_fit(ticker: str, r: CandidateRecord) -> None:
-    held = schwab.position_tickers()
+    held = []
+    for p in alpaca.positions():
+        sym = (p.get("symbol") or "").upper()
+        if sym:
+            held.append(sym)
     sec, fac = _sector_for(ticker.upper())
     r.sector = sec; r.factor = fac
     held_specs = {_sector_for(h) for h in held}
@@ -315,12 +345,12 @@ def normalize(
     except Exception as e:
         r.add_error(f"fmp: {e}")
 
-    # 4. portfolio fit (Schwab read-only)
+    # 4. portfolio fit (Alpaca paper book)
     try:
         _populate_portfolio_fit(ticker, r)
-        r.sources_used.append("schwab")
+        r.sources_used.append("alpaca_positions")
     except Exception as e:
-        r.add_error(f"schwab: {e}")
+        r.add_error(f"alpaca_positions: {e}")
 
     # 5. sector support
     try:

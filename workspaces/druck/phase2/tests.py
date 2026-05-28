@@ -4,13 +4,18 @@ Run: `python3 -m phase2.tests`
 """
 from __future__ import annotations
 
+import sqlite3
 import sys
+import tempfile
+import threading
+import time
 import traceback
+from pathlib import Path
 
 from .schema import (
     CandidateRecord, RecommendationClass, Regime, SetupState, CatalystType,
 )
-from . import scoring, ats_v6, candidate_decisions
+from . import scoring, ats_v6, candidate_decisions, db
 from .setup_classifier import SetupInputs, classify as classify_setup
 from .regime import classify as classify_regime
 
@@ -33,6 +38,7 @@ def test_regime():
     check(classify_regime(400, 405, 395, 20, 0.0)[0] == Regime.CAUTION.value, "caution below 20d MA")
     check(classify_regime(400, 405, 395, 40, 0.0)[0] == Regime.CRISIS.value, "crisis VIX>35")
     check(classify_regime(400, 405, 395, 22, -0.06)[0] == Regime.CRISIS.value, "crisis spy 5d -6%")
+    check(classify_regime(420, 415, 405, None, 0.01)[0] == Regime.MACRO_UNKNOWN.value, "missing VIX becomes macro unknown")
 
 
 def test_setup_classifier():
@@ -182,6 +188,34 @@ def test_alpha_ranker_regime_overlay():
     check(s_crisis.score <= 30, f"crisis caps at 30, got {s_crisis.score}")
 
 
+def test_sector_sympathy_catalyst():
+    print("\n[catalyst sympathy]")
+    from . import catalyst_verifier as cv
+
+    orig_quote = cv.finnhub.quote
+    orig_verify = cv.verify
+    try:
+        cv.finnhub.quote = lambda ticker: {"dp": 19.3}
+
+        def fake_verify(ticker, *, days_back=14, allow_sympathy=True):
+            if ticker == "NVDA" and not allow_sympathy:
+                return cv.CatalystResult(
+                    ticker="NVDA",
+                    catalyst_type="earnings_double_beat",
+                    catalyst_source="finnhub.earnings_calendar",
+                    catalyst_date="2026-05-20",
+                    catalyst_confidence=0.9,
+                )
+            return orig_verify(ticker, days_back=days_back, allow_sympathy=allow_sympathy)
+
+        cv.verify = fake_verify
+        res = cv._detect_sector_sympathy("MU", days_back=14)
+        check(res is not None and res.catalyst_type == "sector_sympathy_confirmed", "MU detects sector sympathy")
+    finally:
+        cv.finnhub.quote = orig_quote
+        cv.verify = orig_verify
+
+
 def test_universe():
     print("\n[universe]")
     from .universe import etf_universe, is_junk_ticker, sector_etf_for
@@ -251,6 +285,25 @@ def test_intraday_limit_plan_rejects_bad_limit():
         intraday_alpha._live_price = orig_live
 
 
+def test_monday_open_execution_blockers():
+    print("\n[monday_open blockers]")
+    from . import monday_open
+
+    risk_cfg = {
+        "hard_gates": {
+            "block_on_unresolved_order_state": True,
+            "block_on_broker_api_instability": True,
+        }
+    }
+    blockers = monday_open._execution_blockers(
+        risk_cfg=risk_cfg,
+        warnings=["alpaca.account failed: boom"],
+        open_orders=[{"id": "1"}],
+    )
+    check(any("open orders" in b for b in blockers), "open orders block execution")
+    check(any("broker/data instability" in b for b in blockers), "broker instability blocks execution")
+
+
 def test_ats_v6_validation():
     print("\n[ats v6]")
     out = ats_v6.validate_to_dict()
@@ -260,14 +313,24 @@ def test_ats_v6_validation():
     check(out["conviction_trade_id"] == "trade-conv-001", "conviction path validation")
     check(out["opportunistic_trade_id"] == "trade-opp-001", "opportunistic path validation")
     check(out["config_summary"]["startup_mode"] == "seed", "startup mode defaults to seed")
+    check(out["config_summary"]["portfolio_size_usd"] == 100000, "portfolio size exposed in config layer")
+    check(out["config_summary"]["broker_mode"] == "alpaca_paper", "broker mode exposed in config layer")
+    check(out["config_summary"]["allowed_instruments"] == ["stocks"], "allowed instruments exposed in config layer")
+    check(out["config_summary"]["engine_types"] == ["conviction", "opportunistic"], "engine types exposed in config layer")
+    storage_paths = out["config_summary"]["storage_paths"] or {}
+    check(storage_paths.get("sqlite_db", "").endswith("sql/ats_v6.db"), "storage paths exposed in config layer")
     alloc = out["config_summary"]["capital_allocation"] or {}
     check(alloc.get("conviction") == 60 and alloc.get("opportunistic") == 30 and alloc.get("cash_reserve") == 10,
           "Aaron capital allocation encoded")
     engine_summary = out.get("report_preview", {}).get("engine_summary", [])
     candidate_summary = out.get("report_preview", {}).get("candidate_decision_summary", [])
+    json_probe = out.get("report_preview", {}).get("json_query_probe", {})
     check(any(r.get("engine") == "conviction" for r in engine_summary), "report includes conviction engine")
     check(any(r.get("engine") == "opportunistic" for r in engine_summary), "report includes opportunistic engine")
     check(any(r.get("decision") == "trade" for r in candidate_summary), "report includes candidate decision summary")
+    check(json_probe.get("spread_bps") == 8.0, "entry_conditions_json is queryable via json_extract")
+    check(json_probe.get("atr_pct") == 0.025, "entry condition ATR is queryable via json_extract")
+    check(json_probe.get("has_stale_quote_flag") == 0, "data_quality_flags_json is queryable via json_each")
 
 
 def test_candidate_decision_replay():
@@ -286,6 +349,68 @@ def test_candidate_decision_replay():
     check(decisions.get("replay-reject-001") == "reject", "reject decision listed")
 
 
+def test_sqlite_wal_and_busy_timeout():
+    print("\n[sqlite policy]")
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "ats_v6_test.db"
+        ats_v6.initialize_database(db_path)
+
+        with db.connect(db_path) as conn:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+
+        check(str(journal_mode).lower() == "wal", f"journal mode is WAL, got {journal_mode}")
+        check(int(busy_timeout) >= 30000, f"busy timeout configured, got {busy_timeout}")
+
+
+def test_sqlite_writer_waits_instead_of_immediate_lock_failure():
+    print("\n[sqlite contention]")
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "ats_v6_lock_test.db"
+        ats_v6.initialize_database(db_path)
+
+        acquired = threading.Event()
+        release = threading.Event()
+        writer_done = threading.Event()
+        outcome: dict[str, object] = {}
+
+        def hold_write_lock() -> None:
+            with db.connect(db_path, write=True) as conn:
+                acquired.set()
+                release.wait(timeout=2.0)
+                conn.commit()
+
+        def contending_writer() -> None:
+            acquired.wait(timeout=1.0)
+            started = time.monotonic()
+            try:
+                with db.connect(db_path, write=True) as conn:
+                    conn.execute("SELECT 1")
+                    conn.commit()
+                outcome["waited"] = time.monotonic() - started
+                outcome["ok"] = True
+            except sqlite3.OperationalError as exc:
+                outcome["error"] = str(exc)
+                outcome["ok"] = False
+            finally:
+                writer_done.set()
+
+        t1 = threading.Thread(target=hold_write_lock)
+        t2 = threading.Thread(target=contending_writer)
+        t1.start()
+        t2.start()
+
+        check(acquired.wait(timeout=1.0), "primary writer acquired lock")
+        time.sleep(0.2)
+        release.set()
+        check(writer_done.wait(timeout=2.0), "contending writer completed after lock release")
+        t1.join(timeout=1.0)
+        t2.join(timeout=1.0)
+
+        check(outcome.get("ok") is True, f"contending writer succeeded: {outcome}")
+        check(float(outcome.get("waited") or 0.0) >= 0.15, f"writer waited for lock release, got {outcome.get('waited')}")
+
+
 def main():
     for fn in (
         test_regime, test_setup_classifier, test_scoring_buy_ready,
@@ -293,9 +418,12 @@ def main():
         test_scoring_crisis_overlay, test_scoring_incomplete,
         test_vol_efficiency_bounds,
         test_alpha_ranker, test_alpha_ranker_extended, test_alpha_ranker_regime_overlay,
+        test_sector_sympathy_catalyst,
         test_universe, test_candidate_pool_dataclass, test_cache_manager,
         test_intraday_limit_plan_live_price_and_guard, test_intraday_limit_plan_rejects_bad_limit,
+        test_monday_open_execution_blockers,
         test_ats_v6_validation, test_candidate_decision_replay,
+        test_sqlite_wal_and_busy_timeout, test_sqlite_writer_waits_instead_of_immediate_lock_failure,
     ):
         try:
             fn()

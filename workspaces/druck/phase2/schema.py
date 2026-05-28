@@ -14,6 +14,7 @@ from enum import Enum
 class Regime(str, Enum):
     RISK_ON = "risk_on"
     NEUTRAL = "neutral"
+    MACRO_UNKNOWN = "macro_unknown"
     CAUTION = "caution"
     RISK_OFF = "risk_off"
     CRISIS = "crisis"
@@ -91,6 +92,10 @@ class CandidateRecord:
     reclaim_flag: bool = False
     overextended_flag: bool = False
     rsi_14: Optional[float] = None
+    post_earnings_high: Optional[float] = None
+    pre_event_close: Optional[float] = None
+    sold_off_since_earnings: bool = False
+    reclaim_on_volume: bool = False
 
     # ---- analyst sentiment (FMP) ----
     fmp_consensus: Optional[str] = None
@@ -163,7 +168,7 @@ class CandidateRecord:
         self.errors.append(msg)
 
 
-# Header order written to the Candidates sheet (matches PHASE_II_PLAN.md §8).
+# Header order written to the Candidates sheet (matches the retained candidate schema in the PM model).
 CANDIDATES_HEADER: list[str] = [
     "date", "ticker", "regime", "setup_state", "verified_catalyst_type",
     "catalyst_pass", "eps_actual", "eps_estimate", "revenue_actual",

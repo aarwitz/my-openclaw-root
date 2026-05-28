@@ -1,6 +1,6 @@
 # Phase II Quant Calibration & Rule Definitions
 
-Companion to [`PHASE_II_PLAN.md`](../PHASE_II_PLAN.md). This is where every
+Companion to [`AUTONOMOUS_PM_OPERATING_MODEL.md`](../AUTONOMOUS_PM_OPERATING_MODEL.md). This is where every
 "why this number?" answer lives so calibration can be reviewed in one place.
 
 All constants are in [`phase2/scoring.py`](scoring.py) at the top of the

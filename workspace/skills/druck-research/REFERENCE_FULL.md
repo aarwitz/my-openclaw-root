@@ -6,7 +6,7 @@ metadata: {"openclaw":{"emoji":"📈","os":["linux"]}}
 
 # druck-research
 
-Phase II trading research workflow for Druck. Authoritative spec is `~/.openclaw/workspaces/druck/PHASE_II_PLAN.md`.
+Phase II trading research workflow for Druck. Authoritative spec is `~/.openclaw/workspaces/druck/AUTONOMOUS_PM_OPERATING_MODEL.md`.
 
 ## When to use
 - Aaron asks "what should I buy", "what's on the watchlist", "score X for me", "Monday picks", "weekly research"

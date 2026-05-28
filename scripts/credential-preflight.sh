@@ -13,6 +13,7 @@ PREFLIGHT_CACHE_DIR="${HOME}/.openclaw/tmp/preflight-cache"
 GOOGLE_CHECK_TTL_SEC="${GOOGLE_CHECK_TTL_SEC:-14400}"
 GH_ROUTER_BIN="/home/aaron/.openclaw/scripts/gh-account-router.sh"
 GOG_ROUTER_BIN="/home/aaron/.openclaw/scripts/gog-account-router.sh"
+CF_ROUTER_BIN="/home/aaron/.openclaw/scripts/cloudflare-account-router.sh"
 GH_MCP_VALIDATE_BIN="/home/aaron/.openclaw/scripts/validate-github-mcp-official.sh"
 GOOGLE_MCP_VALIDATE_BIN="/home/aaron/.openclaw/scripts/validate-google-workspace-mcp-readonly.sh"
 OPENCLAW_BIN="${OPENCLAW_BIN:-}"
@@ -124,6 +125,7 @@ check "github mcp quick validation" "$GH_MCP_VALIDATE_BIN" --quick
 
 # --- Google router presence ---
 check "google account router present" test -x "$GOG_ROUTER_BIN"
+check "cloudflare account router present" test -x "$CF_ROUTER_BIN"
 
 # --- Google ---
 if gog auth list --check --no-input >/dev/null 2>&1; then
@@ -134,8 +136,13 @@ else
   failures=$((failures + 1))
 fi
 
+check_output "google account (jerry/main)" "^aaronclawrsl@gmail\\.com$" \
+  "$GOG_ROUTER_BIN" --agent main --print-account
 check "google workspace mcp validator present" test -x "$GOOGLE_MCP_VALIDATE_BIN"
 check "google workspace mcp readonly validation" "$GOOGLE_MCP_VALIDATE_BIN"
+check "cloudflare default token verify" "$CF_ROUTER_BIN" --mode default --verify
+check_output "cloudflare worker token path" "^/home/aaron/\\.openclaw/credentials/cloudflare/account-token\\.bak$" \
+  "$CF_ROUTER_BIN" --mode worker-mutate --print-token-path
 check_google_service "drive probe" gog drive search 'owner:me' --max 1 --no-input
 check_google_service "gmail probe" gog gmail search 'newer_than:7d' --max 1 --no-input
 check_google_service "calendar probe" gog calendar calendars --max 1 --no-input

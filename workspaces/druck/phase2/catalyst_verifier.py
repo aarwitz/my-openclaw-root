@@ -14,6 +14,14 @@ from typing import Optional
 from .adapters import finnhub
 from .schema import CatalystType
 
+SECTOR_SYMPATHY_PEERS: dict[str, list[str]] = {
+    "MU": ["NVDA", "AVGO", "AMD", "SMCI", "MRVL"],
+    "AVGO": ["NVDA", "MU", "AMD", "SMCI", "MRVL"],
+    "AMD": ["NVDA", "AVGO", "MU", "SMCI", "MRVL"],
+    "SMCI": ["NVDA", "AVGO", "MU", "AMD", "MRVL"],
+    "MRVL": ["NVDA", "AVGO", "MU", "AMD", "SMCI"],
+}
+
 
 @dataclass
 class CatalystResult:
@@ -28,7 +36,7 @@ class CatalystResult:
         return asdict(self)
 
 
-def verify(ticker: str, *, days_back: int = 14) -> CatalystResult:
+def verify(ticker: str, *, days_back: int = 14, allow_sympathy: bool = True) -> CatalystResult:
     """Run full catalyst-verification chain for one ticker. Always returns a result."""
     res = CatalystResult(ticker=ticker.upper())
 
@@ -92,7 +100,13 @@ def verify(ticker: str, *, days_back: int = 14) -> CatalystResult:
             except Exception:
                 pass
 
-    # ---- 4. nothing found ----
+    # ---- 4. sector sympathy — large move confirmed by peer catalyst cluster ----
+    if allow_sympathy:
+        sympathy = _detect_sector_sympathy(ticker, days_back=days_back)
+        if sympathy:
+            return sympathy
+
+    # ---- 5. nothing found ----
     return res
 
 
@@ -120,3 +134,38 @@ def verify_many(tickers: list[str], *, workers: int = 6, days_back: int = 14) ->
             except Exception:
                 pass
     return out
+
+
+def _detect_sector_sympathy(ticker: str, *, days_back: int) -> Optional[CatalystResult]:
+    peers = SECTOR_SYMPATHY_PEERS.get(ticker.upper())
+    if not peers:
+        return None
+    try:
+        q = finnhub.quote(ticker)
+    except Exception:
+        return None
+    day_pct = q.get("dp")
+    try:
+        day_pct_f = float(day_pct)
+    except (TypeError, ValueError):
+        return None
+    if day_pct_f < 8.0:
+        return None
+
+    for peer in peers:
+        peer_res = verify(peer, days_back=days_back, allow_sympathy=False)
+        if peer_res.catalyst_type in {
+            CatalystType.EARNINGS_DOUBLE_BEAT.value,
+            CatalystType.GUIDANCE_RAISE.value,
+            CatalystType.MAJOR_CORPORATE_EVENT.value,
+            CatalystType.ANALYST_REVISION_CLUSTER.value,
+        }:
+            return CatalystResult(
+                ticker=ticker.upper(),
+                catalyst_type=CatalystType.SECTOR_SYMPATHY_CONFIRMED.value,
+                catalyst_source="peer_sympathy",
+                catalyst_headline=f"{ticker.upper()} +{day_pct_f:.1f}% with peer catalyst in {peer}",
+                catalyst_date=peer_res.catalyst_date,
+                catalyst_confidence=0.65,
+            )
+    return None

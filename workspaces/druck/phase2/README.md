@@ -1,14 +1,13 @@
 # Druck Phase II Pipeline
 
 Lightweight, deterministic Phase II trading-research pipeline implementing
-[`PHASE_II_PLAN.md`](../PHASE_II_PLAN.md), [`SOFTWARE_DEV_SPEC.md`](../SOFTWARE_DEV_SPEC.md),
-and [`QUANT_DEV_SPEC.md`](../QUANT_DEV_SPEC.md).
+[`AUTONOMOUS_PM_OPERATING_MODEL.md`](../AUTONOMOUS_PM_OPERATING_MODEL.md).
 
 ## Design principles
 
 - **Rules-first, not ML.** Every score and class derives from explicit rules.
 - **Source authority.** Finnhub = catalyst truth, Massive = price-structure truth,
-  Alpaca = live-execution truth, FMP = analyst-sentiment support, Schwab = real-book truth.
+  Alpaca = account/live-execution truth, FMP = analyst-sentiment support.
 - **Fail closed.** Missing primary inputs degrade class — never assume favorable.
 - **Idempotent.** All sheet writes keyed by `(date, ticker)`.
 - **Auditable.** Every scored row carries the raw inputs that produced it.
@@ -27,7 +26,6 @@ phase2/
 │   ├── massive.py             daily aggregates, ATR, dollar volume, regime
 │   ├── alpaca.py              account, positions, quotes, orders (paper)
 │   ├── fmp.py                 grades, ratings snapshot, price-target context
-│   ├── schwab.py              cached positions reader (read-only here)
 │   └── sheets.py              gog wrapper for Candidates/Outcomes idempotent I/O
 ├── regime.py                  SPY/VIX → regime label
 ├── setup_classifier.py        rule-based setup-state assignment
@@ -105,4 +103,4 @@ otherwise; read back and assert before claiming success.
 ## Non-goals
 
 No live broker execution. No options pricing (Phase III). No social-media
-ingestion (Phase III). No ML ranking. No Schwab order placement.
+ingestion (Phase III). No ML ranking.

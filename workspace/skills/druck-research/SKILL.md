@@ -6,7 +6,7 @@ metadata: {"openclaw":{"emoji":"📈","os":["linux"]}}
 
 # druck-research Router (Lean + Deterministic)
 
-Authoritative strategy spec remains: `~/.openclaw/workspaces/druck/PHASE_II_PLAN.md`.
+Authoritative strategy spec remains: `~/.openclaw/workspaces/druck/AUTONOMOUS_PM_OPERATING_MODEL.md`.
 
 ## Operation Table
 

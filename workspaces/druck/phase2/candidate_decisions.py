@@ -6,6 +6,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
+from . import db
 from .ats_v6 import DEFAULT_DB_PATH, initialize_database
 
 
@@ -35,12 +36,9 @@ class CandidateDecision:
         return row
 
 
-def _connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def _connect(db_path: Path = DEFAULT_DB_PATH, *, write: bool = False) -> sqlite3.Connection:
     initialize_database(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return db.connect(db_path, write=write)
 
 
 def upsert_candidate_decision(decision: CandidateDecision, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
@@ -53,7 +51,7 @@ def upsert_candidate_decision(decision: CandidateDecision, db_path: Path = DEFAU
     VALUES ({placeholders})
     ON CONFLICT(candidate_id) DO UPDATE SET {updates}
     """
-    with _connect(db_path) as conn:
+    with _connect(db_path, write=True) as conn:
         conn.execute(sql, [row[c] for c in columns])
         stored = conn.execute(
             "SELECT candidate_id, decision, eventual_trade_id FROM candidate_decisions WHERE candidate_id=?",
@@ -64,7 +62,7 @@ def upsert_candidate_decision(decision: CandidateDecision, db_path: Path = DEFAU
 
 
 def link_trade(candidate_id: str, trade_id: str, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
-    with _connect(db_path) as conn:
+    with _connect(db_path, write=True) as conn:
         conn.execute(
             "UPDATE candidate_decisions SET eventual_trade_id=? WHERE candidate_id=?",
             (trade_id, candidate_id),
@@ -87,7 +85,7 @@ def record_holdout_returns(
     signal_holdout_30d_pnl: float | None = None,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
-    with _connect(db_path) as conn:
+    with _connect(db_path, write=True) as conn:
         conn.execute(
             """
             UPDATE candidate_decisions
