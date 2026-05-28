@@ -11,6 +11,7 @@ from . import (
     candidate_decisions,
     cache_manager,
     catalyst_verifier,
+    checkpoints,
     decision_journal,
     intraday_alpha,
     event_alpha,
@@ -216,6 +217,20 @@ def cmd_intraday_alpha(args):
     _emit(report, args.format)
 
 
+def cmd_checkpoint(args):
+    result = checkpoints.run_checkpoint(
+        args.name,
+        create_intents=not args.no_intents,
+        max_replacements=args.max_replacements,
+        max_rotations=args.max_rotations,
+        scan_limit=args.scan_limit,
+    )
+    if args.format == "text":
+        print(checkpoints.result_to_text(result))
+    else:
+        _emit(asdict(result))
+
+
 def cmd_validate_ats_v6(args):
     out = ats_v6.validate_to_dict()
     _emit(out, args.format)
@@ -314,6 +329,14 @@ def main(argv=None):
     sp_ia.add_argument("--max-total", type=int, default=120)
     sp_ia.add_argument("--no-cache", action="store_true")
     sp_ia.set_defaults(fn=cmd_intraday_alpha)
+
+    sp_cp = sp.add_parser("checkpoint", help="Run one deterministic checkpoint and persist state")
+    sp_cp.add_argument("--name", required=True, choices=("preopen_0900", "morning_1100", "rerank_1330", "close_1530"))
+    sp_cp.add_argument("--no-intents", action="store_true")
+    sp_cp.add_argument("--max-replacements", type=int, default=5)
+    sp_cp.add_argument("--max-rotations", type=int, default=3)
+    sp_cp.add_argument("--scan-limit", type=int, default=30)
+    sp_cp.set_defaults(fn=cmd_checkpoint)
 
     sp_x = sp.add_parser("x-monitor", help="Fetch and normalize X posts for trading signals")
     sp_x.add_argument("--accounts", help="comma-separated usernames")

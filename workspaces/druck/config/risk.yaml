@@ -5,6 +5,7 @@ status: approved_for_v6_buildout
 
 runtime:
   startup_mode: seed
+  portfolio_size_usd: 100000
   allowed_modes:
     - seed
     - normal

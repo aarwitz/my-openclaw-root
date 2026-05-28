@@ -25,34 +25,35 @@ What already exists:
 - Safe watcher scaffold:
   - `/home/aaron/.openclaw/scripts/tm-ready-watcher.sh`
 - Dwight policy already says ready coding issues should launch immediately when repo path is known.
+- Task Manager now performs the deterministic first queue step itself when a code-backed issue becomes ready.
+- Launcher result postback now exists through Task Manager `POST /api/issues/{id}/launch-result`.
 
 What is still missing:
-- deterministic Task Manager state transition trigger
-- enforced readiness gates at the Task Manager layer
-- explicit PR creation/update as a standard completion contract
-- clean exclusion rules so admin/planning tasks do not auto-launch
+- broader end-state hygiene around `launched` vs completed implementation
+- automatic PR opening remains a separate policy choice; current contract requires explicit PR status evidence even when no PR is opened
 
 Current watcher status:
-- scans ready `in_progress` issues
+- scans Task Manager auto-launch issues in `ready|queued`
 - respects readiness contract and executing-agent allowlist
-- persists per-issue launch state
+- persists per-issue launch metadata in watcher state
 - dry-run does not claim the launch signature
-- re-entry is keyed off issue state edits, not comments alone
+- re-entry is keyed off the Task Manager launch signature fields, not comments alone
 - execute mode requires explicit environment gate
 - single-issue execute wrapper exists:
   - `/home/aaron/.openclaw/scripts/tm-ready-launch-once.sh`
-- still needs rollout/invocation wiring and broader execution hardening
+- now acts primarily as observer/backup tooling rather than the primary source of truth
 
 ## 3) Readiness contract
 
 An issue may auto-launch only if all are true:
+- `auto_launch_enabled = true`
+- Task Manager `launch_state` becomes `ready`
 - `assigned_to` is one of `Jerry`, `Resi`, `Druck`, `Dwight`
 - issue is code-backed and repo-executable
 - repo is known via absolute `repo_path` or resolvable `repo_slug`
 - branch is present for code-bearing work
 - title/goal is concrete enough to execute
 - acceptance criteria are present
-- description contains explicit opt-in marker `AUTO_LAUNCH_READY`
 - no unresolved blocker requiring a human first
 
 An issue must not auto-launch if any are true:
@@ -60,24 +61,22 @@ An issue must not auto-launch if any are true:
 - task is planning/admin/research-only with no repo execution path
 - repo is unknown
 - external approval is required before execution
+- Task Manager `launch_state = queued` and the current signature was already adopted by the watcher
 
 ## 4) Trigger model
 
-Target trigger:
+Current trigger:
 - Task Manager issue becomes `in_progress` while satisfying the readiness contract
+- backend recomputes readiness on issue create/update
+- backend detaches the canonical Dwight launcher immediately on the first ready signature
 
-Acceptable interim trigger:
-- Dwight explicitly runs the issue launcher immediately after creating/updating the ready issue
+Optional backup trigger:
+- polling watcher that scans for ready/queued issues and adopts or executes them when explicitly invoked
 
-Longer-term trigger choices:
-1. Task Manager backend event hook on issue update
-2. polling watcher that scans for newly ready issues
-3. hybrid: backend marks ready, watcher launches
-
-Recommended path:
-- start with polling watcher for safety and easier rollback
-- later move to backend event trigger if needed
-- for immediate use, prefer the single-issue execute wrapper before enabling any persistent watcher loop
+Current recommended path:
+- default: rely on Task Manager issue update trigger
+- use `run issue ...` as the operator override
+- use the single-issue watcher execute wrapper only for controlled canaries or recovery
 
 ## 5) Execution contract
 
@@ -88,6 +87,7 @@ When a ready issue triggers:
 4. Pass acceptance criteria through
 5. Launch through `dwight-launch-from-issue.py`
 6. Route through coding lane selection
+7. Post launcher outcome back to Task Manager as `launched` or `failed`
 7. Executing agent owns:
    - implementation
    - tests/checks
@@ -107,7 +107,12 @@ For code-backed issues, done means:
 - code changed or blocker clearly documented
 - targeted validation run
 - Task Manager evidence comment posted
-- PR created or updated unless blocked by a concrete reason
+- PR status explicitly recorded as one of:
+  - `opened`
+  - `not-opened`
+  - `not-needed`
+  - `unknown`
+- PR URL included when `pr_status=opened`
 
 Completion does not imply:
 - auto-merge
@@ -121,23 +126,34 @@ Completion does not imply:
 - Add/confirm required Task Manager issue fields
 - Standardize branch/repo/acceptance criteria requirements
 - Mark code-backed issues explicitly or infer them cleanly
+- Status: implemented for the live TM path
 
 ### Phase 2: deterministic launch
-- Implement a watcher or backend trigger
 - Trigger on `in_progress` + readiness contract satisfied
 - Persist launch metadata and de-duplicate launches
+- Post launcher result back into the issue
+- Status: implemented for the live TM path
 
-### Phase 3: PR automation
+### Phase 3: queue discipline + PR automation
+- Decide whether one agent may have multiple `queued` launches at once
 - Standardize PR title/body from Task Manager issue
 - Post PR link back to Task Manager
 - Require test/evidence summary before PR open
+- Status: queue discipline and explicit PR-status evidence are implemented; automatic PR opening is not
 
 ### Phase 4: hygiene and reporting
 - Add dashboards/searches for:
   - ready but not launched
-  - launched but no progress
+  - queued but no real execution evidence
   - in progress without PR
   - PR open but issue not updated
+- Status: first operator views now exist in Task Manager Search as preset filters for:
+  - `Ready, Not Queued`
+  - `Queued/Launched, No Recent Evidence`
+  - `In Progress, No PR`
+- Legacy normalization note:
+  - completed audit/canary issues should be moved out of `in_progress` once evidence lands
+  - older non-executable items should not remain in `in_progress` without branch/repo/acceptance criteria
 
 ## 8) Safety rules
 
@@ -149,16 +165,17 @@ Completion does not imply:
 
 ## 9) Recommended first implementation
 
-First pilot:
-- use Task Manager issues assigned to `Jerry`
-- watcher scans for ready issues every short interval
-- on first ready transition, launch exactly once and write launch metadata back to Task Manager
-- require PR creation for completion
+First pilot result:
+- live canary issue `#131` proved the clean loop end-to-end:
+  - Task Manager issue update
+  - automatic queue
+  - canonical launcher execution
+  - structured postback through `POST /api/issues/{id}/launch-result`
+  - branch evidence plus explicit `pr_status`
 
-Then extend to:
-- `Resi`
-- `Dwight`
-- `Druck` where repo-backed coding applies
+Next pilot hardening:
+- decide whether PR opening itself should become automatic
+- extend operator reporting if PR-open and stale-evidence views become necessary
 
 ## 10) Source of truth
 

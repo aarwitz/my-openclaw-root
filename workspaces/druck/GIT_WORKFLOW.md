@@ -68,8 +68,7 @@ git blame phase2/scoring.py | grep "extension_penalty"
 - `phase2/setup_classifier.py` — 6-state setup precedence rules
 
 **Documentation:**
-- `PHASE_II_PLAN.md` — Source authority + scoring framework
-- `QUANT_DEV_SPEC.md` — Math formulas + validation criteria
+- `AUTONOMOUS_PM_OPERATING_MODEL.md` — Source authority + scoring framework
 - `phase2/README.md` — Design principles + cache explanation
 - `phase2/RULES.md` — Full calibration reference
 

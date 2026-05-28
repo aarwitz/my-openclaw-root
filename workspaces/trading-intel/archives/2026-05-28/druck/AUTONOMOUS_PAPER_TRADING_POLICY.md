@@ -6,27 +6,24 @@ Purpose: allow Druck to execute a fully autonomous paper-trading loop while keep
 
 ## Account roles
 
-- Schwab: real-book reference only for current holdings, exposure, and portfolio fit
 - Alpaca paper: execution sandbox
 - Druck: research, ranking, paper order placement, monitoring, and postmortem logging
-- Aaron: approves the mandate and can mimic only the paper trades he likes in Schwab
+- Aaron: approves the mandate and reviews the paper system
 
 ## Authorization override
 
 This file overrides the prior Phase II non-goal of "no automated order placement" for Alpaca paper trading only.
-It does not authorize live Schwab trading or any non-paper broker execution.
+It does not authorize any non-paper broker execution.
 
 ## Objective
 
 Primary objective: maximize risk-adjusted paper P&L over repeated 2 to 10 trading day swings.
-Secondary objective: generate a reviewable stream of paper trades Aaron can selectively copy into Schwab.
 
 "Maximize daily profits" is not the operating rule by itself. Druck must prefer repeatable catalyst-backed setups over churn.
 
 ## Allowed actions
 
 Druck may, without additional approval:
-- mirror Schwab equity and ETF positions into Alpaca paper
 - place new Alpaca paper buy and sell orders
 - trim or fully exit Alpaca paper positions
 - cancel Alpaca paper orders
@@ -34,7 +31,6 @@ Druck may, without additional approval:
 
 ## Disallowed actions
 
-- no live Schwab orders
 - no options
 - no short selling
 - no leveraged ETFs unless Aaron explicitly authorizes them later
@@ -67,13 +63,13 @@ Starting limits for autonomous paper trading:
 
 ## Execution style
 
-- market orders are allowed for mirror-sync and high-conviction liquid names
+- market orders are allowed only for explicitly approved policy reasons on highly liquid names
 - use limit orders when spreads are wide or when chasing gap extensions would violate setup discipline
-- avoid placing orders in the first minute after the open unless the order is a mirror-sync or a protective exit
+- avoid placing orders in the first minute after the open unless the order is a protective exit
 
 ## Exit rules
 
-Each discretionary trade should have:
+Each trade should have:
 - entry thesis
 - invalidator
 - falsifier by Wednesday close when applicable
@@ -94,21 +90,19 @@ Every paper order should be logged locally with:
 - side
 - qty
 - order type
-- reason category (`mirror_sync`, `new_entry`, `trim`, `exit`, `rebalance`, `stop`, `cancel`)
-- Phase II metadata for discretionary trades
+- reason category (`new_entry`, `trim`, `exit`, `rebalance`, `stop`, `cancel`)
+- Phase II metadata for new entries
 - related Alpaca order id when available
 
 ## Monday open loop
 
 On market-open days, Druck should:
 1. refresh Alpaca account, orders, and positions
-2. refresh Schwab positions for reference
-3. confirm mirror state or note drift
-4. run macro regime check
-5. review existing Alpaca positions for invalidators and concentration
-6. evaluate up to the top Phase II candidates for up to 2 new trades
-7. place paper orders if qualified
-8. post a concise desk update summarizing what changed and why
+2. run macro regime check
+3. review existing Alpaca positions for invalidators and concentration
+4. evaluate up to the top Phase II candidates for up to 2 new trades
+5. place paper orders if qualified
+6. post a concise desk update summarizing what changed and why
 
 ## Review standard
 

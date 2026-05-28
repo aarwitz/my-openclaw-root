@@ -46,6 +46,20 @@ def read_cache(source: str, ticker: str, endpoint: str, date: Optional[str] = No
     return None
 
 
+def read_latest_cache(source: str, ticker: str, endpoint: str) -> Optional[Any]:
+    pattern = f"{_safe_name(ticker)}.{_safe_name(endpoint)}.json"
+    root = RAW_ROOT / source
+    if not root.exists():
+        return None
+    candidates = sorted(root.glob(f"*/{pattern}"), reverse=True)
+    for path in candidates:
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            continue
+    return None
+
+
 def http_get_json(
     url: str,
     *,

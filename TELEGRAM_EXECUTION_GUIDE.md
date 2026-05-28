@@ -25,7 +25,8 @@ Audience: Aaron operating OpenClaw through Telegram.
 - Dwight has an explicit run contract for coding:
 	- `run issue <id> --repo <abs-path> [--scope ... --expected-files ... --risk ... --acp-available ... --acp-agent ... --agent-timeout ...]`
 - Dwight policy already says ready coding issues should be launched immediately when repo path is known.
-- Fully deterministic Task Manager state-triggered launch is planned, but not yet the current source of truth.
+- Task Manager is now the default deterministic launch source for ready code-backed issues via `auto_launch_enabled` + readiness fields.
+- `run issue ...` remains the operator override when you want to force immediate launch manually.
 
 ## 3) Message format that gets best results
 
@@ -139,6 +140,7 @@ Target behavior:
 - Dwight creates or updates the issue
 - once the readiness contract is satisfied, execution starts automatically
 - assigned agent owns implementation, tests, evidence, branch updates, Task Manager comments, and PR creation
+- only one active `queued|launched` coding issue is allowed per executing agent by default
 - merge/deploy stay approval-gated
 
 ## 8) What to request in every completion
@@ -169,13 +171,14 @@ Never use `systemctl --user restart` for gateway restarts.
 If execution fails:
 
 1. Re-check issue ID and absolute repo path.
-2. Re-run with explicit scope/risk/expected-files.
-3. If ACP path fails at runtime, rely on codex-subagent fallback and request metadata path.
-4. If still blocked, run deterministic CLI launcher from server.
+2. Re-check Task Manager readiness fields: `assigned_to`, `repo_slug`, `branch`, acceptance criteria, and `auto_launch_enabled`.
+3. Re-run with explicit scope/risk/expected-files if using manual override.
+4. If ACP path fails at runtime, rely on codex-subagent fallback and request metadata path.
+5. If still blocked, run deterministic CLI launcher from server.
 
 ## 11) Safe First Live Use
 
-For the first live auto-launch on a real issue:
+For controlled live verification of the auto-launch system on a real issue:
 
 1. Ensure the issue is code-backed and `in_progress`
 2. Ensure it has:
@@ -183,14 +186,26 @@ For the first live auto-launch on a real issue:
    - `repo_slug`
    - `branch`
    - acceptance criteria
-3. Add `AUTO_LAUNCH_READY` to the issue description
-4. Run exactly one controlled execute pass:
+3. Ensure `auto_launch_enabled=true`
+4. Make one real issue edit so Task Manager recomputes readiness and shows `launch_state=ready` or `queued`
+5. If you want a watcher-path canary instead of relying on the normal TM trigger, run exactly one controlled execute pass:
 
 ```bash
 ~/.openclaw/scripts/tm-ready-launch-once.sh --issue-id <tm_id>
 ```
 
-This is preferred over enabling a permanent background loop immediately.
+Normal/default path now:
+- update the issue into a valid ready state in Task Manager
+- Task Manager queues the canonical Dwight launcher itself
+- launcher posts back `launched|failed` evidence into the issue
+- completion evidence should include `branch=... pr_status=...` and `pr_url=...` when a PR is opened
+
+The watcher path is now optional backup/inspection tooling, not the primary source of truth.
+
+Useful operator checks in Task Manager Search now:
+- `Ready, Not Queued`
+- `Queued/Launched, No Recent Evidence`
+- `In Progress, No PR`
 
 ## 12) Bottom line
 

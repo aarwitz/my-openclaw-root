@@ -183,7 +183,93 @@
         }
       },
       {
-        "id": "dwight",
+        "id": "researcher",
+        "workspace": "/home/aaron/.openclaw/workspaces/researcher",
+        "model": "openai/gpt-5.4",
+        "skills": [
+          "newsapi-ai",
+          "finnhub",
+          "massive",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Researcher",
+          "emoji": "\ud83d\udd0e"
+        }
+      },
+      {
+        "id": "quant",
+        "workspace": "/home/aaron/.openclaw/workspaces/quant",
+        "model": "openai/gpt-5.4",
+        "skills": [
+          "massive",
+          "finnhub",
+          "financialmodeling-prep-api",
+          "druck-research"
+        ],
+        "identity": {
+          "name": "Quant",
+          "emoji": "\ud83e\uddee"
+        }
+      },
+      {
+        "id": "trader",
+        "workspace": "/home/aaron/.openclaw/workspaces/trader",
+        "model": "openai/gpt-5.4",
+        "humanDelay": {
+          "mode": "custom",
+          "minMs": 1200,
+          "maxMs": 2400
+        },
+        "groupChat": {
+          "mentionPatterns": [
+            "@druck_rsl_bot\\b"
+          ]
+        },
+        "skills": [
+          "alpaca",
+          "massive",
+          "finnhub",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Trader",
+          "emoji": "\ud83d\udcb0"
+        }
+      },
+      {
+        "id": "critic",
+        "workspace": "/home/aaron/.openclaw/workspaces/critic",
+        "model": "openai/gpt-5.4",
+        "skills": [
+          "newsapi-ai",
+          "finnhub",
+          "massive",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Critic",
+          "emoji": "\u2696\ufe0f"
+        }
+      },
+      {        "id": "archivist",
+        "workspace": "/home/aaron/.openclaw/workspaces/archivist",
+        "model": "openai/gpt-5.4",
+        "skills": [
+          "finnhub",
+          "massive",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Archivist",
+          "emoji": "📚"
+        }
+      },
+      {        "id": "dwight",
         "workspace": "/home/aaron/.openclaw/workspaces/dwight",
         "model": "openai/gpt-5.4",
         "humanDelay": {
@@ -229,7 +315,7 @@
         "channel": "telegram",
         "accountId": "druck"
       },
-      "agentId": "druck"
+      "agentId": "trader"
     },
     {
       "match": {
@@ -248,6 +334,16 @@
   ],
   "tools": {
     "profile": "coding",
+    "agentToAgent": {
+      "enabled": true,
+      "allow": [
+        "researcher",
+        "quant",
+        "trader",
+        "critic",
+        "archivist"
+      ]
+    },
     "web": {
       "search": {
         "enabled": true,

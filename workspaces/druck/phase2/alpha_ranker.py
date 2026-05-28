@@ -189,6 +189,7 @@ REGIME_CAPS = {
     Regime.CRISIS.value:   30.0,
     Regime.RISK_OFF.value: 50.0,
     Regime.CAUTION.value:  70.0,
+    Regime.MACRO_UNKNOWN.value: 100.0,
     Regime.NEUTRAL.value:  100.0,
     Regime.RISK_ON.value:  100.0,
 }
@@ -212,6 +213,8 @@ def _dominant_risk(
 ) -> str:
     if regime in (Regime.CRISIS.value, Regime.RISK_OFF.value):
         return f"regime_{regime}"
+    if regime == Regime.MACRO_UNKNOWN.value:
+        return "macro_unknown"
     if penalties.get("extension", 0) <= -10:
         return "extension"
     if penalties.get("crowding", 0) <= -7:

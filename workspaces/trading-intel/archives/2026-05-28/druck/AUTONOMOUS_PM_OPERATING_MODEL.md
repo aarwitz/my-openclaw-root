@@ -7,6 +7,9 @@ Execution venue: Alpaca paper
 Primary benchmark: SPY
 Secondary hurdle: cash / short-duration Treasury equivalent
 
+This document is the authoritative operating and quantitative strategy spec.
+It supersedes `PHASE_II_PLAN.md`, which has been retired.
+
 ## 1. Purpose
 
 Druck is no longer a Monday-picks reporter.
@@ -258,6 +261,141 @@ Important:
 - even if concentration is allowed, the PM must know when he is making a concentration bet
 
 ## 12. Self-audit rules
+
+Every meaningful action should later be reviewable against:
+- the thesis that justified it
+- the benchmark-relative objective at the time
+- the cash alternative
+- the stated invalidator and falsifier
+- the realized outcome versus expected edge
+
+Minimum audit fields per trade or material hold decision:
+- timestamp
+- sleeve
+- ticker
+- action
+- thesis id
+- trigger
+- invalidator
+- stop logic
+- why this beats `SPY`
+- why this beats cash
+- expected holding horizon
+- realized outcome snapshot at later review
+
+## 13. Quantitative candidate rules
+
+These are the retained deterministic Phase II rules that still govern candidate
+ranking and execution readiness inside the autonomous PM loop.
+
+### 13.1 Source hierarchy
+
+1. Finnhub or primary published-news verification decides catalyst truth.
+2. Massive decides historical price-structure truth.
+3. Alpaca decides live execution-context truth near the open and intraday.
+4. FMP is secondary analyst-sentiment support only.
+
+Fail-closed rules:
+- missing primary catalyst data cannot be treated as neutral
+- sentiment cannot override a failed catalyst gate
+- tape strength cannot substitute for event verification
+- if Alpaca and Massive materially disagree intraday, cap aggressiveness and log `data_discrepancy`
+
+### 13.2 Catalyst gate
+
+No ticker may reach `buy_ready` or `conditional_buy` without at least one
+verified catalyst:
+- `earnings_double_beat`
+- `guidance_raise`
+- `major_corporate_event`
+- `analyst_revision_cluster`
+- `sector_sympathy_confirmed`
+
+If no catalyst gate passes:
+- max class is `watch_only`
+
+### 13.3 Setup-state classification
+
+Every candidate must be labeled exactly one:
+- `breakout_continuation`
+- `post_earnings_drift`
+- `sell_the_news_digestion`
+- `sympathy_momentum`
+- `mean_reversion_bounce`
+- `overextended_chase`
+
+Hard rule:
+- `overextended_chase` can never be `buy_ready`
+
+### 13.4 Scoring buckets
+
+Base score remains a deterministic 0-100 weighted sum:
+- catalyst strength: 30
+- price/volume confirmation: 20
+- setup quality: 15
+- sector support: 10
+- portfolio fit: 10
+- liquidity quality: 5
+- volatility efficiency: 10
+
+Penalties are stored separately and applied after base scoring:
+- extension penalty: 0 to -15
+- crowding penalty: 0 to -10
+- redundancy penalty: 0 to -10
+
+Hard caps:
+- any single penalty <= -10 caps class at `conditional_buy`
+- total penalties <= -20 caps class at `watch_only`
+- liquidity quality = 0 caps class at `watch_only`
+
+### 13.5 Recommendation classes
+
+After penalties and hard rules:
+- `buy_ready`
+- `conditional_buy`
+- `watch_only`
+- `avoid`
+
+Interpretation:
+- `buy_ready` means eligible for autonomous entry if it also survives live execution checks and portfolio replacement logic
+- `conditional_buy` means the idea is directionally valid but not clean enough for aggressive expression
+- `watch_only` means monitor but do not allocate new risk
+- `avoid` means the setup is actively unattractive
+
+### 13.6 Macro regime overlay
+
+The macro regime is applied last:
+- `risk_on`
+- `neutral`
+- `caution`
+- `risk_off`
+- `crisis`
+
+Mandatory downgrades:
+- `risk_off` downgrades all `buy_ready` names to `conditional_buy`
+- `crisis` forces all new candidates to `watch_only`
+
+### 13.7 Risk sizing defaults
+
+Default risk sizing remains volatility-targeted:
+- `conditional_buy`: 1.5% NAV risk
+- `buy_ready`: 2.0% NAV risk
+- position size = `risk_$ / (1.5 x ATR$)`
+- initial stop = `1.5 x ATR` below entry reference
+
+Concentration monitoring remains mandatory:
+- single name: 15% of NAV guideline
+- sector: 35% guideline
+- factor: 50% guideline
+
+These are measurement guardrails, not permission to ignore concentration.
+
+### 13.8 Falsifier discipline
+
+Every `buy_ready` candidate must include a one-line falsifier:
+- what price or event by Wednesday close would prove the thesis wrong
+
+This is required for self-grading and postmortem review.
 
 Every checkpoint must answer:
 - what currently beats `SPY`?

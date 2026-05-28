@@ -1,4 +1,4 @@
-"""Deterministic Phase II scorer (PHASE_II_PLAN.md §4 + QUANT_DEV_SPEC §3).
+"""Deterministic Phase II scorer (AUTONOMOUS_PM_OPERATING_MODEL.md §13.4).
 
 Pure function: takes a `CandidateRecord` populated through normalize() and
 fills the scoring + penalty + class fields. Calibration constants live at

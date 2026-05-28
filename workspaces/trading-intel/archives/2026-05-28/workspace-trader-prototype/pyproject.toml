@@ -1,0 +1,11 @@
+[project]
+name = "trader-state"
+version = "0.1.0"
+description = "Prototype shared-state contract for the Druck trading system."
+requires-python = ">=3.10"
+dependencies = [
+  "pydantic>=2.5,<3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

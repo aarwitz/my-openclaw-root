@@ -1,4 +1,4 @@
-"""Rule-based setup-state classifier (PHASE_II_PLAN.md §3, QUANT_DEV_SPEC §1).
+"""Rule-based setup-state classifier (AUTONOMOUS_PM_OPERATING_MODEL.md §13.3).
 
 All rules are deterministic and operate on derived structural fields. Setup
 labels are mutually exclusive — precedence below resolves multi-true cases.

@@ -64,6 +64,36 @@ def _alpaca_positions_map() -> dict[str, dict]:
     return out
 
 
+def _build_targeted_universe(
+    held: set[str],
+    generated: list[str],
+    curated: list[str],
+    extra_seed: Optional[list[str]],
+    max_total: int,
+) -> list[str]:
+    """Build a mixed scan list so holdings don't crowd out replacements."""
+    prioritized_held = sorted(held)[: max(3, min(len(held), max_total // 3))]
+    ordered_groups = [
+        prioritized_held,
+        [t.upper() for t in (extra_seed or [])],
+        generated,
+        curated,
+        sorted(held),
+    ]
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in ordered_groups:
+        for ticker in group:
+            ticker = ticker.upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            out.append(ticker)
+            if len(out) >= max_total:
+                return out
+    return out
+
+
 
 def _benchmark_stats() -> dict:
     acct = alpaca.account()
@@ -222,12 +252,13 @@ def run(*, objective: str = DEFAULT_OBJECTIVE, cash_hurdle_apr: float = DEFAULT_
     held = set(pos_map.keys())
     generated = [cp.ticker for cp in candidate_gen.generate_pools(seed=extra_seed, max_total=20, include_ipos=False, include_movers=False)]
     curated = ['SPY','IWM','QQQ','TQQQ','XLE','XLK','XLI','XLV','XLF','XLP','XLY','XLC','TLT','ROBO','WM','RSG','ZTS','PANW','CRWD','ANET','UBER','OXY','DKNG','OKLO','RDDT','GOOG','NVDA','CEG','VST','NRG','VRT','CLS','TSM','RKLB']
-    targeted = list(dict.fromkeys(list(held) + (extra_seed or []) + curated + generated))[:max_total]
+    targeted = _build_targeted_universe(held, generated, curated, extra_seed, max_total)
 
     def do_scan():
         return [m.as_dict() for m in _targeted_scan(targeted)]
 
-    movers_raw = cache_manager.get_or_compute("intraday_alpha_scan", 300, do_scan) if use_cache else do_scan()
+    scan_key = f"intraday_alpha_scan_{max_total}_{abs(hash(tuple(targeted))) % 100000}"
+    movers_raw = cache_manager.get_or_compute(scan_key, 300, do_scan) if use_cache else do_scan()
     movers = [LiquidMover(**m) for m in movers_raw]
     regime = regime_mod.compute()
     # Candidate universe: current book + discovered names + focused seeds
@@ -247,7 +278,8 @@ def run(*, objective: str = DEFAULT_OBJECTIVE, cash_hurdle_apr: float = DEFAULT_
         res = verify_many(filtered_universe[:80])
         return {k: v.as_dict() for k, v in res.items()}
 
-    catalysts_raw = cache_manager.get_or_compute("intraday_alpha_catalysts", 600, do_cats) if use_cache else do_cats()
+    cat_key = f"intraday_alpha_catalysts_{abs(hash(tuple(filtered_universe[:80]))) % 100000}"
+    catalysts_raw = cache_manager.get_or_compute(cat_key, 600, do_cats) if use_cache else do_cats()
     catalysts = {k: CatalystResult(**v) for k, v in catalysts_raw.items()}
 
     sector_5d_map = {}
@@ -367,7 +399,7 @@ def run(*, objective: str = DEFAULT_OBJECTIVE, cash_hurdle_apr: float = DEFAULT_
         "ranked_replacements": [asdict(x) for x in top_buys],
         "proposed_rotations": [asdict(x) for x in rotations[:10]],
         "source_freshness": {
-            "intraday_scan_cache": cache_manager.info("intraday_alpha_scan"),
-            "catalyst_cache": cache_manager.info("intraday_alpha_catalysts"),
+            "intraday_scan_cache": cache_manager.info(scan_key),
+            "catalyst_cache": cache_manager.info(cat_key),
         },
     }

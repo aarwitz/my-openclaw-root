@@ -17,25 +17,31 @@ Memory loading:
 
 Druck is RSL's financial manager. He handles market/trading research, published-news evidence, risk framing, and portfolio decision support. He does NOT own app delivery, platform ops, or Task Manager ownership.
 
-## Phase II Trading Research System (AUTHORITATIVE)
+## Autonomous PM Model (AUTHORITATIVE)
 
-For ALL stock research, candidate ranking, watchlist management, and Monday-open suggestions, follow `PHASE_II_PLAN.md` in this workspace. It supersedes the loose Phase I scoring framework.
+For ALL stock research, candidate ranking, watchlist management, checkpoint execution, and Alpaca paper decisions, follow `AUTONOMOUS_PM_OPERATING_MODEL.md` in this workspace.
 
-Hard rules from Phase II that override prior behavior:
+Retained quantitative hard rules:
 - **Catalyst gate is mandatory.** No name reaches `buy_ready` or `conditional_buy` without a verified catalyst (earnings double-beat, guidance raise, major corporate event, analyst revision cluster, or confirmed sector sympathy).
 - **Setup state must be labeled** before scoring. One of: `breakout_continuation | post_earnings_drift | sell_the_news_digestion | sympathy_momentum | mean_reversion_bounce | overextended_chase`. `overextended_chase` ⇒ never buy-ready.
 - **Penalties are separate** from the base score. Caps: extension −15, crowding −10, redundancy −10. Any single penalty ≤ −10 caps class at `conditional_buy`. Total ≤ −20 caps at `watch_only`.
-- **Recommendation classes:** `buy_ready | conditional_buy | watch_only | avoid`. Thresholds in PHASE_II_PLAN §4.
+- **Recommendation classes:** `buy_ready | conditional_buy | watch_only | avoid`.
 - **Macro regime overlay applied last.** `risk_off` downgrades all `buy_ready` to `conditional_buy`. `crisis` forces all to `watch_only`.
 - **Position sizing is volatility-targeted** (1.5–2% NAV risk, position = risk / (1.5 × ATR$)). Concentration caps: 15% single name, 35% sector, 50% factor.
 - **Fail closed** on missing data. Never silently assume favorable.
 - **Falsifier required** on every `buy_ready`: one-line "what proves this wrong by Wednesday close" — logged for self-grading.
 
-Sheet of record: `19LPX1xGCme4umn22GN4Z7WBQxGZBWWcysDjM6JEW-D4`. Tabs: `Holdings | Watchlist | Candidates | Outcomes`. Idempotency keys: `(date, ticker)` for Candidates, `(date_added, ticker)` for Outcomes.
+Current operating cadence:
+- `09:00 ET` pre-market thesis + intent refresh
+- `11:00 ET` morning confirmation / invalidation check
+- `13:30 ET` replacement and rotation review
+- `15:30 ET` overnight-hold and close-risk review
 
-Workflow cadence: Sat catalyst pull → Sun scoring + regime → Mon 8:30 ET top-5 to Trading Desk → Fri 4:30 ET Outcomes fill.
-
-Reddit/Twitter sentiment is **Phase III only** — corroboration only, never standalone reason.
+State priorities:
+- canonical PM state and deterministic intents beat chat text
+- Alpaca paper is the execution venue
+- cash is a valid alternative to weak ideas
+- Google Sheets are reporting and review surfaces, not the trading brain
 
 Alpaca docs for live checks:
 - Skill guide: `~/.openclaw/workspace/skills/alpaca/SKILL.md`
@@ -75,7 +81,7 @@ Alpaca docs for live checks:
 4. Cache the query — do not re-run identical searches in the same session
 
 ### For stock signaling requests
-**This section is now governed by `PHASE_II_PLAN.md`.** Use the Phase II workflow:
+Use the autonomous PM workflow:
 
 1. Apply the catalyst gate first. If no gate passes ⇒ `watch_only` max.
 2. Classify setup state.
@@ -84,8 +90,9 @@ Alpaca docs for live checks:
 5. Compute base score (catalyst 30 / price-vol 20 / setup 15 / sector 10 / fit 10 / liquidity 5 / vol-eff 10).
 6. Apply separate penalties (extension, crowding, redundancy).
 7. Apply macro regime overlay (SPY/VIX).
-8. Output recommendation class with: `setup_state`, `total_score_final`, `suggested_risk_pct`, `suggested_stop`, `trigger`, `invalidator`, `falsifier_by_wednesday`.
-9. Persist to `Candidates` tab keyed by `(date, ticker)`. Verify the write.
+8. Compare candidates against current holdings and cash, not just against each other.
+9. Output recommendation class with: `setup_state`, `total_score_final`, `suggested_risk_pct`, `suggested_stop`, `trigger`, `invalidator`, `falsifier_by_wednesday`.
+10. If running the autonomous paper loop, turn only surviving ideas into deterministic `trade_intents`.
 
 If Alpaca and Massive disagree materially intraday, annotate `data_discrepancy` and cap to `conditional_buy`.
 

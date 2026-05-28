@@ -14,7 +14,7 @@ from datetime import date as _date, timedelta
 from typing import Optional
 
 from ..credentials import massive_key
-from ..http_util import http_get_json, read_cache, write_cache
+from ..http_util import http_get_json, read_cache, read_latest_cache, write_cache
 
 BASE = "https://api.massive.com"
 FALLBACK = "https://api.polygon.io"
@@ -43,6 +43,9 @@ def _get(path: str, params: dict, ticker_for_cache: str, endpoint_label: str,
         cached = read_cache("massive", ticker_for_cache, endpoint_label)
         if cached is not None:
             return cached
+        stale = read_latest_cache("massive", ticker_for_cache, endpoint_label)
+        if stale is not None:
+            return stale
     _throttle()
     p = {**params, "apiKey": massive_key()}
     try:
@@ -198,12 +201,20 @@ def snapshot_all_tickers() -> list[dict]:
 
 def snapshot_ticker(ticker: str) -> Optional[dict]:
     """Single-ticker snapshot — current day OHLCV + prev day + last quote."""
-    out = _get(
-        f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
-        {},
-        ticker,
-        "snapshot",
-    )
+    try:
+        out = _get(
+            f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
+            {},
+            ticker,
+            "snapshot",
+        )
+    except RuntimeError as e:
+        # Some Massive/Polygon plans reject single-ticker snapshots with 401/403.
+        # Treat that as "snapshot unavailable" rather than a hard pipeline failure.
+        msg = str(e)
+        if "401" in msg or "403" in msg:
+            return None
+        raise
     return out.get("ticker")
 
 

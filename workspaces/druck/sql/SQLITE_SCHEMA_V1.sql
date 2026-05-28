@@ -123,8 +123,8 @@ CREATE TABLE IF NOT EXISTS trades (
   paper_fill_pnl REAL,
   conservative_fill_pnl REAL,
   exit_reason TEXT,
-  entry_conditions_json TEXT,
-  data_quality_flags_json TEXT,
+  entry_conditions_json TEXT CHECK (entry_conditions_json IS NULL OR json_valid(entry_conditions_json)),
+  data_quality_flags_json TEXT CHECK (data_quality_flags_json IS NULL OR json_valid(data_quality_flags_json)),
   thematic_cluster TEXT,
   engine TEXT CHECK (engine IN ('conviction', 'opportunistic')),
   entry_order_id TEXT,
@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE INDEX IF NOT EXISTS idx_trades_ticker_entry_ts ON trades (ticker, entry_ts);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy_status ON trades (strategy_id, status);
 CREATE INDEX IF NOT EXISTS idx_trades_exit_ts ON trades (exit_ts);
+CREATE INDEX IF NOT EXISTS idx_trades_entry_spread_bps ON trades (CAST(json_extract(entry_conditions_json, '$.spread_bps') AS REAL));
+CREATE INDEX IF NOT EXISTS idx_trades_entry_atr_pct ON trades (CAST(json_extract(entry_conditions_json, '$.atr_pct') AS REAL));
 
 CREATE TABLE IF NOT EXISTS positions (
   position_id TEXT PRIMARY KEY,
@@ -273,7 +275,197 @@ CREATE TABLE IF NOT EXISTS portfolio_risk_snapshots (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS hypotheses (
+  hypothesis_id TEXT PRIMARY KEY,
+  thesis_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('raw', 'scored', 'challenged', 'ready', 'active', 'dormant', 'resolved', 'retired')),
+  direction TEXT NOT NULL CHECK (direction IN ('long', 'short', 'pair', 'market_neutral')),
+  primary_ticker TEXT,
+  related_tickers_json TEXT CHECK (related_tickers_json IS NULL OR json_valid(related_tickers_json)),
+  thesis_summary TEXT NOT NULL,
+  why_now TEXT,
+  world_change TEXT,
+  underpricing_claim TEXT,
+  time_horizon_days INTEGER,
+  benchmark_to_beat TEXT NOT NULL DEFAULT 'SPY',
+  cash_hurdle_required INTEGER NOT NULL DEFAULT 1 CHECK (cash_hurdle_required IN (0,1)),
+  confidence TEXT CHECK (confidence IN ('low', 'medium', 'high')),
+  researcher_priority REAL,
+  quant_score REAL,
+  critic_severity REAL,
+  expected_edge_pct REAL,
+  edge_decay_monthly_pct REAL,
+  regime_fit_score REAL,
+  surprise_to_price_score REAL,
+  expression_clarity_score REAL,
+  liquidity_score REAL,
+  crowding_penalty REAL,
+  redundancy_penalty REAL,
+  created_by_agent TEXT NOT NULL,
+  owner_agent TEXT NOT NULL DEFAULT 'researcher',
+  created_ts TEXT NOT NULL,
+  updated_ts TEXT NOT NULL,
+  resolved_ts TEXT,
+  resolution_grade TEXT CHECK (resolution_grade IN ('correct_right_reasons', 'correct_wrong_reasons', 'wrong', 'unresolved')),
+  concise_rationale TEXT,
+  counterargument_summary TEXT,
+  notes_json TEXT CHECK (notes_json IS NULL OR json_valid(notes_json))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hypotheses_thesis_key ON hypotheses (thesis_key);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_status_domain ON hypotheses (status, domain);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_primary_ticker ON hypotheses (primary_ticker);
+
+CREATE TABLE IF NOT EXISTS hypothesis_evidence (
+  evidence_id TEXT PRIMARY KEY,
+  hypothesis_id TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_name TEXT NOT NULL,
+  source_ref TEXT,
+  source_url TEXT,
+  source_ts TEXT,
+  retrieved_ts TEXT NOT NULL,
+  as_of_ts TEXT,
+  revision_id TEXT,
+  entity_key TEXT,
+  summary TEXT NOT NULL,
+  structured_facts_json TEXT CHECK (structured_facts_json IS NULL OR json_valid(structured_facts_json)),
+  parser_confidence REAL,
+  novelty_score REAL,
+  importance_score REAL,
+  created_by_agent TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(hypothesis_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_hypothesis_ts ON hypothesis_evidence (hypothesis_id, source_ts);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_source_name ON hypothesis_evidence (source_name);
+
+CREATE TABLE IF NOT EXISTS hypothesis_falsifiers (
+  falsifier_id TEXT PRIMARY KEY,
+  hypothesis_id TEXT NOT NULL,
+  falsifier_text TEXT NOT NULL,
+  monitor_frequency TEXT,
+  current_status TEXT NOT NULL CHECK (current_status IN ('monitoring', 'warning', 'triggered', 'retired')),
+  triggered_ts TEXT,
+  monitoring_source TEXT,
+  created_by_agent TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(hypothesis_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hypothesis_falsifiers_hypothesis_status ON hypothesis_falsifiers (hypothesis_id, current_status);
+
+CREATE TABLE IF NOT EXISTS expression_candidates (
+  expression_id TEXT PRIMARY KEY,
+  hypothesis_id TEXT NOT NULL,
+  vehicle_type TEXT NOT NULL CHECK (vehicle_type IN ('direct_equity', 'etf', 'pair_trade', 'competitor_short', 'leaps', 'short_dated_option')),
+  ticker TEXT NOT NULL,
+  paired_ticker TEXT,
+  recommended_flag INTEGER NOT NULL DEFAULT 0 CHECK (recommended_flag IN (0,1)),
+  rank_order INTEGER,
+  conviction_weight REAL,
+  quant_score REAL,
+  rationale TEXT,
+  max_loss_pct REAL,
+  liquidity_notes TEXT,
+  created_by_agent TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(hypothesis_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_expression_candidates_hypothesis_rank ON expression_candidates (hypothesis_id, rank_order);
+
+CREATE TABLE IF NOT EXISTS critic_reviews (
+  review_id TEXT PRIMARY KEY,
+  hypothesis_id TEXT,
+  intent_id TEXT,
+  severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'fatal')),
+  challenge_text TEXT NOT NULL,
+  response_text TEXT,
+  resolved_flag INTEGER NOT NULL DEFAULT 0 CHECK (resolved_flag IN (0,1)),
+  reviewed_by_agent TEXT NOT NULL,
+  reviewed_ts TEXT NOT NULL,
+  resolved_ts TEXT,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(hypothesis_id),
+  FOREIGN KEY (intent_id) REFERENCES trade_intents(intent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_critic_reviews_hypothesis ON critic_reviews (hypothesis_id, reviewed_ts);
+CREATE INDEX IF NOT EXISTS idx_critic_reviews_intent ON critic_reviews (intent_id, reviewed_ts);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY,
+  agent_name TEXT NOT NULL CHECK (agent_name IN ('researcher', 'quant', 'trader', 'critic')),
+  run_type TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  started_ts TEXT NOT NULL,
+  ended_ts TEXT,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'canceled')),
+  inputs_json TEXT CHECK (inputs_json IS NULL OR json_valid(inputs_json)),
+  outputs_json TEXT CHECK (outputs_json IS NULL OR json_valid(outputs_json)),
+  error_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_started_ts ON agent_runs (agent_name, started_ts);
+
+CREATE TABLE IF NOT EXISTS audits (
+  audit_id TEXT PRIMARY KEY,
+  audit_ts TEXT NOT NULL,
+  actor_agent TEXT NOT NULL CHECK (actor_agent IN ('researcher', 'quant', 'trader', 'critic', 'system')),
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  rationale TEXT,
+  before_state_json TEXT CHECK (before_state_json IS NULL OR json_valid(before_state_json)),
+  after_state_json TEXT CHECK (after_state_json IS NULL OR json_valid(after_state_json)),
+  metadata_json TEXT CHECK (metadata_json IS NULL OR json_valid(metadata_json)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audits_entity_ts ON audits (entity_type, entity_id, audit_ts);
+
+CREATE TABLE IF NOT EXISTS postmortems (
+  postmortem_id TEXT PRIMARY KEY,
+  hypothesis_id TEXT NOT NULL,
+  graded_by_agent TEXT NOT NULL CHECK (graded_by_agent IN ('critic', 'quant', 'system')),
+  resolved_state TEXT NOT NULL CHECK (resolved_state IN ('correct_right_reasons', 'correct_wrong_reasons', 'wrong', 'unresolved')),
+  grade_summary TEXT NOT NULL,
+  thesis_analysis TEXT,
+  expression_analysis TEXT,
+  lessons_json TEXT CHECK (lessons_json IS NULL OR json_valid(lessons_json)),
+  created_ts TEXT NOT NULL,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(hypothesis_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_postmortems_hypothesis ON postmortems (hypothesis_id, created_ts);
+
 CREATE INDEX IF NOT EXISTS idx_portfolio_risk_snapshot_ts ON portfolio_risk_snapshots (snapshot_ts);
+
+CREATE TABLE IF NOT EXISTS checkpoint_runs (
+  run_id TEXT PRIMARY KEY,
+  checkpoint_name TEXT NOT NULL,
+  run_ts TEXT NOT NULL,
+  regime TEXT,
+  portfolio_equity REAL,
+  buying_power REAL,
+  cash REAL,
+  ranked_holdings_json TEXT,
+  ranked_replacements_json TEXT,
+  proposed_rotations_json TEXT,
+  created_intent_count INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  warnings_json TEXT,
+  status TEXT NOT NULL CHECK (status IN ('ok', 'warning', 'failed')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoint_runs_name_ts ON checkpoint_runs (checkpoint_name, run_ts);
 
 CREATE TABLE IF NOT EXISTS candidate_decisions (
   candidate_id TEXT PRIMARY KEY,
