@@ -16,11 +16,7 @@ import json
 from pathlib import Path
 
 CFG = Path.home() / ".openclaw" / "openclaw.json"
-TRADING_GROUP_ID = "-1003846579956"
-REQUIRED_TRADING_TOPICS = {
-    "1": "dwight",
-    "641": "trader",
-}
+MATRIX = Path.home() / ".openclaw" / "workspaces" / "trading-intel" / "reference" / "telegram_routing_matrix.json"
 
 
 def fail(msg: str) -> None:
@@ -31,16 +27,24 @@ def fail(msg: str) -> None:
 def main() -> int:
     if not CFG.exists():
         fail(f"config not found: {CFG}")
+    if not MATRIX.exists():
+        fail(f"routing matrix not found: {MATRIX}")
 
     cfg = json.loads(CFG.read_text())
+    matrix = json.loads(MATRIX.read_text())
 
     agents = {a["id"] for a in cfg["agents"]["list"]}
     accounts = cfg["channels"]["telegram"]["accounts"]
     account_ids = set(accounts.keys())
     default_account = cfg["channels"]["telegram"].get("defaultAccount")
+    matrix_default_account = matrix.get("defaultAccount")
 
     if default_account not in account_ids:
         fail(f"defaultAccount '{default_account}' is missing from channels.telegram.accounts")
+    if default_account != matrix_default_account:
+        fail(
+            f"defaultAccount mismatch: config='{default_account}' matrix='{matrix_default_account}'"
+        )
 
     # Naming contract: avoid ambiguous default transport key.
     if "default" in account_ids:
@@ -72,25 +76,54 @@ def main() -> int:
     if not jerry_route:
         fail("missing explicit telegram binding: accountId 'jerry' -> agentId 'main'")
 
-    groups = cfg["channels"]["telegram"].get("groups", {})
-    if TRADING_GROUP_ID not in groups:
-        fail(f"trading group {TRADING_GROUP_ID} missing from channels.telegram.groups")
+    # Matrix DM routes must exist in bindings and accounts.
+    matrix_dm_routes = matrix.get("dmRoutes", [])
+    if not matrix_dm_routes:
+        fail("routing matrix dmRoutes is empty")
+    for route in matrix_dm_routes:
+        account_id = route.get("accountId")
+        agent_id = route.get("agentId")
+        if account_id not in account_ids:
+            fail(f"routing matrix accountId '{account_id}' not found in channels.telegram.accounts")
+        if agent_id not in agents:
+            fail(f"routing matrix agentId '{agent_id}' not found in agents.list")
+        match = [
+            b
+            for b in bindings
+            if b.get("match", {}).get("accountId") == account_id and b.get("agentId") == agent_id
+        ]
+        if not match:
+            fail(f"missing binding for matrix dmRoute: accountId '{account_id}' -> agentId '{agent_id}'")
 
-    trading_topics = groups[TRADING_GROUP_ID].get("topics", {})
-    for topic_id, expected_agent in REQUIRED_TRADING_TOPICS.items():
-        topic = trading_topics.get(topic_id)
-        if not topic:
-            fail(f"trading group missing topic {topic_id}")
-        if topic.get("agentId") != expected_agent:
-            fail(
-                f"trading topic {topic_id} routes to '{topic.get('agentId')}', expected '{expected_agent}'"
-            )
+    groups = cfg["channels"]["telegram"].get("groups", {})
+    matrix_group_routes = matrix.get("groupRoutes", [])
+    if not matrix_group_routes:
+        fail("routing matrix groupRoutes is empty")
+
+    required_topics = []
+    for group in matrix_group_routes:
+        chat_id = group.get("chatId")
+        if chat_id not in groups:
+            fail(f"matrix group {chat_id} missing from channels.telegram.groups")
+        cfg_topics = groups[chat_id].get("topics", {})
+        for topic in group.get("topics", []):
+            topic_id = topic.get("topicId")
+            expected_agent = topic.get("agentId")
+            cfg_topic = cfg_topics.get(topic_id)
+            required_topics.append((chat_id, topic_id, expected_agent))
+            if not cfg_topic:
+                fail(f"group {chat_id} missing topic {topic_id}")
+            if cfg_topic.get("agentId") != expected_agent:
+                fail(
+                    f"group {chat_id} topic {topic_id} routes to '{cfg_topic.get('agentId')}', expected '{expected_agent}'"
+                )
 
     print("OK: telegram routing invariants satisfied")
     print(f"- defaultAccount: {default_account}")
     print(f"- bound accounts: {sorted(bound_accounts)}")
     print(f"- bound agents: {sorted(bound_agents)}")
-    print(f"- trading topics: {sorted(REQUIRED_TRADING_TOPICS.items())}")
+    print(f"- matrix file: {MATRIX}")
+    print(f"- required topics: {sorted(required_topics)}")
     return 0
 
 

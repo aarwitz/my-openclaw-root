@@ -39,10 +39,23 @@ Standing rule: whenever a trade intent changes state, an order is submitted, fil
 
 ## 1. Where to talk to it
 
+Canonical routing table:
+- [workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md](workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md)
+- Machine-enforced source: [workspaces/trading-intel/reference/telegram_routing_matrix.json](workspaces/trading-intel/reference/telegram_routing_matrix.json)
+
+Surface definitions:
+- DM: direct one-to-one chat with a bot account. No group chat id and no topic id.
+- Group: a Telegram chat room identified by chat id.
+- Topic: a thread inside a forum-enabled group. Topic ids are scoped to their group chat id.
+
 - Primary execution interface: `@druck_rsl_bot` in Trading Desk topic Ask Druck (`topic_id 641`).
 - Oversight/escalation interface: Dwight in Trading Desk topic `1`.
 - Mention-gated policy is on. In group chat, address Druck explicitly with `@druck_rsl_bot`.
 - `FYI @druck_rsl_bot ...` or `cc @druck_rsl_bot ...` means listen-only. Use that when you want Druck to absorb context without replying.
+
+Routing authority rule:
+- If there is any conflict between memory/chat notes and the matrix table, follow [workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md](workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md).
+- Any route change must update the matrix JSON and pass [scripts/audit_telegram_routing.py](scripts/audit_telegram_routing.py).
 
 Observed behavior baseline (May 31, 2026):
 - Ask Druck topic returns explicit topic identity confirmation: "This is the Ask Druck topic in Trading Desk (topic 641)."

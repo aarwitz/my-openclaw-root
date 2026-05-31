@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "defaultAccount": "jerry",
+  "dmRoutes": [
+    {
+      "accountId": "jerry",
+      "agentId": "main",
+      "persona": "Jerry",
+      "botHandle": "@jerry_rsl_bot",
+      "surface": "dm",
+      "description": "General OpenClaw operations and health checks"
+    },
+    {
+      "accountId": "dwight",
+      "agentId": "dwight",
+      "persona": "Dwight",
+      "botHandle": "@dwight_rsl_bot",
+      "surface": "dm",
+      "description": "Oversight and task execution status"
+    },
+    {
+      "accountId": "resi",
+      "agentId": "resi",
+      "persona": "Resi",
+      "botHandle": "@resi_rsl_bot",
+      "surface": "dm",
+      "description": "Resi workspace direct execution"
+    },
+    {
+      "accountId": "druck",
+      "agentId": "trader",
+      "persona": "Druck",
+      "botHandle": "@druck_rsl_bot",
+      "surface": "dm",
+      "description": "Trader persona direct execution"
+    }
+  ],
+  "groupRoutes": [
+    {
+      "chatId": "-1003846579956",
+      "chatName": "Trading Desk",
+      "chatType": "forum_group",
+      "topics": [
+        {
+          "topicId": "1",
+          "topicName": "Infrastructure",
+          "agentId": "dwight",
+          "botHandle": "@dwight_rsl_bot",
+          "surface": "group_topic",
+          "requiresMention": true
+        },
+        {
+          "topicId": "641",
+          "topicName": "Ask Druck",
+          "agentId": "trader",
+          "botHandle": "@druck_rsl_bot",
+          "surface": "group_topic",
+          "requiresMention": true
+        }
+      ]
+    }
+  ]
+}

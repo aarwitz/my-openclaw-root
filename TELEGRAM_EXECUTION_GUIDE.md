@@ -19,6 +19,15 @@ Audience: Aaron operating OpenClaw through Telegram.
 - Telegram accounts are active for `jerry`, `dwight`, `resi`, `druck`.
 - Allowed Telegram user IDs are allowlisted.
 - Naming contract: the primary general bot account key is `jerry` and routes to agent id `main` (identity name Jerry). Transport account keys are not bot names.
+
+Routing matrix (authoritative):
+- Human-readable table: [workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md](workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md)
+- Machine source: [workspaces/trading-intel/reference/telegram_routing_matrix.json](workspaces/trading-intel/reference/telegram_routing_matrix.json)
+
+Surface distinction:
+- DM: one-to-one with a bot account; no group chat id or topic id.
+- Group: shared chat room identified by chat id.
+- Topic: thread inside a forum-enabled group; topic ids are only meaningful within that chat id.
 - Coding execution path is detached task routing with lanes:
 	- `inline`
 	- `codex-subagent`
