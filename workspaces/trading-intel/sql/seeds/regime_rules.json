@@ -1,9 +1,9 @@
 {
-  "id": "regime_rules_v1",
-  "rule_version": "v1",
+  "id": "regime_rules_live",
+  "rule_version": "live",
   "effective_at": "2026-05-29T00:00:00Z",
-  "notes": "Initial deterministic regime classifier. See reference/regime_rules_v1.md for narrative.",
-  "experiment_id": "regime_rules_v1_init",
+  "notes": "Deterministic regime classifier. See reference/regime_rules.md for narrative.",
+  "experiment_id": "regime_rules_live_init",
   "thresholds_json": {
     "signals": {
       "spy_trend": {

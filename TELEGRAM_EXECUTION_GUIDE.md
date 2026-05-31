@@ -16,8 +16,9 @@ Audience: Aaron operating OpenClaw through Telegram.
 
 ## 2) What is currently true in this deployment
 
-- Telegram accounts are active for `default`, `dwight`, `resi`, `druck`.
+- Telegram accounts are active for `jerry`, `dwight`, `resi`, `druck`.
 - Allowed Telegram user IDs are allowlisted.
+- Naming contract: the primary general bot account key is `jerry` and routes to agent id `main` (identity name Jerry). Transport account keys are not bot names.
 - Coding execution path is detached task routing with lanes:
 	- `inline`
 	- `codex-subagent`
@@ -176,6 +177,12 @@ If execution fails:
 4. If ACP path fails at runtime, rely on codex-subagent fallback and request metadata path.
 5. If still blocked, run deterministic CLI launcher from server.
 
+Config regression guardrail:
+
+```bash
+python3 ~/.openclaw/scripts/audit_telegram_routing.py
+```
+
 ## 11) Safe First Live Use
 
 For controlled live verification of the auto-launch system on a real issue:
@@ -213,4 +220,4 @@ Useful operator checks in Task Manager Search now:
 - Send structured intent, not vague requests.
 - Force evidence on every completion.
 - Use automation for triage, planning, execution, and follow-through, not just chat answers.
-- For the implementation rollout, use `workspace/docs/task-manager-execution-automation-plan.md`.
+- For trading-desk usage, also use `workspaces/trading-intel/HUMAN_USE_GUIDE.md` and `workspaces/trading-intel/OPERATOR_GUIDE.md`.

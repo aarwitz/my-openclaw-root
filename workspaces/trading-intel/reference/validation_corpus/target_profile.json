@@ -1,7 +1,7 @@
 {
-  "profile_id": "validation_target_v1",
+  "profile_id": "validation_target_live",
   "effective_at": "2026-05-29T00:00:00Z",
-  "experiment_id": "validation_corpus_v1",
+  "experiment_id": "validation_corpus_live",
   "go_live_minimum": {
     "post_cutoff_substantive_min": 30,
     "post_cutoff_fake_date_variants_min": 30,

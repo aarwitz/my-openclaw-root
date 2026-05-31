@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
+
 """Flatten all open Alpaca paper positions and clear the reconciliation pause.
 
 Steps:
   1. Fetch all open Alpaca positions.
-  2. Submit a DELETE /v2/positions to close everything at market.
+    2. Submit a positions-delete call to close everything at market.
   3. Clear the active exits_trims_only pause in the trading-intel DB.
   4. Write an audit row.
 
@@ -13,18 +19,16 @@ Usage:
   python3 flatten_and_reset.py [--dry-run]
 """
 
-from __future__ import annotations
 
 import argparse
 import json
 import os
+from pathlib import Path
 import sqlite3
-import sys
 import uuid
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
-from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 ALPACA_CRED_PATH = Path(os.path.expanduser("~/.openclaw/credentials/alpaca-api.json"))
@@ -118,7 +122,7 @@ def main(argv: list[str]) -> int:
             pause["id"],
             json.dumps({"reason": "portfolio flattened, starting clean", "cleared_by": "flatten_and_reset.py"}),
             n,
-            "flatten_and_reset_v1",
+            "flatten_and_reset_live",
         ))
         conn.commit()
         print(f"\npause {pause['id']} ({pause['scope']}) cleared")

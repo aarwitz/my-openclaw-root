@@ -23,7 +23,7 @@ BASE = Path(__file__).resolve().parent
 CASES = BASE / "cases"
 SEEDS = BASE / "seeds"
 INDEX = BASE / "index.json"
-PROFILE = BASE / "target_profile_v1.json"
+PROFILE = BASE / "target_profile.json"
 QUALITY_MIN_SCORE = 45
 
 ALLOWED_CLASS = {"winner", "negative_control", "post_cutoff"}

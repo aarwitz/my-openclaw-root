@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # ewag-capture.sh — LLM-free screenshot/video capture → Google Drive upload

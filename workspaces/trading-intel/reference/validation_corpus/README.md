@@ -43,7 +43,7 @@ Build path:
   },
   "passed": 0,
   "created_at": "2026-05-29T00:00:00Z",
-  "experiment_id": "validation_corpus_v1_seed"
+  "experiment_id": "validation_corpus_seed"
 }
 ```
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 # druck-truth-check.sh
 # Deterministic skill health + evidence audit for Druck.
 # Writes results to /tmp/druck-truth-check.txt
@@ -163,25 +164,35 @@ else
 fi
 
 # ── 7) Druck session freshness ───────────────────────────────────────────────
-SESSIONS_FILE="/home/aaron/.openclaw/agents/druck/sessions/sessions.json"
-if [[ -f "$SESSIONS_FILE" ]]; then
+# Prefer canonical trader path; keep legacy druck path as fallback.
+SESSIONS_FILE=""
+for candidate in \
+  "/home/aaron/.openclaw/agents/trader/sessions/sessions.json" \
+  "/home/aaron/.openclaw/agents/druck/sessions/sessions.json"; do
+  if [[ -f "$candidate" ]]; then
+    SESSIONS_FILE="$candidate"
+    break
+  fi
+done
+
+if [[ -n "$SESSIONS_FILE" ]]; then
   NOW_MS="$(date +%s%3N)"
   # Get the most recent updatedAt across all druck sessions
   LAST_UPDATE_MS="$(jq '[.. | .updatedAt? // empty] | max // 0' "$SESSIONS_FILE" 2>/dev/null || echo 0)"
   if [[ "$LAST_UPDATE_MS" -gt 0 ]]; then
     AGE_HOURS=$(( (NOW_MS - LAST_UPDATE_MS) / 3600000 ))
     if [[ "$AGE_HOURS" -le 24 ]]; then
-      add_pass "druck session: last activity ${AGE_HOURS}h ago (fresh)"
+      add_pass "druck session: last activity ${AGE_HOURS}h ago (fresh; ${SESSIONS_FILE})"
     elif [[ "$AGE_HOURS" -le 72 ]]; then
-      add_warn "druck session: last activity ${AGE_HOURS}h ago (stale — no Druck response in 3 days)"
+      add_warn "druck session: last activity ${AGE_HOURS}h ago (stale — no Druck response in 3 days; ${SESSIONS_FILE})"
     else
-      add_fail "druck session: last activity ${AGE_HOURS}h ago (very stale — Druck may be inactive)"
+      add_fail "druck session: last activity ${AGE_HOURS}h ago (very stale — Druck may be inactive; ${SESSIONS_FILE})"
     fi
   else
-    add_warn "druck session: could not determine last activity"
+    add_warn "druck session: could not determine last activity (${SESSIONS_FILE})"
   fi
 else
-  add_warn "druck session: sessions.json not found"
+  add_warn "druck session: sessions.json not found (checked trader and legacy druck paths)"
 fi
 
 # ── 8) Candidates sheet freshness (proxy via Drive/Notes modification time) ──

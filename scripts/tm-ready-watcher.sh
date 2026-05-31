@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 TM_BASE="${TM_BASE:-http://127.0.0.1:8000}"

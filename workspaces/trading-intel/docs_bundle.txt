@@ -18,11 +18,13 @@ Effective: 2026-05-28.
 
 - `sql/schema.sql` — canonical DDL for the shared state store.
 - `sql/seed_bootstrap.py` — idempotent loader for canonical seed rows.
-- `sql/seeds/regime_rules_v1.json` — versioned regime classifier thresholds (loaded into `regime_rules`).
-- `reference/regime_rules_v1.md` — narrative spec for the v1 regime classifier.
+- `sql/seeds/regime_rules.json` — active deterministic regime classifier thresholds (loaded into `regime_rules`).
+- `reference/regime_rules.md` — narrative spec for the live regime classifier.
 - `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
-- `../researcher/skills/reasoning_chain_v1.md` — versioned 8-question researcher reasoning chain.
+- `../researcher/skills/reasoning_chain.md` — active 8-question researcher reasoning chain.
 - `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
+- `OPERATOR_GUIDE.md` — Telegram command reference and daily workflow for the human operator.
+- `HUMAN_USE_GUIDE.md` — best-practice patterns for humans or external systems interfacing with Druck.
 - `archives/` — date-stamped retirement of superseded docs and prototypes.
 
 ## Legacy decommissioned
@@ -33,7 +35,7 @@ Legacy druck workspace state has been removed. This stack is the only active tra
 
 - If two docs disagree, the lower-numbered active doc wins, then `sql/schema.sql`.
 - New docs must be approved into `DOC_INDEX.md` before any agent treats them as authoritative.
-- Active stack is capped at 5 documents. Anything else lives as reference or archive.
+- Active authority stack is capped at 5 documents. Anything else lives as reference or archive.
 
 
 ========================================================================================================================
@@ -61,7 +63,7 @@ Five OpenClaw agents share one canonical SQLite store and one repo of authoritat
 
 ## Authority
 
-If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`).
+If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`). This root is the single live trading authority.
 
 
 ========================================================================================================================
@@ -94,14 +96,534 @@ If anything outside this root contradicts a doc here, the doc here wins. Legacy 
 
 ## 2026-05-29: Production-readiness artifacts
 
-- D21: Regime classifier v1 thresholds authored at `reference/regime_rules_v1.md` and seeded via `sql/seeds/regime_rules_v1.json` (`rule_version = "v1"`, `experiment_id = "regime_rules_v1_init"`). Quant is unblocked to implement deterministic regime classification. Default fail-closed remains `caution` when signals are stale or missing.
-- D22: Researcher reasoning chain promoted to a versioned skill at `workspaces/researcher/skills/reasoning_chain_v1.md` (`experiment_id = "researcher_reasoning_v1"`). All downstream rows must carry this `experiment_id` so reasoning-chain changes are attributable.
-- D23: Validation corpus scaffolded at `reference/validation_corpus/` with the JSON contract, one exemplar seed per class, and a paired `fake_date_variant` seed (`experiment_id = "validation_corpus_v1_seed"`). Operator must hand-build the full corpus to clear Phase 1 thresholds (≥30 post-cutoff, ≥60 negative-control, plus fake-date variants).
+- D21: Deterministic regime thresholds authored at `reference/regime_rules.md` and seeded via `sql/seeds/regime_rules.json` (`rule_version = "live"`, `experiment_id = "regime_rules_live_init"`). Quant is unblocked to implement deterministic regime classification. Default fail-closed remains `caution` when signals are stale or missing.
+- D22: Researcher reasoning chain promoted to an active skill at `workspaces/researcher/skills/reasoning_chain.md` (`experiment_id = "researcher_reasoning_live"`). All downstream rows must carry this `experiment_id` so reasoning-chain changes are attributable.
+- D23: Validation corpus scaffolded at `reference/validation_corpus/` with the JSON contract, one exemplar seed per class, and a paired `fake_date_variant` seed (`experiment_id = "validation_corpus_seed"`). Operator must hand-build the full corpus to clear Phase 1 thresholds (≥30 post-cutoff, ≥60 negative-control, plus fake-date variants).
+
+## 2026-05-30: Bootstrap start and continuous learning loop
+
+- D24: Bootstrap operations mode approved for Alpaca paper with current corpus, provided all execution and reconciliation gates remain enforced. This is an operations start, not edge proof.
+- D25: Dual-lane data policy adopted: real specific operations data for live trading decisions, masked evaluation corpus for leakage-resistant validation.
+- D26: Continuous learning export flow added: resolved hypotheses can be exported into a review queue and promoted into approved raw cases, then converted into masked validation cases over time.
 
 ## Format
 
 For future decisions, append entries with: id, summary, rationale, files touched, approver, date.
 
+## 2026-05-31: Clean slate and operator guide
+
+- D27: Portfolio flattened (14 legacy Alpaca paper positions closed at market) and reconciliation divergence cleared. DB is at clean state: 0 positions, 0 hypotheses, no active pauses. This is the actual start of the trading loop.
+- D28: OPERATOR_GUIDE.md added at trading-intel workspace root as primary operator reference. DOC_INDEX.md updated. AGENT_HANDOFF_TODAY.md and BOOTSTRAP_START_DRUCK_NOW.md deleted as stale one-day task documents.
+- D29: Regime snapshot is empty. First operator action must be a regime assessment before any new opens are submitted.
+- D30: Final-state cleanup executed: all canonical rule/reasoning artifacts moved to stable names (`regime_rules.*`, `reasoning_chain.md`) and authority docs rewritten as one live operating contract without rollout-version language.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/OPERATOR_GUIDE.md
+========================================================================================================================
+# Operator Guide — Trading Intelligence
+
+Your daily interface with Druck via Telegram (`@druck_rsl_bot` in the Trading Desk group, topic 244).
+
+Companion doc: `HUMAN_USE_GUIDE.md` for efficient prompt patterns, notification strategy, and system-to-system interfacing.
+
+---
+
+## System state right now
+
+- **Status:** clean slate, no positions, no pauses, no active hypotheses.
+- **Regime:** not yet assessed. Druck needs to run a regime classification before opening new positions.
+- **First action:** ask Druck to assess the current regime and produce thesis candidates.
+
+---
+
+## Starting a trading cycle
+
+### Step 1 — Regime assessment
+
+```
+@druck_rsl_bot
+Assess current regime using the live deterministic classifier. Pull SPY trend, VIX term structure,
+credit spreads, and yield curve. Snapshot the result to the DB and summarize.
+```
+
+Druck will read the regime rules from `regime_rules` and write a row to the `regime` table. You will see the current state (risk_on / neutral / caution / risk_off / crisis) and which signals drove it.
+
+### Step 2 — Request thesis candidates
+
+```
+@druck_rsl_bot
+Produce top 3 thesis candidates for this regime. Include evidence, expected edge vs
+SPY and 3% cash, and a concrete falsifier for each.
+```
+
+Druck follows the DRUCK_UPDATE format. Each candidate becomes a `hypothesis` row in state `draft`.
+
+### Step 3 — Approve or reject
+
+After critic review, Druck will present each hypothesis for your approval before submitting any trade intent.
+
+```
+@druck_rsl_bot /approve hypo_abc123
+@druck_rsl_bot /reject hypo_abc123 rationale: too dependent on single data point
+```
+
+---
+
+## Daily Telegram commands
+
+| Command | What it does |
+|---|---|
+| `/summary` | Full system snapshot: regime, active hypotheses, open positions, intents, any pauses |
+| `/hypothesis [id]` | List all active hypotheses, or show one in detail |
+| `/intent [id]` | List open trade intents, or show one in detail |
+| `/approve <id>` | Approve a hypothesis or trade intent to advance it |
+| `/reject <id> [reason]` | Reject with a reason — written to audits |
+| `/exit <ticker>` | Request a market close on a position |
+| `/trim <ticker> <pct>` | Trim a position by a percentage |
+| `/regime` | Show the current regime snapshot and which signals are driving it |
+| `/critic <hypo_id>` | Request a fresh critic challenge on a hypothesis |
+| `/archivist` | Request the archivist to resolve any completed hypotheses |
+| `/audit [n]` | Show the last n audit rows (default 10) |
+
+---
+
+## Understanding Druck's output
+
+Every substantive Druck reply is structured as:
+
+```
+DRUCK_UPDATE
+request_id: <id or none>
+thesis: <1-3 line summary>
+evidence_with_sources:
+- <source + finding>
+expected_edge_vs_sp500: <daily/weekly/monthly/quarterly>
+expected_edge_vs_cash: <daily/weekly/monthly/quarterly>
+falsifier: <the condition that would prove this wrong>
+next_action: <what happens next and when>
+```
+
+You will also see the raw tool trace output (script runs, DB queries, API calls) before the final DRUCK_UPDATE block. This is intentional — it gives you visibility into exactly what Druck is doing in real time.
+
+---
+
+## Understanding pauses
+
+If Druck detects a problem, it opens a `system_pauses` row and enters `exits_trims_only` mode — no new opens or adds until resolved.
+
+Common triggers:
+- Broker/DB position divergence (Alpaca positions not reflected in the DB)
+- Stale regime snapshot (>36 hours old)
+- Missing critic review on a pending intent
+
+To see what's paused:
+```
+@druck_rsl_bot /summary
+```
+
+To manually clear after you've verified the cause:
+```
+python3 ~/.openclaw/workspaces/trader/scripts/flatten_and_reset.py   # if positions need wiping
+```
+Or ask Druck to resolve and clear after you've confirmed the state is clean.
+
+---
+
+## Autonomous behavior (what Druck does without prompting)
+
+Per the schedule in `docs/05_IMPLEMENTATION_POLICY.md` section 3:
+
+| Time (US/Eastern) | What runs |
+|---|---|
+| 09:00 | Pre-market decision pass |
+| 11:00 | Confirmation / invalidation pass |
+| 13:30 | Replacement / rotation pass |
+| 15:30 | Close-risk pass |
+| Event-driven | On Alpaca order/position events |
+| Sunday 09:00 | Weekly portfolio pattern extraction (Archivist) |
+
+Druck will post updates to Telegram at each pass if there is anything material to report.
+
+---
+
+## Approval gates — what Druck checks before submitting any trade
+
+Every trade intent must clear all of these before Druck submits to Alpaca:
+
+1. Valid `hypothesis_id` in state `ready` or `active`
+2. Critic has reviewed and approved the hypothesis
+3. Data freshness: all source signals < 36 hours old
+4. Explainability: thesis + falsifier + provenance + counterargument all present
+5. Fill realism: sizing respects ADV fraction limits and includes slippage estimate
+6. Expected edge beats both SPY and 3% annualized cash yield after slippage
+7. Reconciliation gate: no open unresolved divergences
+
+If any gate fails, the intent stays in `draft` or `critic_review` and Druck tells you why.
+
+---
+
+## Operator scripts
+
+Located at `~/.openclaw/workspaces/trader/scripts/`:
+
+| Script | Purpose |
+|---|---|
+| `summary_report.py` | Print the same output `/summary` generates — useful to verify DB state directly |
+| `flatten_and_reset.py` | Close all Alpaca positions at market and clear any active system pause |
+| `reconcile_legacy_positions.py` | Import pre-existing Alpaca positions into the DB as tracked legacy positions |
+| `../trading-intel/reference/validation_corpus/export_learning_queue.py` | Export resolved hypotheses to a review queue for corpus promotion |
+
+---
+
+## Corpus growth loop (10-15 min/week)
+
+As Druck resolves hypotheses, you can promote high-quality outcomes into the validation corpus:
+
+1. `python3 reference/validation_corpus/export_learning_queue.py` — exports resolved outcomes to `tmp/learning_queue.jsonl`
+2. Review the queue; author good ones as raw cases in `reference/validation_corpus/raw_cases/`
+3. `python3 reference/validation_corpus/build_masked_from_raw.py` — converts to anonymized evaluation cases
+4. `python3 reference/validation_corpus/validate_corpus.py` — validates counts and schema
+
+See `reference/validation_corpus/CONTINUOUS_LEARNING_APPROVAL_LOOP.md` for full detail.
+
+---
+
+## Authority hierarchy (what wins when things conflict)
+
+```
+01_OPERATING_AUTHORITY.md  >  02_ARCHITECTURE.md  >  03_EXECUTION_STATE_MACHINE.md
+    >  sql/schema.sql  >  04_SHARED_STATE_SCHEMA.md  >  05_IMPLEMENTATION_POLICY.md
+```
+
+Any change to these docs requires a `DECISION_LOG.md` entry.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/HUMAN_USE_GUIDE.md
+========================================================================================================================
+# Human Use Guide — Trading Desk
+
+Audience: Aaron or any human/operator system interfacing with Druck.
+
+This guide complements `OPERATOR_GUIDE.md`.
+- Use `OPERATOR_GUIDE.md` for command reference and workflow order.
+- Use this guide for how to interact with Druck efficiently day to day.
+
+## 0. Fast start
+
+If you want the shortest path to useful output, send these in order.
+
+First message:
+
+```text
+@druck_rsl_bot /summary
+```
+
+If `regime: n/a`, send:
+
+```text
+@druck_rsl_bot
+Assess current regime, snapshot it to the DB, and summarize the implications for new entries, adds, exits, and cash posture.
+```
+
+Then send:
+
+```text
+@druck_rsl_bot
+Produce top 3 thesis candidates for this regime with evidence, expected edge vs SPY and cash, and a falsifier for each.
+```
+
+If you want passive trade/event updates, send this once:
+
+```text
+@druck_rsl_bot
+Standing rule: whenever a trade intent changes state, an order is submitted, filled, canceled, or blocked, or a system pause opens/closes, post a concise update here with ticker, action, reason, and next step.
+```
+
+## 1. Where to talk to it
+
+- Primary execution interface: `@druck_rsl_bot` in Trading Desk topic `244`.
+- Oversight/escalation interface: Dwight in Trading Desk topic `1`.
+- Mention-gated policy is on. In group chat, address Druck explicitly with `@druck_rsl_bot`.
+- `FYI @druck_rsl_bot ...` or `cc @druck_rsl_bot ...` means listen-only. Use that when you want Druck to absorb context without replying.
+
+## 2. Fastest way to get useful information
+
+Start with the cheapest state read, then drill down.
+
+Best first command:
+
+```text
+@druck_rsl_bot /summary
+```
+
+Use it when you want the current operating picture:
+- active hypotheses
+- open intents
+- open positions
+- current regime
+- active pauses
+
+Use narrower commands for drilldown:
+
+```text
+@druck_rsl_bot /regime
+@druck_rsl_bot /hypothesis
+@druck_rsl_bot /hypothesis <id>
+@druck_rsl_bot /intent
+@druck_rsl_bot /intent <id>
+@druck_rsl_bot /audit 20
+```
+
+Use natural-language requests when you want synthesis rather than raw state:
+
+```text
+@druck_rsl_bot
+What changed since the last material update? Focus on regime, active candidates, open risk, and any blocked actions.
+```
+
+```text
+@druck_rsl_bot
+Summarize the current portfolio posture in plain English: what we own, why we own it, what would make us add, and what would make us exit.
+```
+
+## 3. Best command patterns
+
+Requests work best when they specify:
+- objective
+- constraints
+- output format
+- time horizon
+
+Good pattern:
+
+```text
+@druck_rsl_bot
+Objective: produce the top 3 actionable ideas for the current regime.
+Constraints: no orders yet, evidence must be primary-source-backed, compare against SPY and cash.
+Return: one ranked table plus a DRUCK_UPDATE block for the top idea.
+```
+
+If you want machine-friendly replies, ask for one `DRUCK_UPDATE` block and provide a `request_id`:
+
+```text
+@druck_rsl_bot
+request_id: morning-check-001
+objective: summarize current state and next best action
+constraints: no order submission, concise, source-backed
+required_outputs:
+- thesis
+- evidence_with_sources
+- expected_edge_vs_sp500
+- expected_edge_vs_cash
+- falsifier
+- next_action
+```
+
+## 4. Notifications and passive monitoring
+
+What is already built in:
+- scheduled trading passes at `09:00`, `11:00`, `13:30`, and `15:30` ET
+- event-driven handling on Alpaca order and position events
+- weekly audit summary into the trader Telegram thread
+- material updates are posted when there is something worth reporting
+
+What is not currently built as a separate surface:
+- no dedicated subscribe/unsubscribe notification settings
+- no separate notification command contract documented beyond the trading thread itself
+
+Practical implication:
+- the trading thread is the notification surface
+- if you want tighter reporting, ask Druck for an explicit standing reporting rule in that thread
+
+Example:
+
+```text
+@druck_rsl_bot
+Standing rule: whenever a trade intent changes state, an order is submitted, filled, canceled, or blocked, or a system pause opens/closes, post a concise update here with ticker, action, reason, and next step.
+```
+
+For a lighter cadence:
+
+```text
+@druck_rsl_bot
+Standing rule: only notify me here for fills, exits, new pauses, regime changes, and anything that changes expected edge or risk materially.
+```
+
+## 5. How to stay in touch optimally
+
+Use three interaction modes.
+
+Mode 1: snapshot
+- `/summary` when you are re-entering context
+- `/regime` when you care about market posture
+
+Mode 2: decision support
+- ask for top candidates
+- ask for critic challenge on a specific hypothesis
+- ask for edge vs SPY and cash before approving anything
+
+Mode 3: management loop
+- approve, reject, trim, or exit
+- ask what changed since last check-in
+- ask what is blocked and why
+
+Good recurring human loop:
+1. Run `/summary`.
+2. If regime is `n/a`, request a regime assessment.
+3. Ask for top candidates for the current regime.
+4. Review one idea deeply with `/hypothesis <id>` or a natural-language challenge.
+5. Approve or reject.
+6. Check `/audit 20` or `/intent` later for trail and current posture.
+
+## 6. When to use Dwight versus Druck
+
+Use Druck when you want:
+- current trading state
+- hypothesis, intent, position, or regime details
+- execution, trim, exit, or approval actions
+- direct portfolio monitoring
+
+Use Dwight when you want:
+- supervisory pressure on Druck
+- a missed update chased down
+- a higher-level portfolio accountability pass
+- a request framed as oversight, KPI enforcement, or escalation
+
+Example Dwight escalation:
+
+```text
+@dwight_rsl_bot
+ACTION_REQUEST_DRUCK
+request_id: oversight-check-001
+objective: verify Druck has current regime, top active risks, and next required actions
+why_now: I want assurance the desk is not drifting silently
+constraints: concise, evidence-backed, no order changes
+required_outputs:
+- thesis
+- evidence_with_sources
+- expected_edge_vs_sp500
+- expected_edge_vs_cash_3pct
+- falsifier
+- concrete_next_action
+deadline_et: 11:15
+```
+
+## 7. Best prompts for common jobs
+
+Morning open:
+
+```text
+@druck_rsl_bot
+Assess current regime, summarize current posture, and tell me the highest-value next action before market open.
+```
+
+Find ideas:
+
+```text
+@druck_rsl_bot
+Produce top 3 thesis candidates for this regime with evidence, expected edge vs SPY and cash, and a falsifier for each.
+```
+
+Check risk:
+
+```text
+@druck_rsl_bot
+What is the biggest current risk in the book or pipeline, what would trigger defensive action, and what is the monitoring plan?
+```
+
+Check execution drift:
+
+```text
+@druck_rsl_bot
+Tell me anything currently blocked, stale, unreconciled, or waiting on critic review.
+```
+
+Portfolio explanation:
+
+```text
+@druck_rsl_bot
+Explain the current book as if I have been away for a week: what matters, what changed, and what decisions are coming next.
+```
+
+## 8. If you want another system to interface with it
+
+Best contract:
+- include a stable `request_id`
+- specify objective and constraints
+- ask for explicit outputs
+- prefer one request per message
+- keep listen-only context separate from reply-expected requests
+
+Recommended machine-oriented shape:
+
+```text
+@druck_rsl_bot
+request_id: <stable-id>
+objective: <single concrete goal>
+context: <facts or prior state>
+constraints: <risk, timing, no-trade rules, output length>
+required_outputs:
+- thesis
+- evidence_with_sources
+- expected_edge_vs_sp500
+- expected_edge_vs_cash
+- falsifier
+- next_action
+```
+
+Avoid:
+- mixing multiple unrelated goals in one message
+- asking for execution and broad brainstorming in the same prompt
+- assuming a reply without `@druck_rsl_bot` in the group topic
+
+## 9. CLI backstops when Telegram is not enough
+
+Use these only for verification or recovery:
+
+```bash
+python3 ~/.openclaw/workspaces/trader/scripts/summary_report.py
+python3 ~/.openclaw/workspaces/trader/scripts/reconcile_legacy_positions.py --report
+python3 ~/.openclaw/workspaces/trader/scripts/flatten_and_reset.py --dry-run
+openclaw health
+openclaw gateway status
+```
+
+Do not use gateway restart as a normal operating step. Use hot reload for config changes and the safe restart script only if a restart is truly required.
+
+## 10. If Telegram is silent or behaving oddly
+
+Fast checks:
+
+```bash
+openclaw health
+openclaw gateway status
+```
+
+Telegram-side checks:
+- make sure you are messaging the right account: `@druck_rsl_bot`
+- in the group thread, include the explicit `@druck_rsl_bot` mention
+- if you are using direct Telegram chat and the bot was never started there, send `/start`
+- if pairing/access changed, re-check Telegram pairing and allowlist status
+
+Useful recovery checks from the existing OpenClaw docs:
+- if Telegram is not responding at all, confirm pairing completed
+- if the wider system looks unhealthy, use `openclaw health` before touching anything else
+
+Avoid treating restart as the first fix. Normal operating order is:
+1. verify Telegram message shape,
+2. verify gateway health,
+3. verify the trading DB state with `summary_report.py`,
+4. only then consider gateway recovery steps.
+
+## 11. Bottom line
+
+- Treat Druck as the trading front door, not as a vague chat bot.
+- Use `/summary` first, then drill down.
+- Ask for explicit standing notification rules if you want a tighter update cadence.
+- Use Dwight for oversight pressure, Druck for execution and state.
+- Keep requests structured so the reply can be acted on or parsed immediately.
 
 ========================================================================================================================
 /home/aaron/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md
@@ -491,8 +1013,8 @@ Archivist writeback contract:
 - `postmortems` must name the hypothesis, resolution state, what was learned, what was false, and which mechanism remained plausible.
 - `patterns` must be reusable rules or anti-patterns, not narrative summaries.
 - Researcher consumes `patterns` as a structured prior: it may raise or lower evidence weight, add a new falsifier, or shorten the time horizon for a similar future thesis.
-- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a versioned experiment tag.
-- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a versioned rule or threshold change and logged in `DECISION_LOG.md`.
+- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a traceable experiment tag.
+- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a formal rule or threshold change and logged in `DECISION_LOG.md`.
 
 ## 13. Temporary state policy
 
@@ -602,8 +1124,8 @@ Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`
 ## 9.1 Deterministic regime convention
 
 - `regime.current` means the `current` value from the latest `regime` snapshot by `determined_at`.
-- The classification logic from signals to enum must be versioned and deterministic (`regime_rules.rule_version`).
-- Any regime-rule change requires a new `experiment_id` and a `DECISION_LOG.md` entry.
+- The classification logic from signals to enum must be deterministic and sourced from the active `regime_rules` row (`rule_version = 'live'`).
+- Any regime-rule change requires a `DECISION_LOG.md` entry and refreshed `experiment_id` tags.
 
 ## 9. Resolution and post-mortem
 
@@ -763,7 +1285,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 | `provenance_completeness_pct` | REAL | 0–100 |
 | `counterargument_quality_score` | REAL | critic quality score |
 | `explainability_status` | TEXT | `pass` / `fail` |
-| `experiment_id` | TEXT | policy/prompt/scoring version tag |
+| `experiment_id` | TEXT | policy/prompt/scoring attribution tag |
 | `max_fillable_size` | REAL | ADV-aware maximum realistic size |
 | `modeled_slippage_bps` | REAL | expected slippage assumption |
 | `modeled_fill_price` | REAL | slippage-adjusted expected fill |
@@ -870,7 +1392,7 @@ Fields: `id`, `masked_case_json`, `case_class` (`winner` / `negative_control` / 
 
 ### 3.15 `regime_rules`
 
-Versioned deterministic mapping from input signals to regime enum.
+Deterministic mapping from input signals to regime enum.
 
 Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `experiment_id`.
 
@@ -1046,9 +1568,9 @@ Validation corpus ingestion protocol:
 
 Regime rules ingestion protocol:
 
-- Quant owns regime classification and must write the current regime snapshot from a versioned rule set.
-- A regime update is only valid if the rule version and thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule version in audit metadata.
-- Rule updates require a `DECISION_LOG.md` entry and a new `experiment_id`.
+- Quant owns regime classification and must write the current regime snapshot from the active deterministic rule set.
+- A regime update is only valid if thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule configuration in audit metadata.
+- Rule updates require a `DECISION_LOG.md` entry and refreshed `experiment_id` tags.
 - Until the regime rule page is authored, default behavior is fail-closed to `neutral`/`caution`-style gating rather than inventing implicit thresholds.
 
 ## 8. Pre-flight checklist for live paper
@@ -1065,6 +1587,19 @@ Regime rules ingestion protocol:
 - Any change to authority docs requires an entry in `DECISION_LOG.md`.
 - Any new active doc requires updating `DOC_INDEX.md` and confirming the active set stays at five.
 - Every policy/scoring/prompt change must create an `experiment_id` stamped onto downstream intents, audits, patterns, and postmortems.
+
+## 10. Bootstrap operations and continuous corpus growth
+
+- Initial operations are allowed in Alpaca paper before full validation corpus counts are reached, as long as all execution gates and reconciliation rules still pass.
+- Initial operations do not change the edge-proof requirement: corpus thresholds in section 7 remain mandatory before treating results as robust edge evidence.
+- Use a dual-lane workflow:
+	- operations lane: real, specific thesis/execution data for live paper decisions.
+	- evaluation lane: masked validation cases for leakage-resistant measurement.
+- Continuous learning loop:
+	1. export resolved hypothesis outcomes into a review queue,
+	2. approve high-quality candidates,
+	3. convert approved raw detailed cases into masked evaluation cases,
+	4. re-run corpus validation.
 
 
 ========================================================================================================================
@@ -1390,11 +1925,11 @@ WHERE r.determined_at = (SELECT MAX(determined_at) FROM regime);
 
 
 ========================================================================================================================
-/home/aaron/.openclaw/workspaces/trading-intel/reference/regime_rules_v1.md
+/home/aaron/.openclaw/workspaces/trading-intel/reference/regime_rules.md
 ========================================================================================================================
-# Regime Rules — v1
+# Regime Rules
 
-Status: active reference. Loaded into `regime_rules` as `rule_version = "v1"`.
+Status: active reference. Loaded into `regime_rules` as `rule_version = "live"`.
 Effective: 2026-05-29.
 Owner: `quant`.
 Authority: this page is the concrete numeric realization of the regime model declared in
@@ -1474,8 +2009,8 @@ The aggregate uses the **worst-of with credit override** rule, deterministically
 5. Map the final severity back to the enum.
 
 This rule is what `regime_rules.thresholds_json.aggregation` encodes; quant must implement it
-exactly. Any change requires a new `rule_version`, a `DECISION_LOG.md` entry, and a new
-`experiment_id`.
+exactly. Any change requires a `DECISION_LOG.md` entry and updated `experiment_id` tags in
+affected rows.
 
 ## 4. Fail-closed behavior
 
@@ -1484,7 +2019,7 @@ If any of the following is true, quant MUST write `regime.current = 'caution'` w
 
 - Any of the four signals is missing or stale (> 36 hours old for daily series).
 - FRED, Alpaca, or CBOE source returned an error and no fallback snapshot is available.
-- Active `regime_rules.rule_version` is older than `effective_at` floor (i.e., misconfigured).
+- Active `regime_rules` row is missing or malformed.
 
 The system never invents an implicit `risk_on` or `neutral` from partial inputs.
 
@@ -1505,28 +2040,26 @@ Trader gate consequences as defined in `docs/01_OPERATING_AUTHORITY.md` and
 
 ## 6. Seed row
 
-The canonical first row is shipped at `sql/seeds/regime_rules_v1.json` and loaded into
+The canonical row is shipped at `sql/seeds/regime_rules.json` and loaded into
 `regime_rules` on schema bootstrap. The seed `thresholds_json` exactly mirrors the tables above.
 
 ## 7. Change procedure
 
-- Author a new file `reference/regime_rules_vN.md` for the proposed rule set.
-- Add a new seed `sql/seeds/regime_rules_vN.json`.
-- Append a `DECISION_LOG.md` entry with rationale and `experiment_id`.
-- Insert the new row into `regime_rules` with `effective_at = now`.
-- Quant begins emitting `regime` rows that reference `rule_version = "vN"`.
-- The old row stays in `regime_rules` for historical attribution; never delete prior rule rows.
+- Update this file and `sql/seeds/regime_rules.json` together.
+- Append a `DECISION_LOG.md` entry with rationale and refreshed `experiment_id` tags.
+- Upsert the active row in `regime_rules` with `rule_version = "live"` and updated `effective_at`.
+- Quant emits new `regime` rows using the updated thresholds after the decision is approved.
 
 
 ========================================================================================================================
-/home/aaron/.openclaw/workspaces/trading-intel/sql/seeds/regime_rules_v1.json
+/home/aaron/.openclaw/workspaces/trading-intel/sql/seeds/regime_rules.json
 ========================================================================================================================
 {
-  "id": "regime_rules_v1",
-  "rule_version": "v1",
+  "id": "regime_rules_live",
+  "rule_version": "live",
   "effective_at": "2026-05-29T00:00:00Z",
-  "notes": "Initial deterministic regime classifier. See reference/regime_rules_v1.md for narrative.",
-  "experiment_id": "regime_rules_v1_init",
+  "notes": "Deterministic regime classifier. See reference/regime_rules.md for narrative.",
+  "experiment_id": "regime_rules_live_init",
   "thresholds_json": {
     "signals": {
       "spy_trend": {
@@ -1613,9 +2146,15 @@ Authority: `docs/05_IMPLEMENTATION_POLICY.md` §7 and `sql/schema.sql` `validati
 
 ## Layout
 
+- `raw_cases/<case_id>.json` — internal detailed source cases with real names/numbers for fast authoring.
 - `cases/<case_id>.json` — one case per file, matches the JSON contract below.
 - `seeds/` — high-quality exemplar cases shipped as templates for hand-building the rest.
 - `index.json` — generated manifest of all cases (id, class, fake_date_variant, passed, source_file).
+
+Build path:
+
+- `build_masked_from_raw.py` converts `raw_cases/*.json` into model-facing `cases/*.json`.
+- `validate_corpus.py` validates shape/counts and emits `index.json`.
 
 ## JSON contract (one file per case)
 
@@ -1643,7 +2182,7 @@ Authority: `docs/05_IMPLEMENTATION_POLICY.md` §7 and `sql/schema.sql` `validati
   },
   "passed": 0,
   "created_at": "2026-05-29T00:00:00Z",
-  "experiment_id": "validation_corpus_v1_seed"
+  "experiment_id": "validation_corpus_seed"
 }
 ```
 
@@ -1688,23 +2227,23 @@ files under `cases/` instead.
 
 
 ========================================================================================================================
-/home/aaron/.openclaw/workspaces/researcher/skills/reasoning_chain_v1.md
+/home/aaron/.openclaw/workspaces/researcher/skills/reasoning_chain.md
 ========================================================================================================================
-# Researcher Reasoning Chain — v1
+# Researcher Reasoning Chain
 
-Status: active versioned skill. Loaded by `researcher` for every hypothesis creation and every
+Status: active skill. Loaded by `researcher` for every hypothesis creation and every
 material evidence update.
 
 - `skill_id`: `researcher.reasoning_chain`
-- `version`: `v1`
-- `experiment_id`: `researcher_reasoning_v1`
+- `version`: `live`
+- `experiment_id`: `researcher_reasoning_live`
 - Effective: 2026-05-29.
 - Authority: subordinate to `workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md` and
   `docs/02_ARCHITECTURE.md`. If this skill ever conflicts with the canonical docs, the docs win.
 
 ## Purpose
 
-This chain is the single, versioned reasoning procedure researcher follows to convert a primary
+This chain is the single reasoning procedure researcher follows to convert a primary
 source delta into a falsifiable hypothesis. The chain output is structured and machine-readable
 so quant, critic, and archivist can consume it deterministically. Long-form prose belongs in the
 journal, not in this chain's output.
@@ -1722,7 +2261,7 @@ The chain emits one JSON object that is attached to the audit and used to update
 
 ```json
 {
-  "experiment_id": "researcher_reasoning_v1",
+  "experiment_id": "researcher_reasoning_live",
   "q1_world_change": "...",
   "q2_mechanism_to_cash_flows": "...",
   "q3_who_is_affected": { "winners": [], "losers": [] },
@@ -1795,15 +2334,16 @@ filings for capacity additions in region Y"). This is the anti-confirmation-bias
 - `critic` enforces structure: validates Q1 primary-source citation, demands ≥2 falsifiers in Q7,
   ≥2 disconfirming-evidence sources in Q8, and rejects any field that reads as boilerplate.
 - `archivist` uses Q2 mechanism + Q7 falsifiers + Q6 milestones to grade outcomes and to extract
-  patterns. A postmortem must reference the `experiment_id` of the chain version used.
+  patterns. A postmortem must reference the `experiment_id` of the chain run used.
 
-## Versioning rules
+## Change control
 
-- Any change to question count, ordering, or output schema is a new `version`, a new
-  `experiment_id`, a new skill file `reasoning_chain_vN.md`, and a `DECISION_LOG.md` entry.
+- Any structural change to question count, ordering, or output schema requires a
+  `DECISION_LOG.md` entry.
+- Keep this file as the single live chain definition; do not fork parallel chain files.
 - The chain output JSON always carries `experiment_id`. Downstream rows inherit it via
   `audits.experiment_id` and `hypotheses.experiment_id`.
-- Old versions stay on disk; never delete.
+- Refresh `experiment_id` when a structural change is approved so outcomes remain attributable.
 
 
 ========================================================================================================================
@@ -1844,4 +2384,6 @@ All operational, architectural, lifecycle, schema, and policy rules live under t
 - Telegram commands available: `/summary`, `/hypothesis`, `/intent`, `/approve`, `/reject`, `/exit`, `/trim`, `/regime`, `/critic`, `/archivist`, `/audit`.
 - Telegram routing: account `druck` is bound to this agent. Do not assume any other Telegram presence.
 - "Druck" is your persona label, not a separate supervisory agent.
+- `/summary` source of truth: `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py`.
+- Do not call `sqlite3`; use Python SQLite access (sqlite3 CLI is not installed).
 

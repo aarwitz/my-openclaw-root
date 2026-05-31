@@ -35,12 +35,12 @@ CANONICAL STATE
   WAL-mode SQLite; application-layer write enforcement; one shared store for all five agents.
 
 CANONICAL REFERENCE ARTIFACTS
-  reference/regime_rules_v1.md            -> v1 regime classifier thresholds (narrative)
-  sql/seeds/regime_rules_v1.json          -> regime_rules seed row (rule_version v1)
+  reference/regime_rules.md               -> live regime classifier thresholds (narrative)
+  sql/seeds/regime_rules.json             -> regime_rules seed row (rule_version live)
   sql/seed_bootstrap.py                   -> idempotent seed loader
   reference/validation_corpus/README.md   -> validation case JSON contract + protocol
   reference/validation_corpus/seeds/      -> exemplar cases (winner / negative_control / post_cutoff + fake_date_variant)
-  ../researcher/skills/reasoning_chain_v1.md  -> versioned 8-question researcher reasoning chain
+  ../researcher/skills/reasoning_chain.md -> active 8-question researcher reasoning chain
 
 ========================================================================================================================
 1) AGENT TOPOLOGY
@@ -291,7 +291,7 @@ Key invariant:
 
   Stage 2: quantification
     - quant updates hypothesis score
-    - quant computes regime.current from versioned deterministic rules
+    - quant computes regime.current from deterministic live rules
     - quant ranks expression candidates
     - quant proposes sizes and tranche logic
 
@@ -364,7 +364,7 @@ Key invariant:
     - no free-form advice is written directly back into researcher or quant state
     - researcher consumes patterns as a prior adjustment, added falsifier, or shorter horizon
     - quant consumes patterns as a scoring prior, threshold shift, or ranking penalty
-    - any promotion from pattern to hard rule requires a versioned rule change and DECISION_LOG entry
+    - any promotion from pattern to hard rule requires a formal rule change and DECISION_LOG entry
 
   LOOP F: FALSIFIER -> DORMANT -> EXIT/TRIM
     - falsifier flips broken
@@ -474,9 +474,9 @@ Key invariant:
     - rows are append-only corpus records plus batch audit trail
 
   regime_rules protocol
-    - quant owns regime.current and must use versioned deterministic thresholds
+    - quant owns regime.current and must use deterministic thresholds from the active live rule set
     - regime_rules stores rule_version, effective_at, thresholds_json, notes, experiment_id
-    - a regime update is only valid when the active rule version is recorded
+    - a regime update is only valid when the active rule configuration is recorded
     - default fail-closed behavior applies if thresholds are not yet authored
 
   audits

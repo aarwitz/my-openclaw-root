@@ -1,6 +1,6 @@
-# Regime Rules — v1
+# Regime Rules
 
-Status: active reference. Loaded into `regime_rules` as `rule_version = "v1"`.
+Status: active reference. Loaded into `regime_rules` as `rule_version = "live"`.
 Effective: 2026-05-29.
 Owner: `quant`.
 Authority: this page is the concrete numeric realization of the regime model declared in
@@ -80,8 +80,8 @@ The aggregate uses the **worst-of with credit override** rule, deterministically
 5. Map the final severity back to the enum.
 
 This rule is what `regime_rules.thresholds_json.aggregation` encodes; quant must implement it
-exactly. Any change requires a new `rule_version`, a `DECISION_LOG.md` entry, and a new
-`experiment_id`.
+exactly. Any change requires a `DECISION_LOG.md` entry and updated `experiment_id` tags in
+affected rows.
 
 ## 4. Fail-closed behavior
 
@@ -90,7 +90,7 @@ If any of the following is true, quant MUST write `regime.current = 'caution'` w
 
 - Any of the four signals is missing or stale (> 36 hours old for daily series).
 - FRED, Alpaca, or CBOE source returned an error and no fallback snapshot is available.
-- Active `regime_rules.rule_version` is older than `effective_at` floor (i.e., misconfigured).
+- Active `regime_rules` row is missing or malformed.
 
 The system never invents an implicit `risk_on` or `neutral` from partial inputs.
 
@@ -111,14 +111,12 @@ Trader gate consequences as defined in `docs/01_OPERATING_AUTHORITY.md` and
 
 ## 6. Seed row
 
-The canonical first row is shipped at `sql/seeds/regime_rules_v1.json` and loaded into
+The canonical row is shipped at `sql/seeds/regime_rules.json` and loaded into
 `regime_rules` on schema bootstrap. The seed `thresholds_json` exactly mirrors the tables above.
 
 ## 7. Change procedure
 
-- Author a new file `reference/regime_rules_vN.md` for the proposed rule set.
-- Add a new seed `sql/seeds/regime_rules_vN.json`.
-- Append a `DECISION_LOG.md` entry with rationale and `experiment_id`.
-- Insert the new row into `regime_rules` with `effective_at = now`.
-- Quant begins emitting `regime` rows that reference `rule_version = "vN"`.
-- The old row stays in `regime_rules` for historical attribution; never delete prior rule rows.
+- Update this file and `sql/seeds/regime_rules.json` together.
+- Append a `DECISION_LOG.md` entry with rationale and refreshed `experiment_id` tags.
+- Upsert the active row in `regime_rules` with `rule_version = "live"` and updated `effective_at`.
+- Quant emits new `regime` rows using the updated thresholds after the decision is approved.

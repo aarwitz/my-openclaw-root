@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
+
 import argparse
+from pathlib import Path
 import glob
 import json
 import re
-from pathlib import Path
 
 
 def load_session_file(base: Path, agent: str, sender: str) -> Path:

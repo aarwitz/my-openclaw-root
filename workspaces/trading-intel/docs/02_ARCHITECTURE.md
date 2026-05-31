@@ -257,8 +257,8 @@ Archivist writeback contract:
 - `postmortems` must name the hypothesis, resolution state, what was learned, what was false, and which mechanism remained plausible.
 - `patterns` must be reusable rules or anti-patterns, not narrative summaries.
 - Researcher consumes `patterns` as a structured prior: it may raise or lower evidence weight, add a new falsifier, or shorten the time horizon for a similar future thesis.
-- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a versioned experiment tag.
-- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a versioned rule or threshold change and logged in `DECISION_LOG.md`.
+- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a traceable experiment tag.
+- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a formal rule or threshold change and logged in `DECISION_LOG.md`.
 
 ## 13. Temporary state policy
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # Lane-aware coding task launcher for hybrid inline/Codex-subagent/ACP architecture.

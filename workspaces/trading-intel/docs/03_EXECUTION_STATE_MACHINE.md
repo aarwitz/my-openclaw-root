@@ -75,8 +75,8 @@ Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`
 ## 9.1 Deterministic regime convention
 
 - `regime.current` means the `current` value from the latest `regime` snapshot by `determined_at`.
-- The classification logic from signals to enum must be versioned and deterministic (`regime_rules.rule_version`).
-- Any regime-rule change requires a new `experiment_id` and a `DECISION_LOG.md` entry.
+- The classification logic from signals to enum must be deterministic and sourced from the active `regime_rules` row (`rule_version = 'live'`).
+- Any regime-rule change requires a `DECISION_LOG.md` entry and refreshed `experiment_id` tags.
 
 ## 9. Resolution and post-mortem
 

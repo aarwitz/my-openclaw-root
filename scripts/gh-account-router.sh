@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 CRED_FILE="/home/aaron/.openclaw/credentials/github_credentials.json"

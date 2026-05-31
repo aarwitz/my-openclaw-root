@@ -123,7 +123,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 | `provenance_completeness_pct` | REAL | 0–100 |
 | `counterargument_quality_score` | REAL | critic quality score |
 | `explainability_status` | TEXT | `pass` / `fail` |
-| `experiment_id` | TEXT | policy/prompt/scoring version tag |
+| `experiment_id` | TEXT | policy/prompt/scoring attribution tag |
 | `max_fillable_size` | REAL | ADV-aware maximum realistic size |
 | `modeled_slippage_bps` | REAL | expected slippage assumption |
 | `modeled_fill_price` | REAL | slippage-adjusted expected fill |
@@ -230,7 +230,7 @@ Fields: `id`, `masked_case_json`, `case_class` (`winner` / `negative_control` / 
 
 ### 3.15 `regime_rules`
 
-Versioned deterministic mapping from input signals to regime enum.
+Deterministic mapping from input signals to regime enum.
 
 Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `experiment_id`.
 

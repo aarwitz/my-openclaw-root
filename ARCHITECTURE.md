@@ -236,4 +236,4 @@ Watcher re-entry rule:
 - Use Task Flow only for multi-step pipelines.
 - Use single detached task for one coding outcome.
 - Keep lane vocabulary, preflight checks, and fallback semantics unchanged unless script behavior is intentionally revised in the same change set.
-- Use `workspace/docs/task-manager-execution-automation-plan.md` as the rollout source of truth for the remaining cleanup and hardening after deterministic launch.
+- Use `workspace/docs/task-manager-execution-automation-plan.md` as the coding-lane implementation reference when you need low-level launcher details.

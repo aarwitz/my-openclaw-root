@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+
 """Generate a clean trader summary from trading-intel SQLite state.
 
 Designed for Telegram-facing /summary responses. No tool-trace output.
 """
 
-from __future__ import annotations
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
 
 import os
 import sqlite3

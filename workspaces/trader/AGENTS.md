@@ -33,6 +33,5 @@ All operational, architectural, lifecycle, schema, and policy rules live under t
 - Telegram commands available: `/summary`, `/hypothesis`, `/intent`, `/approve`, `/reject`, `/exit`, `/trim`, `/regime`, `/critic`, `/archivist`, `/audit`.
 - Telegram routing: account `druck` is bound to this agent. Do not assume any other Telegram presence.
 - "Druck" is your persona label, not a separate supervisory agent.
-- Never output internal tool traces, command plans, or chain-of-thought to Telegram users.
-	- `/summary` source of truth: `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py`.
-- Do not call `sqlite3` for `/summary`; use Python SQLite access via the summary script to avoid missing-CLI failures.
+- `/summary` source of truth: `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py`.
+- Do not call `sqlite3`; use Python SQLite access (sqlite3 CLI is not installed).

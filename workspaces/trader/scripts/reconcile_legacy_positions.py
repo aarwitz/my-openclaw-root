@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
+
 """Reconcile legacy Alpaca paper positions into the trading-intel DB.
 
 Fetches live Alpaca positions and offers two modes:
@@ -14,16 +20,14 @@ Usage:
   python3 reconcile_legacy_positions.py [--import] [--clear-pause]
 """
 
-from __future__ import annotations
 
 import argparse
 import json
 import os
+from pathlib import Path
 import sqlite3
-import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 ALPACA_CRED_PATH = Path(os.path.expanduser("~/.openclaw/credentials/alpaca-api.json"))
@@ -93,7 +97,7 @@ def import_position(conn: sqlite3.Connection, pos: dict) -> str:
         "system",
         n,
         n,
-        "reconcile_legacy_import_v1",
+        "reconcile_legacy_import_live",
     ))
 
     conn.execute("""
@@ -112,12 +116,12 @@ def import_position(conn: sqlite3.Connection, pos: dict) -> str:
         unrealized_pl,
         n,
         n,
-        "reconcile_legacy_import_v1",
+        "reconcile_legacy_import_live",
     ))
 
     conn.execute("""
         INSERT INTO audits
-          (id, actor, action, entity_type, entity_id, detail_json, created_at, experiment_id)
+          (id, actor, action, entity_type, entity_id, after_state, timestamp, experiment_id)
         VALUES (?,?,?,?,?,?,?,?)
     """, (
         f"audit_{uuid.uuid4().hex}",
@@ -127,7 +131,7 @@ def import_position(conn: sqlite3.Connection, pos: dict) -> str:
         pos_id,
         json.dumps({"symbol": pos["symbol"], "qty": qty, "market_value": market_value}),
         n,
-        "reconcile_legacy_import_v1",
+        "reconcile_legacy_import_live",
     ))
 
     return pos_id
@@ -140,7 +144,7 @@ def clear_pause(conn: sqlite3.Connection, pause_id: str) -> None:
     )
     conn.execute("""
         INSERT INTO audits
-          (id, actor, action, entity_type, entity_id, detail_json, created_at, experiment_id)
+          (id, actor, action, entity_type, entity_id, after_state, timestamp, experiment_id)
         VALUES (?,?,?,?,?,?,?,?)
     """, (
         f"audit_{uuid.uuid4().hex}",
@@ -150,7 +154,7 @@ def clear_pause(conn: sqlite3.Connection, pause_id: str) -> None:
         pause_id,
         json.dumps({"reason": "legacy positions imported, divergence resolved"}),
         now_iso(),
-        "reconcile_legacy_import_v1",
+        "reconcile_legacy_import_live",
     ))
 
 

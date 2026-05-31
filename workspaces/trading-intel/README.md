@@ -20,4 +20,4 @@ Five OpenClaw agents share one canonical SQLite store and one repo of authoritat
 
 ## Authority
 
-If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`).
+If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`). This root is the single live trading authority.

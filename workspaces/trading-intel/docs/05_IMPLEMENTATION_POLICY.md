@@ -136,9 +136,9 @@ Validation corpus ingestion protocol:
 
 Regime rules ingestion protocol:
 
-- Quant owns regime classification and must write the current regime snapshot from a versioned rule set.
-- A regime update is only valid if the rule version and thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule version in audit metadata.
-- Rule updates require a `DECISION_LOG.md` entry and a new `experiment_id`.
+- Quant owns regime classification and must write the current regime snapshot from the active deterministic rule set.
+- A regime update is only valid if thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule configuration in audit metadata.
+- Rule updates require a `DECISION_LOG.md` entry and refreshed `experiment_id` tags.
 - Until the regime rule page is authored, default behavior is fail-closed to `neutral`/`caution`-style gating rather than inventing implicit thresholds.
 
 ## 8. Pre-flight checklist for live paper
@@ -158,8 +158,8 @@ Regime rules ingestion protocol:
 
 ## 10. Bootstrap operations and continuous corpus growth
 
-- Bootstrap mode is allowed in Alpaca paper before full validation corpus counts are reached, as long as all execution gates and reconciliation rules still pass.
-- Bootstrap mode does not change the edge-proof requirement: corpus thresholds in section 7 remain mandatory before treating results as robust edge evidence.
+- Initial operations are allowed in Alpaca paper before full validation corpus counts are reached, as long as all execution gates and reconciliation rules still pass.
+- Initial operations do not change the edge-proof requirement: corpus thresholds in section 7 remain mandatory before treating results as robust edge evidence.
 - Use a dual-lane workflow:
 	- operations lane: real, specific thesis/execution data for live paper decisions.
 	- evaluation lane: masked validation cases for leakage-resistant measurement.

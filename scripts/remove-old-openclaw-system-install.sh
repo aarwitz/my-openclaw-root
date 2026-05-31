@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # Removes old root-owned /usr OpenClaw install after migration to nvm-managed OpenClaw.

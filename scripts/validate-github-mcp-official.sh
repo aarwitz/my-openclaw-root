@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 EXPORT_BIN="/home/aaron/.openclaw/scripts/export-github-mcp-env.sh"

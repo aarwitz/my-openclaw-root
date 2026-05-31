@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 OPENCLAW_BIN="/home/aaron/.nvm/versions/node/v22.22.1/bin/openclaw"

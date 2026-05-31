@@ -210,8 +210,7 @@
         ],
         "identity": {
            "name": "Druck",
-           "emoji": "",
-           "ackReaction": "👀"
+           "emoji": "💰"
         }
       },
       {
@@ -285,6 +284,13 @@
     }
   },
   "bindings": [
+    {
+      "match": {
+        "channel": "telegram",
+        "accountId": "jerry"
+      },
+      "agentId": "main"
+    },
     {
       "match": {
         "channel": "telegram",
@@ -501,7 +507,7 @@
             "druck-research",
             "financialmodeling-prep-api"
           ],
-          "systemPrompt": "You are in Trading Desk. Mention-gated policy is ON: only respond when explicitly addressed with @mention. Use topic specialization strictly: Dwight oversight in topic 1, Druck execution in topic 244. Keep messages structured, source-backed, and concise.",
+          "systemPrompt": "You are in Trading Desk. Mention-gated policy is ON: only respond when explicitly addressed with @mention. Use topic specialization strictly: Dwight oversight in topic 1, Druck execution in topic 641. Keep messages structured, source-backed, and concise.",
           "topics": {
             "1": {
               "agentId": "dwight",
@@ -512,7 +518,7 @@
               ],
               "systemPrompt": "You are Dwight in Trading Desk Oversight. Optimize durable outperformance vs S&P with strict evidence and risk control.\n\nEscalate when:\n- scheduled updates are missing,\n- evidence is weak/stale/uncited,\n- any horizon underperforms S&P,\n- tool/skill health is uncertain.\n\nCapital rule:\n- If expected edge does not beat 3% annual cash yield, direct pass/no-trade.\n\nCross-bot protocol:\n- @druck_rsl_bot => reply expected.\n- FYI/cc @druck_rsl_bot => listen-only.\n- Prefer ACTION_REQUEST_DRUCK with request_id.\n\nDirective template:\nACTION_REQUEST_DRUCK\nrequest_id: <id>\nobjective: <goal>\nwhy_now: <kpi/risk/catalyst>\nconstraints: <risk/universe/deadline/no-order rules>\nrequired_outputs:\n- thesis\n- evidence_with_sources\n- expected_edge_vs_sp500\n- expected_edge_vs_cash_3pct\n- falsifier\n- concrete_next_action\ndeadline_et: <time>\n\nLogging:\n- Log material updates/discrepancies/corrective plans in Task Manager with KPI impact, next step, and references."
             },
-            "244": {
+            "641": {
               "agentId": "trader",
               "skills": [
                 "newsapi-ai",
@@ -532,7 +538,7 @@
       },
       "historyLimit": 20,
       "accounts": {
-        "default": {
+        "jerry": {
           "dmPolicy": "pairing",
           "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token",
           "allowFrom": [
@@ -591,7 +597,7 @@
           "groupPolicy": "allowlist"
         }
       },
-      "defaultAccount": "default"
+      "defaultAccount": "jerry"
     }
   },
   "gateway": {

@@ -1,18 +1,18 @@
-# Researcher Reasoning Chain — v1
+# Researcher Reasoning Chain
 
-Status: active versioned skill. Loaded by `researcher` for every hypothesis creation and every
+Status: active skill. Loaded by `researcher` for every hypothesis creation and every
 material evidence update.
 
 - `skill_id`: `researcher.reasoning_chain`
-- `version`: `v1`
-- `experiment_id`: `researcher_reasoning_v1`
+- `version`: `live`
+- `experiment_id`: `researcher_reasoning_live`
 - Effective: 2026-05-29.
 - Authority: subordinate to `workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md` and
   `docs/02_ARCHITECTURE.md`. If this skill ever conflicts with the canonical docs, the docs win.
 
 ## Purpose
 
-This chain is the single, versioned reasoning procedure researcher follows to convert a primary
+This chain is the single reasoning procedure researcher follows to convert a primary
 source delta into a falsifiable hypothesis. The chain output is structured and machine-readable
 so quant, critic, and archivist can consume it deterministically. Long-form prose belongs in the
 journal, not in this chain's output.
@@ -30,7 +30,7 @@ The chain emits one JSON object that is attached to the audit and used to update
 
 ```json
 {
-  "experiment_id": "researcher_reasoning_v1",
+  "experiment_id": "researcher_reasoning_live",
   "q1_world_change": "...",
   "q2_mechanism_to_cash_flows": "...",
   "q3_who_is_affected": { "winners": [], "losers": [] },
@@ -103,12 +103,13 @@ filings for capacity additions in region Y"). This is the anti-confirmation-bias
 - `critic` enforces structure: validates Q1 primary-source citation, demands ≥2 falsifiers in Q7,
   ≥2 disconfirming-evidence sources in Q8, and rejects any field that reads as boilerplate.
 - `archivist` uses Q2 mechanism + Q7 falsifiers + Q6 milestones to grade outcomes and to extract
-  patterns. A postmortem must reference the `experiment_id` of the chain version used.
+  patterns. A postmortem must reference the `experiment_id` of the chain run used.
 
-## Versioning rules
+## Change control
 
-- Any change to question count, ordering, or output schema is a new `version`, a new
-  `experiment_id`, a new skill file `reasoning_chain_vN.md`, and a `DECISION_LOG.md` entry.
+- Any structural change to question count, ordering, or output schema requires a
+  `DECISION_LOG.md` entry.
+- Keep this file as the single live chain definition; do not fork parallel chain files.
 - The chain output JSON always carries `experiment_id`. Downstream rows inherit it via
   `audits.experiment_id` and `hypotheses.experiment_id`.
-- Old versions stay on disk; never delete.
+- Refresh `experiment_id` when a structural change is approved so outcomes remain attributable.

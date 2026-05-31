@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -u
 
 TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

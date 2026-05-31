@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 DEFAULT_TOKEN_FILE="/home/aaron/.openclaw/credentials/cloudflare/account-token"

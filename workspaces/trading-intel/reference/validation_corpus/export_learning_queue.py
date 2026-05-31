@@ -76,7 +76,7 @@ def main() -> int:
                 "suggested_case_class": "post_cutoff",
                 "suggested_direction": "none",
                 "notes": "review and convert to raw_case JSON if this is a strong, externally checkable example",
-                "experiment_id": row["postmortem_experiment_id"] or "validation_corpus_v1",
+                "experiment_id": row["postmortem_experiment_id"] or "validation_corpus_live",
             }
             f.write(json.dumps(item) + "\n")
 

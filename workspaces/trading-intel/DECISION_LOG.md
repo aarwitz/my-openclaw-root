@@ -25,9 +25,9 @@
 
 ## 2026-05-29: Production-readiness artifacts
 
-- D21: Regime classifier v1 thresholds authored at `reference/regime_rules_v1.md` and seeded via `sql/seeds/regime_rules_v1.json` (`rule_version = "v1"`, `experiment_id = "regime_rules_v1_init"`). Quant is unblocked to implement deterministic regime classification. Default fail-closed remains `caution` when signals are stale or missing.
-- D22: Researcher reasoning chain promoted to a versioned skill at `workspaces/researcher/skills/reasoning_chain_v1.md` (`experiment_id = "researcher_reasoning_v1"`). All downstream rows must carry this `experiment_id` so reasoning-chain changes are attributable.
-- D23: Validation corpus scaffolded at `reference/validation_corpus/` with the JSON contract, one exemplar seed per class, and a paired `fake_date_variant` seed (`experiment_id = "validation_corpus_v1_seed"`). Operator must hand-build the full corpus to clear Phase 1 thresholds (≥30 post-cutoff, ≥60 negative-control, plus fake-date variants).
+- D21: Deterministic regime thresholds authored at `reference/regime_rules.md` and seeded via `sql/seeds/regime_rules.json` (`rule_version = "live"`, `experiment_id = "regime_rules_live_init"`). Quant is unblocked to implement deterministic regime classification. Default fail-closed remains `caution` when signals are stale or missing.
+- D22: Researcher reasoning chain promoted to an active skill at `workspaces/researcher/skills/reasoning_chain.md` (`experiment_id = "researcher_reasoning_live"`). All downstream rows must carry this `experiment_id` so reasoning-chain changes are attributable.
+- D23: Validation corpus scaffolded at `reference/validation_corpus/` with the JSON contract, one exemplar seed per class, and a paired `fake_date_variant` seed (`experiment_id = "validation_corpus_seed"`). Operator must hand-build the full corpus to clear Phase 1 thresholds (≥30 post-cutoff, ≥60 negative-control, plus fake-date variants).
 
 ## 2026-05-30: Bootstrap start and continuous learning loop
 
@@ -38,3 +38,10 @@
 ## Format
 
 For future decisions, append entries with: id, summary, rationale, files touched, approver, date.
+
+## 2026-05-31: Clean slate and operator guide
+
+- D27: Portfolio flattened (14 legacy Alpaca paper positions closed at market) and reconciliation divergence cleared. DB is at clean state: 0 positions, 0 hypotheses, no active pauses. This is the actual start of the trading loop.
+- D28: OPERATOR_GUIDE.md added at trading-intel workspace root as primary operator reference. DOC_INDEX.md updated. AGENT_HANDOFF_TODAY.md and BOOTSTRAP_START_DRUCK_NOW.md deleted as stale one-day task documents.
+- D29: Regime snapshot is empty. First operator action must be a regime assessment before any new opens are submitted.
+- D30: Final-state cleanup executed: all canonical rule/reasoning artifacts moved to stable names (`regime_rules.*`, `reasoning_chain.md`) and authority docs rewritten as one live operating contract without rollout-version language.

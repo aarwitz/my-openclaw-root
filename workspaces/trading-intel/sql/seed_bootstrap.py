@@ -2,7 +2,7 @@
 """Bootstrap canonical seeds into the trading-intel SQLite store.
 
 Currently seeds:
-- regime_rules v1 from sql/seeds/regime_rules_v1.json
+- active regime_rules from sql/seeds/regime_rules.json
 
 Idempotent: existing rows with the same id are left untouched.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
-REGIME_SEED = HERE / "seeds" / "regime_rules_v1.json"
+REGIME_SEED = HERE / "seeds" / "regime_rules.json"
 
 
 def seed_regime_rules(conn: sqlite3.Connection) -> str:

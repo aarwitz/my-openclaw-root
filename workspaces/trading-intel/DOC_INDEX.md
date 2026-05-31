@@ -15,11 +15,13 @@ Effective: 2026-05-28.
 
 - `sql/schema.sql` — canonical DDL for the shared state store.
 - `sql/seed_bootstrap.py` — idempotent loader for canonical seed rows.
-- `sql/seeds/regime_rules_v1.json` — versioned regime classifier thresholds (loaded into `regime_rules`).
-- `reference/regime_rules_v1.md` — narrative spec for the v1 regime classifier.
+- `sql/seeds/regime_rules.json` — active deterministic regime classifier thresholds (loaded into `regime_rules`).
+- `reference/regime_rules.md` — narrative spec for the live regime classifier.
 - `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
-- `../researcher/skills/reasoning_chain_v1.md` — versioned 8-question researcher reasoning chain.
+- `../researcher/skills/reasoning_chain.md` — active 8-question researcher reasoning chain.
 - `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
+- `OPERATOR_GUIDE.md` — Telegram command reference and daily workflow for the human operator.
+- `HUMAN_USE_GUIDE.md` — best-practice patterns for humans or external systems interfacing with Druck.
 - `archives/` — date-stamped retirement of superseded docs and prototypes.
 
 ## Legacy decommissioned
@@ -30,4 +32,4 @@ Legacy druck workspace state has been removed. This stack is the only active tra
 
 - If two docs disagree, the lower-numbered active doc wins, then `sql/schema.sql`.
 - New docs must be approved into `DOC_INDEX.md` before any agent treats them as authoritative.
-- Active stack is capped at 5 documents. Anything else lives as reference or archive.
+- Active authority stack is capped at 5 documents. Anything else lives as reference or archive.

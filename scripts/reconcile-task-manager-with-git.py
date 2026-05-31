@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
+
 
 import argparse
 import json
 import shutil
 import subprocess
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
