@@ -123,7 +123,7 @@ Good pattern:
 @druck_rsl_bot
 Objective: produce the top 3 actionable ideas for the current regime.
 Constraints: no orders yet, evidence must be primary-source-backed, compare against SPY and cash.
-Return: one ranked table plus a DRUCK_UPDATE block for the top idea.
+Return: numbered bullets (no markdown tables), one ticker per bullet, plus a DRUCK_UPDATE block for the top idea.
 ```
 
 Safer Telegram pattern (recommended):

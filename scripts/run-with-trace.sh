@@ -84,15 +84,16 @@ esac
 LOG_FILE="$HOME/.openclaw/logs/script-runs.jsonl"
 mkdir -p "$(dirname "$LOG_FILE")"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "run-with-trace requires jq" >&2
+  exit 127
+fi
+
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 START_EPOCH="$(date +%s)"
 CWD="$PWD"
-ARGS_JSON="$(python3 - <<'PY' "$@"
-import json,sys
-print(json.dumps(sys.argv[1:]))
-PY
-)"
+ARGS_JSON="$(printf '%s\n' "$@" | jq -R . | jq -s .)"
 
 set +e
 OPENCLAW_RUN_WITH_TRACE=1 "${RUN_CMD[@]}" "$@"
@@ -102,25 +103,26 @@ END_EPOCH="$(date +%s)"
 END_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DURATION="$((END_EPOCH - START_EPOCH))"
 
-python3 - <<'PY' "$LOG_FILE" "$RUN_ID" "$START_TS" "$END_TS" "$DURATION" "$EXIT_CODE" "$TAG" "$SCRIPT" "$CWD" "$ARGS_JSON"
-import json
-import pathlib
-import sys
-
-log_file = pathlib.Path(sys.argv[1])
-run = {
-    "run_id": sys.argv[2],
-    "started_at": sys.argv[3],
-    "ended_at": sys.argv[4],
-    "duration_seconds": int(sys.argv[5]),
-    "exit_code": int(sys.argv[6]),
-    "tag": sys.argv[7],
-    "script": sys.argv[8],
-    "cwd": sys.argv[9],
-    "args": json.loads(sys.argv[10]),
-}
-with log_file.open("a", encoding="utf-8") as f:
-    f.write(json.dumps(run, separators=(",", ":")) + "\n")
-PY
+jq -cn \
+  --arg run_id "$RUN_ID" \
+  --arg started_at "$START_TS" \
+  --arg ended_at "$END_TS" \
+  --argjson duration_seconds "$DURATION" \
+  --argjson exit_code "$EXIT_CODE" \
+  --arg tag "$TAG" \
+  --arg script "$SCRIPT" \
+  --arg cwd "$CWD" \
+  --argjson args "$ARGS_JSON" \
+  '{
+    run_id: $run_id,
+    started_at: $started_at,
+    ended_at: $ended_at,
+    duration_seconds: $duration_seconds,
+    exit_code: $exit_code,
+    tag: $tag,
+    script: $script,
+    cwd: $cwd,
+    args: $args
+  }' >> "$LOG_FILE"
 
 exit "$EXIT_CODE"

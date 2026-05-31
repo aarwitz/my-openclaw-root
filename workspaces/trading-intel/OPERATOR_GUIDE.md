@@ -81,7 +81,7 @@ falsifier: <the condition that would prove this wrong>
 next_action: <what happens next and when>
 ```
 
-You will also see the raw tool trace output (script runs, DB queries, API calls) before the final DRUCK_UPDATE block. This is intentional — it gives you visibility into exactly what Druck is doing in real time.
+When internal diagnostics are needed, Druck surfaces only the material trace needed to explain the decision. Keep the final Telegram reply compact and readable; suppress routine tool chatter and failure spillover.
 
 ---
 

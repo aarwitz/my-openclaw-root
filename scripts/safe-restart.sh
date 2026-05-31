@@ -27,6 +27,10 @@ OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 MAX_WAIT=30  # seconds to wait for gateway to stop
 RUN_ID="$(date -u +"%Y%m%dT%H%M%SZ")-$$"
 REASON="manual"
+ROOT="${HOME}/.openclaw"
+COMPOSE_FILE="${ROOT}/docker-compose.openclaw.yml"
+DOCKER_SERVICE="openclaw-gateway"
+DOCKER_CONTAINER="openclaw-gateway"
 
 force=false
 skip_cron=false
@@ -61,6 +65,76 @@ fail() {
   exit 1
 }
 
+is_docker_runtime() {
+  [[ -f "${COMPOSE_FILE}" ]] && docker ps -a --format '{{.Names}}' | grep -Fxq "${DOCKER_CONTAINER}"
+}
+
+gateway_healthy() {
+  if [[ "${runtime_mode}" == "docker" ]]; then
+    local status
+    local health
+    status="$(docker inspect --format '{{.State.Status}}' "${DOCKER_CONTAINER}" 2>/dev/null || true)"
+    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${DOCKER_CONTAINER}" 2>/dev/null || true)"
+    [[ "${status}" == "running" ]] && [[ "${health}" == "healthy" || "${health}" == "none" ]]
+  else
+    "${OPENCLAW_BIN}" health &>/dev/null
+  fi
+}
+
+restart_gateway() {
+  if [[ "${runtime_mode}" == "docker" ]]; then
+    docker compose -f "${COMPOSE_FILE}" stop "${DOCKER_SERVICE}" || true
+    docker compose -f "${COMPOSE_FILE}" up -d "${DOCKER_SERVICE}"
+  else
+    "${OPENCLAW_BIN}" gateway stop 2>&1 || true
+
+    # Wait for the process to actually exit
+    local waited=0
+    while "${OPENCLAW_BIN}" health &>/dev/null 2>&1 && [[ ${waited} -lt ${MAX_WAIT} ]]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+
+    if "${OPENCLAW_BIN}" health &>/dev/null 2>&1; then
+      warn "Gateway still responding after ${MAX_WAIT}s. Forcing stop..."
+      systemctl --user stop openclaw-gateway 2>/dev/null || true
+      sleep 2
+    fi
+
+    "${OPENCLAW_BIN}" gateway start 2>&1
+  fi
+}
+
+wait_for_gateway_healthy() {
+  local waited=0
+  while [[ ${waited} -lt ${MAX_WAIT} ]]; do
+    if gateway_healthy; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+check_models_auth() {
+  set +e
+  MODELS_CHECK_OUT="$(${OPENCLAW_BIN} models status --check 2>&1)"
+  MODELS_CHECK_RC=$?
+  set -e
+  if [[ ${MODELS_CHECK_RC} -eq 0 ]]; then
+    return 0
+  fi
+
+  # In some builds, --check returns non-zero for "expiring" while runtime auth is still usable.
+  if printf '%s\n' "${MODELS_CHECK_OUT}" | rg -q 'status=usable' \
+    && ! printf '%s\n' "${MODELS_CHECK_OUT}" | rg -q 'status=(missing|invalid|unusable)'; then
+    warn "models status --check returned ${MODELS_CHECK_RC}, but runtime auth is still usable; treating as pass"
+    return 0
+  fi
+  return 1
+}
+
 # --- Pre-flight ---
 log "Starting safe gateway restart..."
 log "Run context: force=${force} skip_cron=${skip_cron}"
@@ -70,12 +144,22 @@ if [[ -z "$OPENCLAW_BIN" ]]; then
 fi
 log "Resolved OpenClaw CLI: ${OPENCLAW_BIN}"
 
+runtime_mode="systemd"
+if is_docker_runtime; then
+  runtime_mode="docker"
+fi
+log "Runtime mode: ${runtime_mode}"
+
 # Check if gateway is actually running
-if ! "$OPENCLAW_BIN" health &>/dev/null; then
+if ! gateway_healthy; then
   if [[ "$force" == "true" ]]; then
     warn "Gateway not healthy (may be down). Proceeding with --force."
   else
-    warn "Gateway not healthy. Use --force to restart anyway, or just run: openclaw gateway start"
+    if [[ "${runtime_mode}" == "docker" ]]; then
+      warn "Gateway not healthy. Use --force to restart anyway, or run: docker compose -f ${COMPOSE_FILE} up -d ${DOCKER_SERVICE}"
+    else
+      warn "Gateway not healthy. Use --force to restart anyway, or just run: openclaw gateway start"
+    fi
     exit 1
   fi
 fi
@@ -100,38 +184,23 @@ else
   log "Step 2/6: Skipping cron management."
 fi
 
-# --- Step 3: Graceful stop ---
-log "Step 3/6: Stopping gateway gracefully..."
-"$OPENCLAW_BIN" gateway stop 2>&1 || true
-
-# Wait for the process to actually exit
-waited=0
-while "$OPENCLAW_BIN" health &>/dev/null 2>&1 && [[ $waited -lt $MAX_WAIT ]]; do
-  sleep 1
-  waited=$((waited + 1))
-done
-
-if "$OPENCLAW_BIN" health &>/dev/null 2>&1; then
-  warn "Gateway still responding after ${MAX_WAIT}s. Forcing stop..."
-  # As a last resort, use systemctl stop (not restart)
-  systemctl --user stop openclaw-gateway 2>/dev/null || true
-  sleep 2
+# --- Step 3+4: Restart runtime ---
+log "Step 3/6: Restarting gateway runtime..."
+restart_gateway
+if wait_for_gateway_healthy; then
+  log "  Gateway runtime healthy after restart."
+else
+  warn "Gateway did not reach healthy state within ${MAX_WAIT}s."
 fi
-
-log "  Gateway stopped."
-
-# --- Step 4: Start gateway ---
-log "Step 4/6: Starting gateway..."
-"$OPENCLAW_BIN" gateway start 2>&1
-sleep 3  # Brief settle time for startup hooks
 
 # --- Step 5: Validate tokens ---
 log "Step 5/6: Validating token health..."
-if "$OPENCLAW_BIN" models status --check &>/dev/null 2>&1; then
-  log "  ✅ Model auth check passed — tokens are healthy."
+if check_models_auth; then
+  log "  Model auth check passed; tokens are healthy."
   token_ok=true
 else
   warn "Model auth check FAILED after restart."
+  warn "models status output: $(printf '%s' "${MODELS_CHECK_OUT}" | head -n 1)"
   token_ok=false
 
   # Try restoring from backup
@@ -141,8 +210,8 @@ else
   # Give the gateway a moment to pick up the restored file
   sleep 2
 
-  if "$OPENCLAW_BIN" models status --check &>/dev/null 2>&1; then
-    log "  ✅ Token restore successful — auth is working."
+  if check_models_auth; then
+    log "  Token restore successful; auth is working."
     token_ok=true
   else
     warn "Token restore did not fix auth."
@@ -163,8 +232,8 @@ fi
 # --- Summary ---
 echo ""
 if [[ "$token_ok" == "true" ]]; then
-  log "✅ Gateway restart complete. All tokens healthy."
+  log "Gateway restart complete. All tokens healthy."
 else
-  log "🚨 Gateway restart complete, but OpenAI tokens need manual re-auth:"
+  log "Gateway restart complete, but OpenAI tokens need manual re-auth:"
   log "   openclaw models auth login --provider openai-codex"
 fi
