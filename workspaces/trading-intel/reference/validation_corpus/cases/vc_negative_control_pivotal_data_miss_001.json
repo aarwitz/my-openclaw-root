@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_pivotal_data_miss_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a biotech has a clean binary late-stage trial catalyst in a large indication. the mechanism is plausible, but the thesis depends on a statistical endpoint the investor cannot de-risk from public narrative alone. the trial then fails to reach statistical significance on the primary endpoint.",
+    "sector_or_theme": "late_stage_biotech_binary_catalyst",
+    "structural_features": [
+      "binary_pivotal_trial_catalyst",
+      "plausible_scientific_mechanism_not_enough",
+      "primary_endpoint_is_pass_fail",
+      "large_value_at_risk",
+      "no_public_way_to_de_risk_binary",
+      "must_be_sized_as_event_bet_or_avoided"
+    ],
+    "primary_source_class": "company_clinical_trial_update"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "high",
+    "rationale_hash": "sha256:245b1a3e8359538d8ba28956b8878b5868f21b9ac124122af6ff260cc0e0bc99"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 1,
+    "external_mechanism_check": "Underlying: Regeneron fianlimab/cemiplimab Phase 3 melanoma trial. Primary source: company release stating the trial did not reach statistical significance on the PFS primary endpoint. Correct behavior is no_trade or explicitly tiny event sizing, not high-confidence long. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

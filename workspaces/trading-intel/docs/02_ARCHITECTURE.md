@@ -1,104 +1,289 @@
-# 02 — Architecture
+# 02 - Architecture
 
-Status: active. Defines agents, workspaces, routing, shared state, and hot vs cold data paths. Implements `01_OPERATING_AUTHORITY.md`.
+Status: active. Canonical description of the OpenClaw trading system topology, source map, decision flow, execution loop, and feedback loops. Implements [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md).
 
-## 1. Agents
+## 1. System shape
 
-Five OpenClaw agents share one canonical SQLite state store.
+The trading stack is thesis-first, paper-first, and single-store.
 
-| Agent | Cadence | Primary role |
-|---|---|---|
-| `researcher` | Continuous background | Primary-source ingestion, hypothesis creation and update |
-| `quant` | Background + on-demand | Scoring, regime, expression candidate ranking, sizing recs |
-| `critic` | Background + pre-trade gate | Prospective challenge of hypotheses and trade intents |
-| `archivist` | Background post-resolution | Post-mortems, pattern extraction, calibration feedback |
-| `trader` | On-demand + scheduled checkpoints | Telegram front door, Alpaca paper execution, position mgmt |
+- One canonical SQLite store holds hypotheses, evidence, regime, intents, orders, positions, pauses, postmortems, and validation cases.
+- Five agents share that store and do not maintain competing copies of trading authority.
+- `trader` is the only Telegram-facing lane. The displayed persona name is Druck.
+- Telegram is the operator surface, not the execution engine.
+- Alpaca paper is the only broker surface in launch scope.
+- External APIs are ingested into evidence first; they do not directly place trades.
 
-Only `trader` is externally bound to Telegram.
+## 2. Topology at a glance
 
-## 2. Workspaces
+```text
+                ┌─────────────────────────────────────────────────────────────┐
+                │                 External Information Surfaces               │
+                │  SEC | FRED | EIA | ClinicalTrials.gov | openFDA | ...      │
+                │  USAspending | BLS | USGS | USPTO | arXiv | UN Comtrade      │
+                │  NOAA | OpenAlex | PubMed | USDA WASDE | FERC | Alpaca       │
+                └───────────────┬─────────────────────────────────────────────┘
+                                │
+                                v
+                      ┌───────────────────────┐
+                      │ researcher            │
+                      │ source ingestion      │
+                      │ hypothesis creation   │
+                      │ falsifier tracking    │
+                      └──────────┬────────────┘
+                                 │ evidence + falsifiers
+                                 v
+                      ┌───────────────────────┐
+                      │ quant                 │
+                      │ scoring               │
+                      │ regime classification │
+                      │ expression ranking    │
+                      │ sizing recommendations│
+                      └──────────┬────────────┘
+                                 │ candidate intents
+                                 v
+                      ┌───────────────────────┐
+                      │ critic                │
+                      │ prospective review    │
+                      │ challenge closure     │
+                      └──────────┬────────────┘
+                                 │ reviewed intents
+                                 v
+                      ┌───────────────────────┐
+                      │ trader (Druck)        │
+                      │ Telegram front door   │
+                      │ Alpaca paper submit   │
+                      │ order/position sync   │
+                      └──────────┬────────────┘
+                                 │ broker events + fills
+                                 v
+                      ┌───────────────────────┐
+                      │ reconciliation        │
+                      │ audit rows            │
+                      │ pauses / divergence    │
+                      └──────────┬────────────┘
+                                 │ resolved cases
+                                 v
+                      ┌───────────────────────┐
+                      │ archivist             │
+                      │ postmortems           │
+                      │ patterns              │
+                      │ calibration feedback  │
+                      └──────────┬────────────┘
+                                 │ feedback to research + quant
+                                 v
+                      ┌───────────────────────┐
+                      │ shared SQLite store   │
+                      │ trading-intel.sqlite  │
+                      └───────────────────────┘
+```
 
-- Each agent has its own OpenClaw workspace under `/home/aaron/.openclaw/workspaces/<agent>/`.
-- Each workspace contains `AGENTS.md`, `IDENTITY.md`, `SOUL.md`. `AGENTS.md` references this canonical root for all authoritative docs.
-- No agent stores trading authority docs in its own workspace. Authority lives only in `/workspaces/trading-intel/`.
+## 3. Agent contracts
 
-## 3. Routing
+| Agent | Role | Writes | Primary loop |
+|---|---|---|---|
+| `researcher` | Ingests source deltas and builds new theses | `hypotheses`, `hypothesis_evidence`, `falsifier_signals` | Source -> evidence -> thesis |
+| `quant` | Scores, ranks, sizes, and classifies regime | `hypotheses`, `regime`, `trade_intents` | Evidence -> score -> candidate intent |
+| `critic` | Challenges hypothesis and intent quality before capital risk | `critic_reviews` | Intent gating loop |
+| `trader` | Telegram-facing Druck persona and only execution lane | `trade_intents`, `orders`, `positions`, `tranches` | Human command -> broker -> reconciliation |
+| `archivist` | Grades outcomes and extracts reusable patterns | `hypotheses`, `postmortems`, `patterns` | Resolution -> attribution -> calibration |
 
-- Telegram account `druck` is bound to agent `trader`. No other Telegram bindings for trading agents.
-- Internal agent-to-agent delegation is enabled for all five trading agents: `researcher`, `quant`, `critic`, `archivist`, `trader`.
-- Default internal coordination is through shared state, not chat. Agent-to-agent calls are for explicit, narrow handoffs (e.g., trader asks quant for a fresh size recommendation before executing).
+All five agents can read all trading state. Write permissions are application-enforced, not implicit.
 
-## 4. Shared state
+## 4. Canonical external sources
 
-Canonical store: SQLite at `~/.openclaw/state/trading-intel.sqlite`. Schema authority: `sql/schema.sql`. Entity model: `04_SHARED_STATE_SCHEMA.md`.
+This is the approved source stack. Sources are read into evidence records; they never bypass the shared store.
 
-Write permissions, enforced at the application layer:
+| Source | Official name / API surface | Main payloads used | Primary owner | Path |
+|---|---|---|---|---|
+| Broker + market data | Alpaca Trading API (paper) + Alpaca Market Data API | account, orders, positions, fills, bars, trades, quotes | trader | Hot path |
+| Corporate disclosures | SEC EDGAR | 8-K, 10-Q, 10-K, 13D/G, S-1, exhibits, XBRL | researcher | Hot + event-driven |
+| Macro series | FRED + ALFRED | level, vintage, revisions, release timestamps | researcher, quant | Hot + cold |
+| Energy | EIA API | inventories, production, storage, prices, weekly deltas | researcher | Hot + cold |
+| Trials | ClinicalTrials.gov API | trial status, phase, enrollment, endpoints, sponsor changes | researcher | Hot + cold |
+| Drug/regulatory | openFDA APIs | adverse events, labels, recalls, enforcement signals | researcher | Hot + cold |
+| Fiscal demand | USAspending.gov API | awards, obligations, agency flows, timing, counterparties | researcher | Cold |
+| Labor / inflation | BLS Public Data API | CPI, PPI, payrolls, unemployment, JOLTS | researcher, quant | Hot + cold |
+| Geo / physical shocks | USGS APIs | earthquakes, seismic events, water/climate alerts where relevant | researcher | Cold |
+| Innovation | USPTO patent data / patent APIs | publications, claims, assignees, citations, families | researcher | Cold |
+| Preprints | arXiv API / OAI-PMH | preprints, categories, authors, abstract metadata | researcher | Cold |
+| Trade flows | UN Comtrade API | import/export volumes, country flows, product shifts | researcher | Cold |
+| Climate | NOAA climate data services | weather, anomalies, event context | researcher | Cold |
+| Scientific literature | OpenAlex API + PubMed E-utilities | papers, citations, abstracts, author networks | researcher | Cold |
+| Agriculture | USDA WASDE / NASS datasets | supply, demand, acreage, yield, crop balance sheets | researcher | Cold |
+| Power / grid | FERC eLibrary / open data surfaces | generation, transmission, rate filings, capacity changes | researcher | Cold |
 
-| Agent | Writes |
-|---|---|
-| `researcher` | `hypotheses` (new + evidence), `hypothesis_evidence`, `falsifier_signals` |
-| `quant` | `hypotheses` (scores, expression candidates, sizing), `regime`, `trade_intents` (creation) |
-| `critic` | `critic_reviews` (on hypotheses and trade intents) |
-| `trader` | `trade_intents` (execution fields), `orders`, `positions`, `tranches` |
-| `archivist` | `hypotheses` (resolution + grade), `postmortems`, `patterns` |
-| all | `audits` (append-only) |
+Operating rule: broad access at launch, narrow default consumption. Researcher promotes a cold source into evidence only when it materially changes confidence, falsifier status, or regime interpretation.
 
-All five agents can read everything.
+## 5. Signal lifecycle
 
-## 5. Hypothesis lifecycle
+The canonical progression is:
 
-States: `raw` → `scored` → `challenged` → `ready` → `active` → `dormant` → `resolved` → `retired`.
+```text
+source delta
+  -> evidence row
+  -> hypothesis update
+  -> quant score / regime / expression ranking
+  -> critic challenge set
+  -> trade intent
+  -> trader execution or block
+  -> broker fill / position update
+  -> reconciliation
+  -> archivist postmortem
+  -> pattern extraction
+  -> future hypothesis calibration
+```
 
-Transitions (responsible agent in parens):
+What moves between stages:
 
-- `raw` → `scored` (quant): score, edge decay, regime fit.
-- `scored` → `challenged` (critic): challenges issued, requires responses.
-- `challenged` → `ready` (quant): all challenges addressed; expression candidates ranked.
-- `ready` → `active` (trader): first tranche opened.
-- `active` → `dormant` (quant or researcher): a falsifier fired or evidence weakened.
-- `active`/`dormant` → `resolved` (archivist): position fully closed or thesis time horizon expired.
-- `resolved` → `retired` (archivist): pattern extraction complete.
+- Evidence rows carry provenance, release timing, vintage where relevant, and signal type.
+- Hypotheses carry thesis summary, confidence, horizon, score, and falsifier state.
+- Trade intents carry edge scorecards, explainability fields, experiment tags, and fill realism fields.
+- Orders and positions mirror broker reality and are reconciled back to shared state.
+- Postmortems and patterns feed the next generation of hypotheses and quant thresholds.
 
-Detail in `03_EXECUTION_STATE_MACHINE.md`.
+## 6. Decision flow
 
-## 6. Hot path vs cold path
+The system is not a chat bot with trading bolted on. It is a gated state machine.
 
-Hot path (always on, every loop):
+1. Researcher observes source movement and writes evidence.
+2. Quant converts evidence into score, regime, and candidate expressions.
+3. Critic validates that the thesis is still coherent and that objections are addressed.
+4. Trader checks gates, sizing, pauses, and broker state before submission.
+5. Broker events are reconciled against local state.
+6. Archivist grades the outcome and updates the calibration corpus.
 
-- Alpaca account, open orders, positions.
-- Active hypotheses with `state in (ready, active)` and their top-ranked expressions.
-- Live regime snapshot.
-- Core feeds: SEC EDGAR, FRED, EIA, ClinicalTrials.gov, openFDA, USAspending, BLS, market price/volume.
+No stage is allowed to skip ahead by implying a later stage already happened.
 
-Cold path (on-demand by researcher when a hypothesis needs deeper underwriting):
+## 7. Gate stack before capital risk
 
-- Patents (USPTO), trade flows (UN Comtrade), procurement, FERC, NOAA climate, OpenAlex/PubMed, USDA WASDE, USGS, satellite/alt-data (if budgeted).
+`trade_intent` can move to `submitted` only when all of the following are satisfied:
 
-Operating rule: broad access at launch, narrow default consumption. Researcher promotes a cold source into a hypothesis's evidence record only when that source materially changes confidence or falsifier status.
+- hypothesis is `ready` or `active`
+- critic challenges are resolved or an explicit human override exists in `audits`
+- current regime permits the action
+- portfolio and per-trade risk limits are still respected after the hypothetical fill
+- no active pause blocks the atomic action
+- options trades have an explicit catalyst window and only high-confidence theses may use shorter-dated options
+- evidence freshness is within threshold for decision-critical sources
+- factor overlap is acceptable after the hypothetical fill
+- explainability fields are present and above threshold
+- modeled fill is realistically achievable under ADV and slippage assumptions
 
-## 7. OpenClaw capability surfaces (how each is used)
+If any gate fails, the intent is blocked with a structured reason. There is no silent fallback to discretionary behavior.
 
-- Tools: live broker and data actions (Alpaca, primary-source APIs).
-- Skills: repeatable agent playbooks (researcher reasoning chain, critic checklist, trader execution loop).
-- Plugins: only for genuine capability gaps not covered by tools/skills.
-- Automation: scheduled background jobs per `05_IMPLEMENTATION_POLICY.md`.
-- Subagents / specialist lanes: only when they reduce a real bottleneck (e.g., long-running deep-research pulls under researcher).
+## 8. Execution and reconciliation loops
 
-## 8. Telegram interface (trader)
+Trader is the only lane that converts intent into broker activity.
 
-User-facing commands handled by `trader`:
+```text
+Telegram command or scheduled checkpoint
+  -> trader checks shared state
+  -> trader checks pauses, freshness, overlap, explainability, fill realism
+  -> trader submits Alpaca order if allowed
+  -> Alpaca emits fill/order events
+  -> trader mirrors events to orders / positions / tranches
+  -> trader reconciles actual broker state vs shared state
+  -> divergence creates reconciliation_run
+  -> affected hypothesis can be paused for new opens until resolved
+```
 
-- `/summary` — active hypotheses, positions, regime, P&L vs SPY.
-- `/hypothesis <id>` — full record.
-- `/intent <id>` — pending trade intent and Critic state.
-- `/approve <id>` / `/reject <id>` — manual override path.
-- `/exit <position_id>`, `/trim <position_id> <pct>`.
-- `/regime` — current regime and gates.
-- `/critic <hypothesis_id>`, `/archivist <hypothesis_id>`.
-- `/audit <period>`.
+Important broker-side invariants:
 
-No other agent has Telegram presence. Researcher, quant, critic, and archivist escalate to the human only by writing to shared state, which trader surfaces on the next checkpoint or via `/summary`.
+- every Alpaca order becomes an `orders` row
+- every filled action becomes position/tranche history
+- early assignment or unexpected corporate action must generate a corrective intent if exposure changed
+- a reconciliation mismatch blocks new opens for the affected hypothesis until cleared
+- broker-wide anomalies can force `exits_trims_only`
 
-## 9. Authority chain
+## 9. Time loops
 
-This doc implements `01_OPERATING_AUTHORITY.md`. It is implemented by `03_EXECUTION_STATE_MACHINE.md` and `04_SHARED_STATE_SCHEMA.md`. Runtime configuration in `/home/aaron/.openclaw/openclaw.json` must reflect the agent set and bindings defined here.
+The system has multiple loops running at different horizons.
+
+- Researcher: morning delta ingest, nightly refresh, event-driven ingress on filing/trial/macro shocks.
+- Quant: pre-market scoring, intraday rerank, after-close recalculation, on-demand rescoring when evidence changes.
+- Critic: high-priority review before intent release, plus postmortem calibration review.
+- Trader: pre-market decision pass, midday confirmation/invalidation, rotation pass, close-risk pass, event-driven reconciliation.
+- Archivist: daily resolution sweep and weekly pattern extraction.
+
+These loops are coupled through shared state, not through free-form chat.
+
+## 10. Telegram interface
+
+Telegram is the operator control surface for Druck, not a trading logic layer.
+
+- `/summary` shows active hypotheses, positions, regime, and P&L vs SPY.
+- `/hypothesis <id>` shows the full record.
+- `/intent <id>` shows the current trade-intent status and critic posture.
+- `/approve <id>` and `/reject <id>` provide explicit human override paths.
+- `/exit <position_id>` and `/trim <position_id> <pct>` are direct risk-management commands.
+- `/regime`, `/critic <hypothesis_id>`, `/archivist <hypothesis_id>`, `/audit <period>` expose state and history.
+
+No other trading agent is externally bound to Telegram.
+
+## 11. Shared state and schema coupling
+
+The runtime schema is authoritative in [sql/schema.sql](../sql/schema.sql).
+
+Key storage relationships:
+
+- `hypotheses` anchors the thesis.
+- `hypothesis_evidence` holds every source-derived observation.
+- `falsifier_signals` marks break conditions and monitors them over time.
+- `expression_candidates` represents possible instruments and vehicle choices.
+- `regime` stores the latest deterministic macro/risk classification snapshot.
+- `trade_intents` records proposed risk actions and all gate results.
+- `critic_reviews` captures unresolved vs resolved challenges.
+- `orders`, `positions`, and `tranches` mirror broker reality.
+- `system_pauses` enforces operational brakes.
+- `reconciliation_runs` records mismatches.
+- `postmortems` and `patterns` close the learning loop.
+- `validation_cases` keeps the leakage-resistant calibration corpus.
+- `audits` is the append-only authority ledger.
+
+## 12. Feedback loops that matter most
+
+The critical loops are:
+
+1. Source -> evidence -> quant -> critic -> trader -> broker -> reconciliation. This is the live execution loop.
+2. Broker fill -> position outcome -> archivist -> pattern -> quant/researcher. This is the calibration loop.
+3. Falsifier change -> dormant state -> exit/trim intent -> reconciliation. This is the protection loop.
+4. Regime update -> gate shift -> candidate reprioritization -> sizing change. This is the context loop.
+5. Validation case -> model decision -> resolved outcome -> threshold update. This is the anti-leakage loop.
+
+Archivist writeback contract:
+
+- Archivist does not write free-form advice back into researcher or quant state.
+- Archivist writes `postmortems` and `patterns` only, plus `audits` for the transition trail.
+- `postmortems` must name the hypothesis, resolution state, what was learned, what was false, and which mechanism remained plausible.
+- `patterns` must be reusable rules or anti-patterns, not narrative summaries.
+- Researcher consumes `patterns` as a structured prior: it may raise or lower evidence weight, add a new falsifier, or shorten the time horizon for a similar future thesis.
+- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a versioned experiment tag.
+- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a versioned rule or threshold change and logged in `DECISION_LOG.md`.
+
+## 13. Temporary state policy
+
+Temporary data under `~/.openclaw/tmp` is never authoritative. It may contain:
+
+- coding-lane run metadata
+- preflight cache files
+- old housekeeping artifacts
+
+Only the subtrees wired into current scripts are operationally useful. Stale archive content in that directory can be removed when it is no longer referenced by the runtime or a current preflight path.
+
+## 14. Non-goals
+
+- No live-capital trading at launch.
+- No hidden bypass around critic or reconciliation.
+- No reliance on stale cached source snapshots for decision-critical signals.
+- No secondary trading persona outside Druck / `trader`.
+
+## 15. Authority chain
+
+This document is implemented by:
+
+- [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md)
+- [03_EXECUTION_STATE_MACHINE.md](03_EXECUTION_STATE_MACHINE.md)
+- [04_SHARED_STATE_SCHEMA.md](04_SHARED_STATE_SCHEMA.md)
+- [05_IMPLEMENTATION_POLICY.md](05_IMPLEMENTATION_POLICY.md)
+
+If this file and the DDL disagree, the DDL is runtime truth and this document must be updated to match.

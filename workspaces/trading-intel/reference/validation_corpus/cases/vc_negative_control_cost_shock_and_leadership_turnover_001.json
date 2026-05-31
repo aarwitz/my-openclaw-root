@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_cost_shock_and_leadership_turnover_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a large managed-care company is treated as a defensive compounder. primary-source updates show elevated medical-cost pressure, margin recovery work, and leadership/organizational changes at the same time. the combination makes \u201cdefensive compounder\u201d a stale label rather than a valid long thesis.",
+    "sector_or_theme": "managed_care_defensive_compounder",
+    "structural_features": [
+      "defensive_label_can_be_stale",
+      "core_cost_line_pressure",
+      "margin_recovery_not_complete",
+      "leadership_or_operating_reset",
+      "cash_flow_quality_repriced",
+      "cost_structure_shock_is_falsifier"
+    ],
+    "primary_source_class": "company_guidance_and_leadership_update"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:68b1dfa39493427f7d4b393e486035b630a9a4545e41dbe3eb40debe00a073eb"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 30,
+    "external_mechanism_check": "Underlying: UnitedHealth. Primary sources: company leadership transition / outlook suspension in 2025 and 2026 investor materials showing ongoing margin-recovery actions and medical-cost pressure. Correct behavior is no_trade until the cost structure is visibly repaired. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

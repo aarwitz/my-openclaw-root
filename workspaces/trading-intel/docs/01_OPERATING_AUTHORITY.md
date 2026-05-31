@@ -55,6 +55,11 @@ Maximum position sizes by conviction (percent of portfolio):
 - Starter: 1–2%.
 - Small-cap asymmetry: up to 15% only if average daily volume exceeds $50M.
 
+Pre-authorized conviction scaling:
+
+- Trader may autonomously scale within approved conviction bands when all gates are satisfied (independent signals, intact falsifiers, regime allows, critic quality threshold met).
+- Manual Aaron approval is required only for overrides above policy max bands or for concentration exceptions.
+
 ## 5. Concentration limits
 
 - No single industry above 40% of portfolio.
@@ -86,6 +91,7 @@ Regime is owned by Quant. Trader cannot override regime gates without an Aaron-a
 - Down 20% YTD: regime forced to `caution`, add cadence pauses, Critic re-approves all open positions.
 - Down 30% YTD: regime forced to `risk_off`, only defensive exits permitted.
 - Recovery target after a 20% drawdown: 6 months.
+- Drawdown circuit breaker is automatic: threshold breach writes `system_pauses` records without manual intervention.
 
 ## 9. Autonomous authority for Trader
 
@@ -109,6 +115,7 @@ Pauses are defined as scopes over atomic actions, not over checkpoints:
 - `new_entries_only`: blocks `open`, allows `add`/`trim`/`exit`/`rotate`.
 - `adds_only`: blocks `add` and `open`, allows `trim`/`exit`.
 - `shorts_only`: blocks any short-side action.
+- `exits_trims_only`: blocks `open` and `add`; allows only `trim`/`exit`.
 - `full_system`: blocks all non-defensive actions.
 
 A rotation is treated as `exit` then `open`. If either atomic action is blocked by an active pause scope, the rotation is blocked.

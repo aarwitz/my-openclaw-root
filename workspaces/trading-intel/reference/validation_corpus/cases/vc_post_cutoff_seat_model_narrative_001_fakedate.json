@@ -1,0 +1,32 @@
+{
+  "id": "vc_post_cutoff_seat_model_narrative_001_fakedate",
+  "case_class": "post_cutoff",
+  "fake_date_variant": "context_shifted_no_identifying_era_cues",
+  "masked_case_json": {
+    "world_change": "a broad \u201cai will destroy seat-based software\u201d narrative tempted investors to short established workflow-software businesses as a cohort. however, primary-source updates across multiple software names showed that some of these companies were still growing revenue, paid usage, or subscription metrics while embedding ai into the product; the cohort was not monolithic enough for a blanket short. presented in a shifted, non-identifying market era with no date, administration, calendar-quarter, or contemporaneous-news cues.",
+    "sector_or_theme": "enterprise_software_ai_disruption_narrative",
+    "structural_features": [
+      "ai_disruption_narrative_targets_seat_models",
+      "cohort_not_monolithic",
+      "some_primary_sources_show_growth_not_impairment",
+      "ai_can_be_feature_or_margin_tailwind",
+      "requires_per_name_net_retention_and_guidance",
+      "blanket_short_lacks_specific_cash_flow_falsifier"
+    ],
+    "primary_source_class": "company_earnings_releases_and_shareholder_letters"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:10ea39f70fcaf7051eec2fc30de1eca4abd4ead78c7d753edf2f20aebbda727e"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 30,
+    "external_mechanism_check": "Fake-date companion for vc_post_cutoff_seat_model_narrative_001. Same underlying resolved outcome and same structural evidence; only era/date cues are shifted. Acceptance requires the model decision and direction to remain invariant versus the parent."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

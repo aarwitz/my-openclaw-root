@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_political_signal_following_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a public political endorsement or official-app notification visibly names a company or small set of equities, and the named securities subsequently move. a proposed strategy is to buy future named securities immediately after similar political signals.",
+    "sector_or_theme": "political_signal_following_event_driven",
+    "structural_features": [
+      "public_signal_visible_to_everyone",
+      "no_repeatable_cash_flow_mechanism",
+      "depends_on_continued_attention_not_fundamentals",
+      "headline_reflexivity_not_structural_edge",
+      "mandate_requires_primary_world_change",
+      "separate_from_real_contract_cash_flows"
+    ],
+    "primary_source_class": "official_political_release_or_public_disclosure"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "low",
+    "rationale_hash": "sha256:ac8c309692ba0b0a51d7b3a2f1197f2cdf478b9000e9dc04606efee267bfe420"
+  },
+  "resolved_outcome_json": {
+    "outcome": "inconclusive",
+    "horizon_days": 30,
+    "external_mechanism_check": "Design negative control. Some named equities may have gone up in the observed instance, but the system mandate is primary-source world change with falsifiable cash-flow mechanism. Correct behavior is no_trade/block unless a separate durable contract, regulatory approval, or earnings mechanism exists. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

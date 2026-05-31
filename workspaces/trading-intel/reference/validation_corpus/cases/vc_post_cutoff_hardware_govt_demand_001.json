@@ -1,0 +1,32 @@
+{
+  "id": "vc_post_cutoff_hardware_govt_demand_001",
+  "case_class": "post_cutoff",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a large-cap enterprise hardware and infrastructure supplier was already in a confirmed server-demand upcycle with a large order backlog. a major defense buyer then awarded it a multi-year blanket purchase agreement for enterprise software and infrastructure standardization shortly before a scheduled earnings release. the event added a durable public-sector demand signal on top of an already accelerating hardware cycle.",
+    "sector_or_theme": "enterprise_hardware_public_sector_demand",
+    "structural_features": [
+      "confirmed_server_demand_upcycle",
+      "large_existing_order_backlog",
+      "multi_year_public_sector_award",
+      "award_arrives_before_earnings",
+      "independent_confirmation_from_customer_and_earnings",
+      "durable_cash_flow_mechanism_not_headline_only"
+    ],
+    "primary_source_class": "government_contract_award_plus_company_earnings_release"
+  },
+  "model_decision_json": {
+    "decision": "open",
+    "direction": "long",
+    "confidence_bucket": "high",
+    "rationale_hash": "sha256:5f92a682769a980b9320028c197096eb13869b2b0649fd8e1d149896a6f48516"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_confirmed",
+    "horizon_days": 21,
+    "external_mechanism_check": "Underlying: Dell Technologies / Dell Federal Systems. Primary sources: Department of War contract award on 2026-05-27 and Dell fiscal Q1 earnings release on 2026-05-28. Outcome check: defense-contract award plus company earnings confirmed accelerating server demand; market reaction on the subsequent print confirmed the cash-flow mechanism. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

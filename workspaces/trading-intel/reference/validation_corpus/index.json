@@ -1,0 +1,268 @@
+{
+  "profile_id": "validation_target_v1",
+  "mode": "go_live_minimum",
+  "counts": {
+    "winner": 1,
+    "negative_control": 13,
+    "post_cutoff_substantive": 7,
+    "post_cutoff_fake_date": 7
+  },
+  "quality_available": true,
+  "quality_warnings": [
+    "quality flag for vc_negative_control_ai_narrative_execution_shock_001: generic narrative language",
+    "quality flag for vc_negative_control_consumer_turnaround_traffic_miss_001: weak mechanism language",
+    "quality flag for vc_negative_control_consumer_turnaround_traffic_miss_001: generic narrative language",
+    "quality flag for vc_negative_control_pivotal_data_miss_001: weak mechanism language",
+    "quality flag for vc_negative_control_pivotal_data_miss_001: generic narrative language",
+    "quality flag for vc_negative_control_aicyber_weak_demand_guide_001: generic narrative language",
+    "quality flag for vc_post_cutoff_datacenter_energy_demand_001: generic narrative language",
+    "quality flag for vc_post_cutoff_datacenter_energy_demand_001_fakedate: generic narrative language",
+    "quality flag for vc_negative_control_political_signal_following_001: weak mechanism language",
+    "quality flag for vc_negative_control_customer_concentration_contract_loss_001: weak mechanism language",
+    "quality flag for vc_negative_control_customer_concentration_contract_loss_001: generic narrative language",
+    "quality flag for vc_post_cutoff_seat_model_narrative_001: generic narrative language",
+    "quality flag for vc_post_cutoff_seat_model_narrative_001_fakedate: generic narrative language",
+    "quality flag for vc_negative_control_leveraged_etf_hindsight_001: weak mechanism language",
+    "quality flag for vc_negative_control_beat_and_raise_still_fell_001: generic narrative language",
+    "quality flag for vc_negative_control_cost_shock_and_leadership_turnover_001: generic narrative language",
+    "quality flag for vc_post_cutoff_hardware_govt_demand_001: generic narrative language",
+    "quality flag for vc_post_cutoff_hardware_govt_demand_001_fakedate: generic narrative language",
+    "quality flag for vc_post_cutoff_incumbent_ai_fear_overreaction_001: generic narrative language",
+    "quality flag for vc_post_cutoff_incumbent_ai_fear_overreaction_001_fakedate: generic narrative language",
+    "quality flag for vc_post_cutoff_launch_dependency_001: generic narrative language",
+    "quality flag for vc_post_cutoff_launch_dependency_001_fakedate: generic narrative language"
+  ],
+  "total_files": 28,
+  "errors": [
+    "count check failed for post_cutoff_substantive: 7 < 30",
+    "count check failed for post_cutoff_fake_date: 7 < 30",
+    "count check failed for negative_control: 13 < 60",
+    "count check failed for winner: 1 < 10"
+  ],
+  "cases": [
+    {
+      "id": "vc_negative_control_ai_narrative_execution_shock_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 50,
+      "source_file": "cases/vc_negative_control_ai_narrative_execution_shock_001.json"
+    },
+    {
+      "id": "vc_negative_control_aicyber_weak_demand_guide_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 70,
+      "source_file": "cases/vc_negative_control_aicyber_weak_demand_guide_001.json"
+    },
+    {
+      "id": "vc_negative_control_beat_and_raise_still_fell_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_negative_control_beat_and_raise_still_fell_001.json"
+    },
+    {
+      "id": "vc_negative_control_biotech_phase1_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 1,
+      "quality_score": null,
+      "source_file": "seeds/vc_negative_control_biotech_phase1_001.json"
+    },
+    {
+      "id": "vc_negative_control_consumer_turnaround_traffic_miss_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 62,
+      "source_file": "cases/vc_negative_control_consumer_turnaround_traffic_miss_001.json"
+    },
+    {
+      "id": "vc_negative_control_cost_shock_and_leadership_turnover_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_negative_control_cost_shock_and_leadership_turnover_001.json"
+    },
+    {
+      "id": "vc_negative_control_customer_concentration_contract_loss_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 77,
+      "source_file": "cases/vc_negative_control_customer_concentration_contract_loss_001.json"
+    },
+    {
+      "id": "vc_negative_control_growth_engine_slowdown_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 90,
+      "source_file": "cases/vc_negative_control_growth_engine_slowdown_001.json"
+    },
+    {
+      "id": "vc_negative_control_infra_halo_execution_miss_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 90,
+      "source_file": "cases/vc_negative_control_infra_halo_execution_miss_001.json"
+    },
+    {
+      "id": "vc_negative_control_leveraged_etf_hindsight_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 84,
+      "source_file": "cases/vc_negative_control_leveraged_etf_hindsight_001.json"
+    },
+    {
+      "id": "vc_negative_control_no_cashflow_speculative_asset_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 90,
+      "source_file": "cases/vc_negative_control_no_cashflow_speculative_asset_001.json"
+    },
+    {
+      "id": "vc_negative_control_pivotal_data_miss_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 64,
+      "source_file": "cases/vc_negative_control_pivotal_data_miss_001.json"
+    },
+    {
+      "id": "vc_negative_control_political_signal_following_001",
+      "case_class": "negative_control",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 74,
+      "source_file": "cases/vc_negative_control_political_signal_following_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_datacenter_energy_demand_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 70,
+      "source_file": "cases/vc_post_cutoff_datacenter_energy_demand_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_datacenter_energy_demand_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 70,
+      "source_file": "cases/vc_post_cutoff_datacenter_energy_demand_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_hardware_govt_demand_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_hardware_govt_demand_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_hardware_govt_demand_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_hardware_govt_demand_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_incumbent_ai_fear_overreaction_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_incumbent_ai_fear_overreaction_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_incumbent_ai_fear_overreaction_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_incumbent_ai_fear_overreaction_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_launch_dependency_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_launch_dependency_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_launch_dependency_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 85,
+      "source_file": "cases/vc_post_cutoff_launch_dependency_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_power_component_supply_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 90,
+      "source_file": "cases/vc_post_cutoff_power_component_supply_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_power_component_supply_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 90,
+      "source_file": "cases/vc_post_cutoff_power_component_supply_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_regional_bank_cre_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 1,
+      "quality_score": null,
+      "source_file": "seeds/vc_post_cutoff_regional_bank_cre_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_regional_bank_cre_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "shifted_back_18_months",
+      "passed": 1,
+      "quality_score": null,
+      "source_file": "seeds/vc_post_cutoff_regional_bank_cre_001_fakedate.json"
+    },
+    {
+      "id": "vc_post_cutoff_seat_model_narrative_001",
+      "case_class": "post_cutoff",
+      "fake_date_variant": null,
+      "passed": 0,
+      "quality_score": 80,
+      "source_file": "cases/vc_post_cutoff_seat_model_narrative_001.json"
+    },
+    {
+      "id": "vc_post_cutoff_seat_model_narrative_001_fakedate",
+      "case_class": "post_cutoff",
+      "fake_date_variant": "context_shifted_no_identifying_era_cues",
+      "passed": 0,
+      "quality_score": 80,
+      "source_file": "cases/vc_post_cutoff_seat_model_narrative_001_fakedate.json"
+    },
+    {
+      "id": "vc_winner_midstream_capacity_001",
+      "case_class": "winner",
+      "fake_date_variant": null,
+      "passed": 1,
+      "quality_score": null,
+      "source_file": "seeds/vc_winner_midstream_capacity_001.json"
+    }
+  ]
+}

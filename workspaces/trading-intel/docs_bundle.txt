@@ -1,0 +1,1847 @@
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/DOC_INDEX.md
+========================================================================================================================
+# Trading Intelligence — Doc Index
+
+Status: active doc map for the canonical 5-agent OpenClaw trading system.
+Effective: 2026-05-28.
+
+## Active docs (the only authoritative set)
+
+1. `docs/01_OPERATING_AUTHORITY.md` — what we trade, why, with what limits.
+2. `docs/02_ARCHITECTURE.md` — 5 agents, workspaces, routing, shared state, hot/cold paths.
+3. `docs/03_EXECUTION_STATE_MACHINE.md` — hypothesis, trade intent, order, position lifecycles and gates.
+4. `docs/04_SHARED_STATE_SCHEMA.md` — canonical entity model and SQLite contract.
+5. `docs/05_IMPLEMENTATION_POLICY.md` — schedules, runtime controls, build phases, validation gates.
+
+## Reference
+
+- `sql/schema.sql` — canonical DDL for the shared state store.
+- `sql/seed_bootstrap.py` — idempotent loader for canonical seed rows.
+- `sql/seeds/regime_rules_v1.json` — versioned regime classifier thresholds (loaded into `regime_rules`).
+- `reference/regime_rules_v1.md` — narrative spec for the v1 regime classifier.
+- `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
+- `../researcher/skills/reasoning_chain_v1.md` — versioned 8-question researcher reasoning chain.
+- `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
+- `archives/` — date-stamped retirement of superseded docs and prototypes.
+
+## Legacy decommissioned
+
+Legacy druck workspace state has been removed. This stack is the only active trading-system authority as of 2026-05-28.
+
+## Hard rules
+
+- If two docs disagree, the lower-numbered active doc wins, then `sql/schema.sql`.
+- New docs must be approved into `DOC_INDEX.md` before any agent treats them as authoritative.
+- Active stack is capped at 5 documents. Anything else lives as reference or archive.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/README.md
+========================================================================================================================
+# Trading Intelligence — Canonical Root
+
+This is the single source of truth for the OpenClaw 5-agent trading system.
+
+- Authoritative docs live in `docs/`.
+- Canonical SQLite schema lives in `sql/schema.sql`.
+- Doc registry: `DOC_INDEX.md`.
+- Decision log: `DECISION_LOG.md`.
+- Retired material lives under `archives/` with date-stamped retirement notes.
+
+## Topology (locked)
+
+Five OpenClaw agents share one canonical SQLite store and one repo of authoritative docs:
+
+- `researcher` — background discovery and hypothesis generation
+- `quant` — scoring, regime, expression selection, sizing
+- `critic` — prospective challenge of every hypothesis and trade intent
+- `archivist` — post-resolution grading and pattern extraction
+- `trader` — only Telegram-facing agent (persona name: Druck); only agent that executes Alpaca paper orders
+
+## Authority
+
+If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`).
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/DECISION_LOG.md
+========================================================================================================================
+# Trading Intelligence — Decision Log
+
+## 2026-05-28: Canonical reset
+
+- D1: New canonical root established at `/home/aaron/.openclaw/workspaces/trading-intel`. All prior trading roots are migration sources only.
+- D2: Topology locked at 5 agents: `researcher`, `quant`, `critic`, `archivist`, `trader`. `trader` is the sole Telegram-facing agent.
+- D3: Options are first-class expression vehicles from launch: direct equity, ETF, LEAPS, shorter-dated catalyst options, pair trades, competitor shorts.
+- D4: Canonical state store is SQLite at `~/.openclaw/state/trading-intel.sqlite`. Schema authority is `sql/schema.sql`.
+- D5: Doc stack capped at 5 active docs in `docs/`. All `/workspaces/druck/*.md` trading docs are superseded.
+- D6: Hybrid retirement policy. High-value historical docs are archived under `archives/` with date-stamped notes; low-value duplicates are hard-deleted.
+- D7: Old `/home/aaron/.openclaw/workspace/trader/` prototype is retired. Useful Pydantic typed-state ideas are absorbed into `sql/schema.sql` and `docs/04_SHARED_STATE_SCHEMA.md`; prototype code archived.
+- D8: `openclaw.json` gains an `archivist` agent. Existing four agent workspace paths are retained.
+- D9: Telegram account `druck` continues to route to agent `trader`. No other Telegram bindings for trading agents.
+- D10: Internal delegation allowlist includes all five trading agents.
+- D11: Naming clarification: "Druck" is the human-facing Telegram persona presented by agent id `trader`; `trader` remains the execution agent id in architecture and schema.
+- D12: Validation protocol replaced with leakage-resistant design: anonymized cases, negative controls, fake-date tests, and post-cutoff holdout metrics as primary evidence.
+- D13: 90-day run is explicitly operational validation (plumbing/gates/reconciliation), not edge validation.
+- D14: Fill realism is mandatory for performance reporting (slippage-adjusted P&L is benchmark series).
+- D15: Execution gates now include data freshness, factor-overlap, explainability thresholds, and ADV-aware fill realism checks.
+- D16: Automatic degraded mode added: broker anomalies or unresolved reconciliation force `exits_trims_only` pause.
+- D17: Experiment tagging required (`experiment_id`) across intents, audits, patterns, postmortems, and validation cases.
+- D18: Naming-collision cleanup required before live-capital consideration: remove or rename legacy `druck` agent id to avoid account-id confusion.
+- D19: Aggressive cutover executed: legacy `druck` agent id removed from runtime config; trading topic routes now target `trader` (Druck persona).
+- D20: Legacy workspace state purged: `/home/aaron/.openclaw/workspaces/druck` and obsolete archived prototypes removed.
+
+## 2026-05-29: Production-readiness artifacts
+
+- D21: Regime classifier v1 thresholds authored at `reference/regime_rules_v1.md` and seeded via `sql/seeds/regime_rules_v1.json` (`rule_version = "v1"`, `experiment_id = "regime_rules_v1_init"`). Quant is unblocked to implement deterministic regime classification. Default fail-closed remains `caution` when signals are stale or missing.
+- D22: Researcher reasoning chain promoted to a versioned skill at `workspaces/researcher/skills/reasoning_chain_v1.md` (`experiment_id = "researcher_reasoning_v1"`). All downstream rows must carry this `experiment_id` so reasoning-chain changes are attributable.
+- D23: Validation corpus scaffolded at `reference/validation_corpus/` with the JSON contract, one exemplar seed per class, and a paired `fake_date_variant` seed (`experiment_id = "validation_corpus_v1_seed"`). Operator must hand-build the full corpus to clear Phase 1 thresholds (≥30 post-cutoff, ≥60 negative-control, plus fake-date variants).
+
+## Format
+
+For future decisions, append entries with: id, summary, rationale, files touched, approver, date.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md
+========================================================================================================================
+# 01 — Operating Authority
+
+Status: active. Authority order: this doc > `02_ARCHITECTURE.md` > `03_EXECUTION_STATE_MACHINE.md` > `04_SHARED_STATE_SCHEMA.md` > `05_IMPLEMENTATION_POLICY.md`.
+
+## 1. Mandate
+
+Beat the S&P 500 in an Alpaca paper account by exploiting slow market diffusion from primary-source world changes into the best liquid public-market expressions.
+
+- Benchmark: SPY total return. Secondary benchmark: cash.
+- Measurement windows: rolling 1-month, 3-month, 12-month active return and Sharpe vs SPY.
+- Capital profile: long horizon, drawdown-tolerant if thesis evidence keeps confirming.
+
+## 2. Operating principles
+
+1. Selection, timing, and execution are separated across agents. No agent conflates them.
+2. Thesis-first. Every trade points back to a `hypothesis_id`. No naked trades.
+3. Primary data beats financial data. Read what prices are downstream of.
+4. Falsifiers beat targets. Watch what kills the thesis, not the upside.
+5. Bet small on new ideas. Bet larger as independent evidence confirms. Stay liquid.
+6. Cash is a real competitor on every marginal trade.
+7. Critic challenges are first-class. Every challenge requires a written response in the audit log before execution.
+8. Archivist is how the system improves. Patterns it extracts feed the other four agents.
+
+## 3. Allowed expression vehicles (first-class from launch)
+
+- Direct equity (long, short with policy gates)
+- ETF (broad theme expression)
+- LEAPS calls and call spreads (high-conviction, defined horizon)
+- Shorter-dated options (defined catalyst windows only)
+- Pair trades (long primary + short corollary)
+- Competitor shorts (paired with explicit long thesis only)
+
+Constraints:
+
+- Alpaca paper account only at launch.
+- Options usage requires hypothesis confidence `high` and explicit catalyst window.
+- Shorter-dated options: maximum 10% of the underlying position size and require an explicit event date.
+- Competitor shorts: only with an explicit long pair, maximum 50% of the long-side position size.
+
+## 4. Conviction-weighted sizing
+
+Position size scales with accumulated independent evidence, not entry timing.
+
+Tranche ladder, expressed as fraction of intended maximum position:
+
+- Starter: 10–15%. Triggered when a hypothesis reaches `scored` with `high` confidence.
+- Confirmation add: +15–20%. Triggered by a new independent confirming signal and prior Critic challenges addressed.
+- Conviction add: +20–25%. Triggered when two or more independent signal types confirm and no falsifiers have broken.
+- Max conviction add: remainder to maximum. Triggered at thesis mid-horizon with trajectory intact, only in `risk_on` or `neutral` regimes.
+
+Maximum position sizes by conviction (percent of portfolio):
+
+- Core conviction (high, long horizon): 5–10%.
+- Emerging (medium): 3–5%.
+- Starter: 1–2%.
+- Small-cap asymmetry: up to 15% only if average daily volume exceeds $50M.
+
+Pre-authorized conviction scaling:
+
+- Trader may autonomously scale within approved conviction bands when all gates are satisfied (independent signals, intact falsifiers, regime allows, critic quality threshold met).
+- Manual Aaron approval is required only for overrides above policy max bands or for concentration exceptions.
+
+## 5. Concentration limits
+
+- No single industry above 40% of portfolio.
+- No single economic factor (e.g., supply constraint) above 50% of portfolio.
+- Hedges (shorts + pair trades) above 30% of portfolio require Critic re-approval.
+- Daily new opens capped at 2 names. Replacements, trims, exits, and rotations are not counted against this cap.
+
+## 6. Regime gates
+
+| Regime | New theses | Add cadence | Existing positions | Cash target |
+|---|---|---|---|---|
+| `risk_on` | Full | Full (all tranches) | Active, rotation enabled | 5–15% |
+| `neutral` | Full | Full | Active, rotation enabled | 15–25% |
+| `caution` | Reduced | Starter + confirmation only | Monitor, no new adds | 25–40% |
+| `risk_off` | Paused | Paused | Monitor only | 40–60% |
+| `crisis` | Paused | Paused | Active defense only | 60–80% |
+
+Regime is owned by Quant. Trader cannot override regime gates without an Aaron-approved standing order.
+
+## 7. Stops and per-trade risk
+
+- Every position carries a stop derived from the falsifier set plus one standard deviation of thesis noise.
+- Maximum loss if stopped: 2–3% of portfolio per position. This sets size automatically.
+- LEAPS: tighter stops (about 10% on premium) due to theta.
+- Shorter-dated options: stops are event-window driven; close on event resolution if thesis not confirmed.
+
+## 8. Drawdown management
+
+- Down 20% YTD: regime forced to `caution`, add cadence pauses, Critic re-approves all open positions.
+- Down 30% YTD: regime forced to `risk_off`, only defensive exits permitted.
+- Recovery target after a 20% drawdown: 6 months.
+- Drawdown circuit breaker is automatic: threshold breach writes `system_pauses` records without manual intervention.
+
+## 9. Autonomous authority for Trader
+
+Trader may autonomously, without per-action human approval, in Alpaca paper:
+
+- Open, add, trim, exit, rotate, cancel orders.
+- Hold cash.
+- Place options orders consistent with this doc.
+
+Trader may not autonomously:
+
+- Override regime gates.
+- Execute a trade without a valid `hypothesis_id` and a Critic review record.
+- Use leverage beyond Alpaca paper defaults.
+- Use any data source outside the configured shared state.
+
+## 10. Pause semantics
+
+Pauses are defined as scopes over atomic actions, not over checkpoints:
+
+- `new_entries_only`: blocks `open`, allows `add`/`trim`/`exit`/`rotate`.
+- `adds_only`: blocks `add` and `open`, allows `trim`/`exit`.
+- `shorts_only`: blocks any short-side action.
+- `exits_trims_only`: blocks `open` and `add`; allows only `trim`/`exit`.
+- `full_system`: blocks all non-defensive actions.
+
+A rotation is treated as `exit` then `open`. If either atomic action is blocked by an active pause scope, the rotation is blocked.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md
+========================================================================================================================
+# 02 - Architecture
+
+Status: active. Canonical description of the OpenClaw trading system topology, source map, decision flow, execution loop, and feedback loops. Implements [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md).
+
+## 1. System shape
+
+The trading stack is thesis-first, paper-first, and single-store.
+
+- One canonical SQLite store holds hypotheses, evidence, regime, intents, orders, positions, pauses, postmortems, and validation cases.
+- Five agents share that store and do not maintain competing copies of trading authority.
+- `trader` is the only Telegram-facing lane. The displayed persona name is Druck.
+- Telegram is the operator surface, not the execution engine.
+- Alpaca paper is the only broker surface in launch scope.
+- External APIs are ingested into evidence first; they do not directly place trades.
+
+## 2. Topology at a glance
+
+```text
+                ┌─────────────────────────────────────────────────────────────┐
+                │                 External Information Surfaces               │
+                │  SEC | FRED | EIA | ClinicalTrials.gov | openFDA | ...      │
+                │  USAspending | BLS | USGS | USPTO | arXiv | UN Comtrade      │
+                │  NOAA | OpenAlex | PubMed | USDA WASDE | FERC | Alpaca       │
+                └───────────────┬─────────────────────────────────────────────┘
+                                │
+                                v
+                      ┌───────────────────────┐
+                      │ researcher            │
+                      │ source ingestion      │
+                      │ hypothesis creation   │
+                      │ falsifier tracking    │
+                      └──────────┬────────────┘
+                                 │ evidence + falsifiers
+                                 v
+                      ┌───────────────────────┐
+                      │ quant                 │
+                      │ scoring               │
+                      │ regime classification │
+                      │ expression ranking    │
+                      │ sizing recommendations│
+                      └──────────┬────────────┘
+                                 │ candidate intents
+                                 v
+                      ┌───────────────────────┐
+                      │ critic                │
+                      │ prospective review    │
+                      │ challenge closure     │
+                      └──────────┬────────────┘
+                                 │ reviewed intents
+                                 v
+                      ┌───────────────────────┐
+                      │ trader (Druck)        │
+                      │ Telegram front door   │
+                      │ Alpaca paper submit   │
+                      │ order/position sync   │
+                      └──────────┬────────────┘
+                                 │ broker events + fills
+                                 v
+                      ┌───────────────────────┐
+                      │ reconciliation        │
+                      │ audit rows            │
+                      │ pauses / divergence    │
+                      └──────────┬────────────┘
+                                 │ resolved cases
+                                 v
+                      ┌───────────────────────┐
+                      │ archivist             │
+                      │ postmortems           │
+                      │ patterns              │
+                      │ calibration feedback  │
+                      └──────────┬────────────┘
+                                 │ feedback to research + quant
+                                 v
+                      ┌───────────────────────┐
+                      │ shared SQLite store   │
+                      │ trading-intel.sqlite  │
+                      └───────────────────────┘
+```
+
+## 3. Agent contracts
+
+| Agent | Role | Writes | Primary loop |
+|---|---|---|---|
+| `researcher` | Ingests source deltas and builds new theses | `hypotheses`, `hypothesis_evidence`, `falsifier_signals` | Source -> evidence -> thesis |
+| `quant` | Scores, ranks, sizes, and classifies regime | `hypotheses`, `regime`, `trade_intents` | Evidence -> score -> candidate intent |
+| `critic` | Challenges hypothesis and intent quality before capital risk | `critic_reviews` | Intent gating loop |
+| `trader` | Telegram-facing Druck persona and only execution lane | `trade_intents`, `orders`, `positions`, `tranches` | Human command -> broker -> reconciliation |
+| `archivist` | Grades outcomes and extracts reusable patterns | `hypotheses`, `postmortems`, `patterns` | Resolution -> attribution -> calibration |
+
+All five agents can read all trading state. Write permissions are application-enforced, not implicit.
+
+## 4. Canonical external sources
+
+This is the approved source stack. Sources are read into evidence records; they never bypass the shared store.
+
+| Source | Official name / API surface | Main payloads used | Primary owner | Path |
+|---|---|---|---|---|
+| Broker + market data | Alpaca Trading API (paper) + Alpaca Market Data API | account, orders, positions, fills, bars, trades, quotes | trader | Hot path |
+| Corporate disclosures | SEC EDGAR | 8-K, 10-Q, 10-K, 13D/G, S-1, exhibits, XBRL | researcher | Hot + event-driven |
+| Macro series | FRED + ALFRED | level, vintage, revisions, release timestamps | researcher, quant | Hot + cold |
+| Energy | EIA API | inventories, production, storage, prices, weekly deltas | researcher | Hot + cold |
+| Trials | ClinicalTrials.gov API | trial status, phase, enrollment, endpoints, sponsor changes | researcher | Hot + cold |
+| Drug/regulatory | openFDA APIs | adverse events, labels, recalls, enforcement signals | researcher | Hot + cold |
+| Fiscal demand | USAspending.gov API | awards, obligations, agency flows, timing, counterparties | researcher | Cold |
+| Labor / inflation | BLS Public Data API | CPI, PPI, payrolls, unemployment, JOLTS | researcher, quant | Hot + cold |
+| Geo / physical shocks | USGS APIs | earthquakes, seismic events, water/climate alerts where relevant | researcher | Cold |
+| Innovation | USPTO patent data / patent APIs | publications, claims, assignees, citations, families | researcher | Cold |
+| Preprints | arXiv API / OAI-PMH | preprints, categories, authors, abstract metadata | researcher | Cold |
+| Trade flows | UN Comtrade API | import/export volumes, country flows, product shifts | researcher | Cold |
+| Climate | NOAA climate data services | weather, anomalies, event context | researcher | Cold |
+| Scientific literature | OpenAlex API + PubMed E-utilities | papers, citations, abstracts, author networks | researcher | Cold |
+| Agriculture | USDA WASDE / NASS datasets | supply, demand, acreage, yield, crop balance sheets | researcher | Cold |
+| Power / grid | FERC eLibrary / open data surfaces | generation, transmission, rate filings, capacity changes | researcher | Cold |
+
+Operating rule: broad access at launch, narrow default consumption. Researcher promotes a cold source into evidence only when it materially changes confidence, falsifier status, or regime interpretation.
+
+## 5. Signal lifecycle
+
+The canonical progression is:
+
+```text
+source delta
+  -> evidence row
+  -> hypothesis update
+  -> quant score / regime / expression ranking
+  -> critic challenge set
+  -> trade intent
+  -> trader execution or block
+  -> broker fill / position update
+  -> reconciliation
+  -> archivist postmortem
+  -> pattern extraction
+  -> future hypothesis calibration
+```
+
+What moves between stages:
+
+- Evidence rows carry provenance, release timing, vintage where relevant, and signal type.
+- Hypotheses carry thesis summary, confidence, horizon, score, and falsifier state.
+- Trade intents carry edge scorecards, explainability fields, experiment tags, and fill realism fields.
+- Orders and positions mirror broker reality and are reconciled back to shared state.
+- Postmortems and patterns feed the next generation of hypotheses and quant thresholds.
+
+## 6. Decision flow
+
+The system is not a chat bot with trading bolted on. It is a gated state machine.
+
+1. Researcher observes source movement and writes evidence.
+2. Quant converts evidence into score, regime, and candidate expressions.
+3. Critic validates that the thesis is still coherent and that objections are addressed.
+4. Trader checks gates, sizing, pauses, and broker state before submission.
+5. Broker events are reconciled against local state.
+6. Archivist grades the outcome and updates the calibration corpus.
+
+No stage is allowed to skip ahead by implying a later stage already happened.
+
+## 7. Gate stack before capital risk
+
+`trade_intent` can move to `submitted` only when all of the following are satisfied:
+
+- hypothesis is `ready` or `active`
+- critic challenges are resolved or an explicit human override exists in `audits`
+- current regime permits the action
+- portfolio and per-trade risk limits are still respected after the hypothetical fill
+- no active pause blocks the atomic action
+- options trades have an explicit catalyst window and only high-confidence theses may use shorter-dated options
+- evidence freshness is within threshold for decision-critical sources
+- factor overlap is acceptable after the hypothetical fill
+- explainability fields are present and above threshold
+- modeled fill is realistically achievable under ADV and slippage assumptions
+
+If any gate fails, the intent is blocked with a structured reason. There is no silent fallback to discretionary behavior.
+
+## 8. Execution and reconciliation loops
+
+Trader is the only lane that converts intent into broker activity.
+
+```text
+Telegram command or scheduled checkpoint
+  -> trader checks shared state
+  -> trader checks pauses, freshness, overlap, explainability, fill realism
+  -> trader submits Alpaca order if allowed
+  -> Alpaca emits fill/order events
+  -> trader mirrors events to orders / positions / tranches
+  -> trader reconciles actual broker state vs shared state
+  -> divergence creates reconciliation_run
+  -> affected hypothesis can be paused for new opens until resolved
+```
+
+Important broker-side invariants:
+
+- every Alpaca order becomes an `orders` row
+- every filled action becomes position/tranche history
+- early assignment or unexpected corporate action must generate a corrective intent if exposure changed
+- a reconciliation mismatch blocks new opens for the affected hypothesis until cleared
+- broker-wide anomalies can force `exits_trims_only`
+
+## 9. Time loops
+
+The system has multiple loops running at different horizons.
+
+- Researcher: morning delta ingest, nightly refresh, event-driven ingress on filing/trial/macro shocks.
+- Quant: pre-market scoring, intraday rerank, after-close recalculation, on-demand rescoring when evidence changes.
+- Critic: high-priority review before intent release, plus postmortem calibration review.
+- Trader: pre-market decision pass, midday confirmation/invalidation, rotation pass, close-risk pass, event-driven reconciliation.
+- Archivist: daily resolution sweep and weekly pattern extraction.
+
+These loops are coupled through shared state, not through free-form chat.
+
+## 10. Telegram interface
+
+Telegram is the operator control surface for Druck, not a trading logic layer.
+
+- `/summary` shows active hypotheses, positions, regime, and P&L vs SPY.
+- `/hypothesis <id>` shows the full record.
+- `/intent <id>` shows the current trade-intent status and critic posture.
+- `/approve <id>` and `/reject <id>` provide explicit human override paths.
+- `/exit <position_id>` and `/trim <position_id> <pct>` are direct risk-management commands.
+- `/regime`, `/critic <hypothesis_id>`, `/archivist <hypothesis_id>`, `/audit <period>` expose state and history.
+
+No other trading agent is externally bound to Telegram.
+
+## 11. Shared state and schema coupling
+
+The runtime schema is authoritative in [sql/schema.sql](../sql/schema.sql).
+
+Key storage relationships:
+
+- `hypotheses` anchors the thesis.
+- `hypothesis_evidence` holds every source-derived observation.
+- `falsifier_signals` marks break conditions and monitors them over time.
+- `expression_candidates` represents possible instruments and vehicle choices.
+- `regime` stores the latest deterministic macro/risk classification snapshot.
+- `trade_intents` records proposed risk actions and all gate results.
+- `critic_reviews` captures unresolved vs resolved challenges.
+- `orders`, `positions`, and `tranches` mirror broker reality.
+- `system_pauses` enforces operational brakes.
+- `reconciliation_runs` records mismatches.
+- `postmortems` and `patterns` close the learning loop.
+- `validation_cases` keeps the leakage-resistant calibration corpus.
+- `audits` is the append-only authority ledger.
+
+## 12. Feedback loops that matter most
+
+The critical loops are:
+
+1. Source -> evidence -> quant -> critic -> trader -> broker -> reconciliation. This is the live execution loop.
+2. Broker fill -> position outcome -> archivist -> pattern -> quant/researcher. This is the calibration loop.
+3. Falsifier change -> dormant state -> exit/trim intent -> reconciliation. This is the protection loop.
+4. Regime update -> gate shift -> candidate reprioritization -> sizing change. This is the context loop.
+5. Validation case -> model decision -> resolved outcome -> threshold update. This is the anti-leakage loop.
+
+Archivist writeback contract:
+
+- Archivist does not write free-form advice back into researcher or quant state.
+- Archivist writes `postmortems` and `patterns` only, plus `audits` for the transition trail.
+- `postmortems` must name the hypothesis, resolution state, what was learned, what was false, and which mechanism remained plausible.
+- `patterns` must be reusable rules or anti-patterns, not narrative summaries.
+- Researcher consumes `patterns` as a structured prior: it may raise or lower evidence weight, add a new falsifier, or shorten the time horizon for a similar future thesis.
+- Quant consumes `patterns` as a scoring prior: it may adjust regime thresholds, confidence priors, or expression ranking penalties, but only through a versioned experiment tag.
+- Neither researcher nor quant may treat a pattern as a hard rule unless it is promoted into a versioned rule or threshold change and logged in `DECISION_LOG.md`.
+
+## 13. Temporary state policy
+
+Temporary data under `~/.openclaw/tmp` is never authoritative. It may contain:
+
+- coding-lane run metadata
+- preflight cache files
+- old housekeeping artifacts
+
+Only the subtrees wired into current scripts are operationally useful. Stale archive content in that directory can be removed when it is no longer referenced by the runtime or a current preflight path.
+
+## 14. Non-goals
+
+- No live-capital trading at launch.
+- No hidden bypass around critic or reconciliation.
+- No reliance on stale cached source snapshots for decision-critical signals.
+- No secondary trading persona outside Druck / `trader`.
+
+## 15. Authority chain
+
+This document is implemented by:
+
+- [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md)
+- [03_EXECUTION_STATE_MACHINE.md](03_EXECUTION_STATE_MACHINE.md)
+- [04_SHARED_STATE_SCHEMA.md](04_SHARED_STATE_SCHEMA.md)
+- [05_IMPLEMENTATION_POLICY.md](05_IMPLEMENTATION_POLICY.md)
+
+If this file and the DDL disagree, the DDL is runtime truth and this document must be updated to match.
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md
+========================================================================================================================
+# 03 — Execution State Machine
+
+Status: active. Defines the deterministic state transitions, gates, and reconciliation rules for hypotheses, trade intents, orders, and positions. Implements `02_ARCHITECTURE.md`.
+
+## 1. Entities and primary states
+
+- `hypothesis.state`: `raw` → `scored` → `challenged` → `ready` → `active` → `dormant` → `resolved` → `retired`.
+- `trade_intent.state`: `proposed` → `critic_review` → `approved` | `blocked` → `submitted` → `filled` | `partial` | `canceled` | `rejected`.
+- `order.state`: mirrors Alpaca order status; reconciled to `trade_intent` and `position`.
+- `position.state`: `opening` → `open` → `scaling` → `trimming` → `closing` → `closed`.
+
+## 2. Hard gates before execution
+
+A `trade_intent` may transition to `submitted` only if all of the following hold:
+
+1. References a valid `hypothesis_id` whose `state` is `ready` or `active`.
+2. Has at least one `critic_review` with `all_challenges_addressed = true`, or an Aaron-approved override recorded in `audits`.
+3. Regime gates in `01_OPERATING_AUTHORITY.md` permit the action under the current `regime.current`.
+4. Concentration and per-trade risk limits in `01_OPERATING_AUTHORITY.md` are satisfied after the would-be fill.
+5. No active pause scope blocks the atomic action (`open`, `add`, `trim`, `exit`).
+6. For options vehicles, the hypothesis confidence is `high` and an explicit catalyst window is recorded.
+7. Decision-critical evidence satisfies per-source freshness budgets (`evidence_freshness_status = pass`).
+8. Factor-overlap and concentration checks pass (`factor_overlap_status = pass`) after hypothetical fill.
+9. Explainability thresholds pass: hypothesis reference present, falsifier set present, provenance completeness above threshold, and counterargument quality above threshold.
+10. Fill-realism checks pass: intent size does not exceed ADV-based cap and modeled slippage/spread assumptions are attached.
+
+If any gate fails, the trade intent moves to `blocked` with a structured `blocked_reason`.
+
+## 3. Tranche transitions
+
+Tranches are recorded on the position and link back to the originating `trade_intent`:
+
+- `starter` — opens position. Requires hypothesis `state = ready` and confidence `high`.
+- `confirmation_add` — requires one new independent signal type since the last tranche and prior Critic challenges addressed.
+- `conviction_add` — requires two or more independent signal types since last tranche and no broken falsifiers.
+- `max_conviction` — requires thesis past mid-horizon with trajectory intact and regime in `risk_on` or `neutral`.
+
+Tranche eligibility is computed by quant on signal or schedule and emitted as a `trade_intent` of `action = add`.
+
+## 4. Falsifier monitoring
+
+- `falsifier_signals` are written by researcher whenever a monitored condition's status changes.
+- If any falsifier transitions to `broken`, quant must transition the hypothesis to `dormant` within one checkpoint and emit an `exit` or `trim` intent per policy.
+- A `dormant` hypothesis cannot receive new adds; trader may still exit.
+
+## 5. Critic review semantics
+
+- Critic must produce a `critic_review` for every hypothesis before it can leave `challenged`, and for every `trade_intent` before it can leave `critic_review`.
+- A review with unanswered challenges keeps the intent at `critic_review`.
+- Critic does not unilaterally block. It blocks by leaving challenges unresolved. Quant or trader can either address the challenge (writing a `response`) or escalate via `/intent` for human override.
+- Overrides are first-class: they are written to `audits` with the overriding actor, the override rationale, and a reference to the unresolved challenge.
+
+## 6. Options-specific execution rules
+
+- LEAPS: stop derived from premium; close on either underlying stop or 50% premium loss, whichever fires first.
+- Shorter-dated options: orders must include an `event_date`; if the event passes without thesis confirmation, trader closes the position on the next checkpoint regardless of P&L.
+- Assignment risk: trader must detect early assignment from Alpaca order/position webhooks (or daily reconciliation) and emit a corrective `trade_intent` if it materially changes exposure.
+
+## 7. Reconciliation
+
+- Trader reconciles Alpaca account, orders, and positions against shared state every checkpoint and on every order event.
+- A divergence (e.g., an `order` Alpaca says is filled but no `position` tranche recorded) creates a `reconciliation_run` record and pauses new opens for the affected hypothesis until resolved.
+- On broker-wide anomalies or unresolved reconciliation divergence, system auto-enters degraded mode via `system_pauses.scope = exits_trims_only` until cleared.
+- End-of-day reconciliation writes a daily account snapshot used by the archivist for attribution.
+
+## 8. Pause-state model
+
+Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`, `shorts_only`, `exits_trims_only`, `full_system`.
+
+- Each pause record lives in `system_pauses` with scope, reason, start, optional end, and source actor.
+- Trader evaluates all active pauses against each candidate atomic action before submission.
+- Rotations decompose into `exit` then `open` and are blocked if either atomic component is blocked.
+- Drawdown circuit-breaker: at portfolio drawdown threshold events, system writes a mandatory pause record automatically (no manual step).
+
+## 9.1 Deterministic regime convention
+
+- `regime.current` means the `current` value from the latest `regime` snapshot by `determined_at`.
+- The classification logic from signals to enum must be versioned and deterministic (`regime_rules.rule_version`).
+- Any regime-rule change requires a new `experiment_id` and a `DECISION_LOG.md` entry.
+
+## 9. Resolution and post-mortem
+
+A hypothesis resolves when one of:
+
+- All positions closed and Trader marks the thesis lifecycle complete.
+- Time horizon expires with no open exposure.
+- Aaron explicitly resolves it via Telegram override (`/exit` with rationale).
+
+Archivist runs the post-mortem (`postmortems` table), writes patterns to `patterns`, and transitions the hypothesis to `retired`.
+
+## 10. Required test cases
+
+These cases must pass before the system goes live in Alpaca paper:
+
+1. Hypothesis cannot move to `ready` without quant score and addressed critic challenges.
+2. Trade intent cannot reach `submitted` with a missing or wrong `hypothesis_id`.
+3. Adding a tranche violating concentration limits is rejected and logged.
+4. Falsifier flip to `broken` on an `active` hypothesis transitions it to `dormant` within one checkpoint.
+5. Pause scope `new_entries_only` blocks an `open` intent but allows an `exit` intent.
+6. Options trade intent without a recorded catalyst window is rejected.
+7. Rotation decomposes correctly and is blocked when its `exit` half is blocked.
+8. Reconciliation divergence creates a `reconciliation_run` and pauses new opens for that hypothesis.
+9. Stale decision-critical evidence blocks `open` and records a structured `blocked_reason`.
+10. Factor-overlap breach blocks or downsizes an `open`/`add` according to policy.
+11. Missing explainability fields (falsifier/provenance/counterargument score) prevents exit from `critic_review`.
+12. ADV-cap breach marks intent as not realistically fillable and blocks submission.
+13. Broker-wide anomaly auto-creates `exits_trims_only` pause and blocks new entries portfolio-wide.
+14. Regime classifier is deterministic: known signal snapshot maps to expected regime label.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md
+========================================================================================================================
+# 04 — Shared State Schema
+
+Status: active. Authoritative entity model. The implementing DDL lives in `sql/schema.sql`. If this doc and the DDL disagree, the DDL is the runtime truth and this doc must be updated to match.
+
+## 1. Storage
+
+- Engine: SQLite (WAL mode).
+- Location: `~/.openclaw/state/trading-intel.sqlite`.
+- Access: all five trading agents share this DB. Write permissions are enforced at the application layer (see `02_ARCHITECTURE.md` section 4).
+- Backups: daily snapshot to `~/.openclaw/state/backups/trading-intel-YYYY-MM-DD.sqlite`.
+
+## 2. Storage policy for reasoning
+
+- Store structured evidence, falsifiers, concise rationale (cap at ~500 chars), decisions, counterarguments.
+- Do not store full chain-of-thought transcripts in the canonical store. Long reasoning artifacts go to a separate per-agent journal file under `~/.openclaw/state/journals/<agent>/YYYY-MM-DD.md` referenced by `audits.journal_ref`.
+
+## 3. Core entities
+
+### 3.1 `hypotheses`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | e.g., `HYPO-20260527-GLP1-LILLY` |
+| `created_at` | TEXT | ISO timestamp |
+| `created_by` | TEXT | always `researcher` |
+| `tickers` | TEXT (JSON) | list of strings |
+| `thesis_summary` | TEXT | 2–3 sentences |
+| `state` | TEXT | enum from `03_EXECUTION_STATE_MACHINE.md` section 1 |
+| `confidence` | TEXT | `low` / `medium` / `high` |
+| `time_horizon` | TEXT | e.g., `12-18 months` |
+| `quant_score` | REAL | 0–100, nullable until scored |
+| `scored_at` | TEXT | nullable |
+| `edge_decay_monthly_pct` | REAL | nullable |
+| `last_critic_review_at` | TEXT | nullable |
+| `resolved_at` | TEXT | nullable |
+| `resolved_state` | TEXT | `correct_right_reasons` / `correct_wrong_reasons` / `wrong` / null |
+| `archivist_grade` | TEXT | nullable, short letter or score |
+| `rationale_concise` | TEXT | <= 500 chars |
+| `journal_ref` | TEXT | path to long-form reasoning if any |
+
+### 3.2 `hypothesis_evidence`
+
+Each row is one piece of evidence. Append-only.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `hypothesis_id` | TEXT FK | |
+| `indicator` | TEXT | what is being observed |
+| `value` | TEXT | observed value |
+| `source` | TEXT | e.g., `SEC EDGAR` |
+| `source_url` | TEXT | nullable |
+| `retrieved_at` | TEXT | when our system fetched it |
+| `released_at` | TEXT | when the source published it |
+| `as_of` | TEXT | the point-in-time the value refers to |
+| `vintage` | TEXT | revision id where applicable (FRED/ALFRED) |
+| `signal_type` | TEXT | for independence counting (e.g., `clinical`, `capex`, `hiring`) |
+
+### 3.3 `falsifier_signals`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `hypothesis_id` | TEXT FK | |
+| `condition` | TEXT | falsifier condition |
+| `monitor_frequency` | TEXT | |
+| `current_status` | TEXT | `no_signal` / `monitoring` / `warning` / `broken` |
+| `updated_at` | TEXT | |
+| `source_ref` | TEXT | evidence row id or URL |
+
+### 3.4 `expression_candidates`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `hypothesis_id` | TEXT FK | |
+| `vehicle` | TEXT | `direct_equity` / `etf` / `leaps` / `short_options` / `competitor_short` / `pair_trade` |
+| `ticker` | TEXT | underlying or contract symbol |
+| `option_contract` | TEXT | OCC symbol for options, nullable |
+| `event_date` | TEXT | required for shorter-dated options |
+| `conviction_weight` | REAL | 0–1 |
+| `quant_rationale` | TEXT | <= 500 chars |
+| `recommended` | INTEGER | 0/1 |
+| `score_json` | TEXT | full expression scoring dict |
+| `created_at` | TEXT | |
+
+### 3.5 `regime`
+
+Single-row-per-snapshot table.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | snapshot id |
+| `determined_at` | TEXT | |
+| `determined_by` | TEXT | always `quant` |
+| `current` | TEXT | `risk_on` / `neutral` / `caution` / `risk_off` / `crisis` |
+| `signals_json` | TEXT | spy_trend, credit_spreads, vix_term_structure, yield_curve |
+| `implications_json` | TEXT | new thesis cadence, add cadence, position mgmt, cash target |
+
+Convention: live `regime.current` is the latest snapshot by `determined_at`.
+
+### 3.6 `trade_intents`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `hypothesis_id` | TEXT FK | required |
+| `expression_candidate_id` | TEXT FK | required |
+| `created_by` | TEXT | `quant` or `trader` (for human-initiated rotations) |
+| `created_at` | TEXT | |
+| `action` | TEXT | `open` / `add` / `trim` / `exit` / `rotate` |
+| `tranche_type` | TEXT | nullable for non-add actions |
+| `ticker` | TEXT | |
+| `vehicle` | TEXT | from `expression_candidates.vehicle` |
+| `size` | REAL | shares or contracts |
+| `entry_price_target` | TEXT | price or range |
+| `stop_rule` | TEXT | |
+| `time_horizon` | TEXT | |
+| `triggered_by` | TEXT | concise signal description |
+| `edge_scorecard_json` | TEXT | expected edge by horizon (daily/weekly/monthly/quarterly) vs SPY and cash |
+| `evidence_freshness_status` | TEXT | `pass` / `fail` |
+| `factor_overlap_status` | TEXT | `pass` / `fail` |
+| `provenance_completeness_pct` | REAL | 0–100 |
+| `counterargument_quality_score` | REAL | critic quality score |
+| `explainability_status` | TEXT | `pass` / `fail` |
+| `experiment_id` | TEXT | policy/prompt/scoring version tag |
+| `max_fillable_size` | REAL | ADV-aware maximum realistic size |
+| `modeled_slippage_bps` | REAL | expected slippage assumption |
+| `modeled_fill_price` | REAL | slippage-adjusted expected fill |
+| `state` | TEXT | from `03_EXECUTION_STATE_MACHINE.md` section 1 |
+| `blocked_reason` | TEXT | nullable |
+| `submitted_at` | TEXT | nullable |
+| `executed_at` | TEXT | nullable |
+| `actual_price` | REAL | nullable |
+| `actual_size` | REAL | nullable |
+| `broker_order_id` | TEXT | nullable |
+
+### 3.7 `critic_reviews`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `target_type` | TEXT | `hypothesis` or `trade_intent` |
+| `target_id` | TEXT | |
+| `reviewed_at` | TEXT | |
+| `reviewed_by` | TEXT | always `critic` |
+| `challenges_json` | TEXT | list of {challenge, response, resolved} |
+| `all_challenges_addressed` | INTEGER | 0/1 |
+
+### 3.8 `orders`
+
+Mirror of Alpaca order events relevant to this system.
+
+| Field | Type | Notes |
+|---|---|---|
+| `broker_order_id` | TEXT PK | |
+| `trade_intent_id` | TEXT FK | |
+| `symbol` | TEXT | |
+| `side` | TEXT | `buy` / `sell` |
+| `qty` | REAL | |
+| `type` | TEXT | `market` / `limit` / `stop` / `stop_limit` |
+| `limit_price` | REAL | nullable |
+| `status` | TEXT | mirror of Alpaca |
+| `submitted_at` | TEXT | |
+| `filled_at` | TEXT | nullable |
+| `avg_fill_price` | REAL | nullable |
+| `raw_payload_path` | TEXT | optional |
+
+### 3.9 `positions` and `tranches`
+
+`positions` is the live aggregate per (hypothesis, vehicle, ticker). `tranches` are the immutable entry/exit ledger.
+
+`positions` columns: `id`, `hypothesis_id`, `ticker`, `vehicle`, `qty`, `cost_basis`, `current_price`, `current_value`, `unrealized_pnl_pct`, `regime_at_first_open`, `state`, `opened_at`, `closed_at`.
+
+Add P&L realism fields on `positions`: `pnl_ideal`, `pnl_slippage_adjusted`.
+
+`tranches` columns: `id`, `position_id`, `trade_intent_id`, `tranche_type`, `qty`, `entry_price`, `entry_at`, `exit_price`, `exit_at`, `exit_reason`, `return_pct`.
+
+### 3.10 `system_pauses`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `scope` | TEXT | `new_entries_only` / `adds_only` / `shorts_only` / `exits_trims_only` / `full_system` |
+| `reason` | TEXT | |
+| `started_at` | TEXT | |
+| `ended_at` | TEXT | nullable |
+| `source_actor` | TEXT | which agent or human imposed it |
+| `block_list_json` | TEXT | optional list of hypothesis_ids it applies to |
+
+### 3.11 `reconciliation_runs`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `started_at` | TEXT | |
+| `finished_at` | TEXT | |
+| `divergences_json` | TEXT | list of {field, expected, observed} |
+| `resolved` | INTEGER | 0/1 |
+
+### 3.12 `postmortems` and `patterns`
+
+`postmortems` columns: `id`, `hypothesis_id`, `resolved_at`, `grade`, `thesis_analysis_json`, `expression_analysis_json`, `critic_analysis_json`, `researcher_analysis_json`, `external_mechanism_check_json`, `experiment_id`.
+
+`patterns` columns: `id`, `created_at`, `pattern`, `confidence`, `applies_to_json`, `source_postmortem_id`, `external_validation_status`, `experiment_id`.
+
+### 3.13 `audits`
+
+Append-only. Every state transition writes an audit row.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | |
+| `timestamp` | TEXT | |
+| `actor` | TEXT | one of the five agents or `human` |
+| `entity_type` | TEXT | |
+| `entity_id` | TEXT | |
+| `action` | TEXT | concise verb |
+| `before_state` | TEXT (JSON) | nullable |
+| `after_state` | TEXT (JSON) | nullable |
+| `rationale_concise` | TEXT | <= 500 chars |
+| `journal_ref` | TEXT | nullable path to long-form journal |
+| `experiment_id` | TEXT | nullable experiment tag |
+
+### 3.14 `validation_cases`
+
+Leakage-resistant validation corpus and outcomes.
+
+Fields: `id`, `masked_case_json`, `case_class` (`winner` / `negative_control` / `post_cutoff`), `fake_date_variant`, `model_decision_json`, `resolved_outcome_json`, `passed`, `created_at`, `experiment_id`.
+
+### 3.15 `regime_rules`
+
+Versioned deterministic mapping from input signals to regime enum.
+
+Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `experiment_id`.
+
+## 4. Required indexes
+
+- `hypotheses(state)`, `hypotheses(resolved_at)`
+- `hypothesis_evidence(hypothesis_id)`, `hypothesis_evidence(signal_type, hypothesis_id)`
+- `falsifier_signals(hypothesis_id, current_status)`
+- `trade_intents(state)`, `trade_intents(hypothesis_id)`
+- `orders(trade_intent_id)`, `orders(status)`
+- `positions(hypothesis_id, state)`
+- `system_pauses(scope, ended_at)`
+- `audits(entity_type, entity_id, timestamp)`
+- `trade_intents(experiment_id, state)`
+- `validation_cases(case_class, passed)`
+
+## 5. Mapping notes (retired prototypes)
+
+- Retired Pydantic prototype types from `/home/aaron/.openclaw/workspace/trader/trader_state/` map as follows:
+  - `Hypothesis` → `hypotheses` + `hypothesis_evidence` + `expression_candidates`.
+  - `TradeIntent` → `trade_intents` + `critic_reviews`.
+  - `Position` → `positions` + `tranches`.
+  - `RegimeSnapshot` → `regime`.
+  - `ApprovalRecord` → `audits` rows with `action = override_approval`.
+  - `RiskPolicy` is doc-defined (`01_OPERATING_AUTHORITY.md`), not a DB entity.
+- Retired SQLite tables (`signals`, `ideas`, `evidence_items`, `trades`) from the legacy druck schema are not migrated; the new schema is canonical going forward.
+
+## 6. Migration policy
+
+- Schema changes are additive when possible. Breaking changes require a numbered migration file under `sql/migrations/` and an entry in `DECISION_LOG.md`.
+- The DB always carries a `_schema_version` row in a `meta` table.
+- SQLite writer policy: configure `busy_timeout`, keep write transactions short, and avoid holding write transactions across model calls. If write contention appears, use a single serialized writer queue.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md
+========================================================================================================================
+# 05 — Implementation Policy
+
+Status: active. Schedules, approved actions, deferred features, build phases, and validation gates. Implements `01_OPERATING_AUTHORITY.md` and `02_ARCHITECTURE.md`.
+
+## 1. Approved actions at launch
+
+- Long and short direct equity in Alpaca paper.
+- ETF positions.
+- LEAPS calls and call spreads consistent with `01_OPERATING_AUTHORITY.md`.
+- Shorter-dated options for explicit catalyst windows.
+- Pair trades and competitor shorts with the constraints in `01_OPERATING_AUTHORITY.md`.
+
+## 2. Explicitly deferred at launch
+
+- Live (non-paper) Alpaca account.
+- Margin beyond Alpaca paper defaults.
+- Crypto.
+- Futures.
+- Any data source not declared in `02_ARCHITECTURE.md` section 6.
+
+Lift restrictions only through a new `DECISION_LOG.md` entry approved by Aaron.
+
+## 3. Recurring job schedule (all times US/Eastern)
+
+Researcher:
+
+- `06:30` core-source delta ingestion.
+- `20:30` nightly hypothesis refresh.
+- Event-driven on a major filing, trial, macro, or sector change.
+
+Quant:
+
+- `08:15` pre-market scoring and regime refresh.
+- `12:45` intraday rerank.
+- `16:20` after-close recalculation.
+- On-demand when researcher flags material updates.
+
+Critic:
+
+- `08:35` high-priority hypothesis review.
+- Before any `trade_intent` can move out of `critic_review`.
+- `17:00` postmortem and error-review queue.
+
+Trader:
+
+- `09:00` pre-market decision pass.
+- `11:00` confirmation / invalidation pass.
+- `13:30` replacement / rotation pass.
+- `15:30` close-risk pass.
+- Event-driven on Alpaca order or position events.
+
+Archivist:
+
+- Daily at `18:30` for any hypotheses resolved that day.
+- Weekly Sunday `09:00` for portfolio-level pattern extraction.
+
+These are baseline cadences. Each agent may run additional event-driven jobs.
+
+## 4. OpenClaw runtime surfaces
+
+- Standing orders authorize each recurring job above.
+- Cron supplies the timing.
+- Task Flow wraps multi-step pipelines (pre-market thesis build, intraday confirmation, post-close audit).
+- Plugins are not added unless a gap is documented in `DECISION_LOG.md`.
+
+## 5. Logging and audit
+
+- Every state transition writes an `audits` row.
+- Every Alpaca order writes an `orders` row and an `audits` row referencing it.
+- Long-form reasoning goes to per-agent journals under `~/.openclaw/state/journals/<agent>/YYYY-MM-DD.md` and is referenced by `audits.journal_ref`.
+- Weekly audit job (Sunday `08:00`) emits a portfolio summary into the trader's Telegram thread.
+
+## 6. Build phases and gates
+
+Phase 1 — Schema and validation:
+
+1. `sql/schema.sql` instantiates without errors and creates the empty `~/.openclaw/state/trading-intel.sqlite`.
+2. Run leakage-resistant validation with anonymized case packets (no ticker/company/date identifiers), negative controls, and fake-date sensitivity checks. Store cases and outcomes in canonical state (`validation_cases`).
+3. Add post-cutoff holdout cases that resolved after model training cutoff. Report in-training-window and post-cutoff metrics separately.
+4. Gate: do not proceed unless post-cutoff performance and false-positive rate clear threshold on the anonymized set.
+
+Phase 2 — Infrastructure:
+
+5. Wire Alpaca paper account read/write through the existing skill.
+6. Implement Tier-0 data connectors (SEC EDGAR, FRED, ClinicalTrials.gov, EIA, USAspending, BLS, USGS, USPTO, arXiv).
+7. Each connector writes `hypothesis_evidence` with full provenance fields.
+8. Implement fill-realism layer: slippage/spread model by vehicle and ADV bucket, and max-size caps by historical ADV fraction.
+
+Phase 3 — Agents:
+
+9. Researcher background job populates and updates hypotheses.
+10. Quant scoring, deterministic regime classification, expression candidates, and sizing recommendations.
+11. Critic challenges and reviews; calibrate on anonymized + post-cutoff validation cases.
+12. Trader executes only after critic reviews, data-freshness gates, explainability thresholds, and reconciliation checks pass.
+13. Archivist runs daily resolution sweep and weekly pattern extraction with external mechanism checks.
+
+Phase 4 — Calibration:
+
+14. Two-week dry run: trader emits intents but does not submit to Alpaca.
+15. Grade intents against actual market movement and calibration quality (confidence vs realized outcomes).
+
+Phase 5 — Live paper (90-day operational validation):
+
+16. Enable Alpaca submission.
+17. Run unmodified for 90 days to validate operations (execution, reconciliation, gating, data freshness).
+18. Do not treat the 90-day run as edge proof. Any live-capital decision requires at least 30 resolved post-cutoff theses graded by Archivist.
+
+## 7. Validation gates (must pass before each phase)
+
+- Schema gate: all required test cases in `03_EXECUTION_STATE_MACHINE.md` section 10 pass against the running DB.
+- Reasoning gate: anonymized + negative-control + fake-date suite clears threshold, with post-cutoff metrics reported separately and treated as primary evidence.
+- Critic calibration gate: evaluated on the same anonymized + post-cutoff suite; report confidence intervals and false-positive rate.
+- Reconciliation gate: 5 consecutive end-of-day reconciliations with zero unresolved divergences.
+- Fill realism gate: every performance report includes both idealized and slippage-adjusted P&L; benchmark comparisons use slippage-adjusted series.
+- Explainability gate: no intent reaches `submitted` without required thesis/falsifier/provenance/counterargument quality fields.
+
+Default A1 threshold values (can be tightened later):
+
+- Minimum sample: at least 30 post-cutoff resolved cases and 60 negative-control cases.
+- Post-cutoff directional accuracy: >= 57%.
+- Negative-control false-positive rate: <= 25%.
+- Fake-date sensitivity: >= 95% conclusion invariance across fake-date variants.
+- Confidence calibration: expected calibration error (ECE) <= 0.10 on resolved post-cutoff cases.
+- Reasoning gate fail-closed rule: if minimum sample is not met, gate status is `fail`.
+
+Validation corpus ingestion protocol:
+
+- Researcher is the default producer of validation cases because it already sees source material first.
+- Cases must be anonymized before storage: strip ticker, company name, deal name, date, and any direct mnemonic that could let the model memorize the answer.
+- Each case must be labeled `winner`, `negative_control`, or `post_cutoff`, with optional `fake_date_variant` metadata.
+- Every case must include a machine-readable model decision and a resolved outcome object before being counted as pass/fail evidence.
+- `passed = true` means the model conclusion matched the resolved outcome under the anonymized representation and the fake-date variant did not flip the conclusion.
+- Negative controls must intentionally produce no trade or a correctly blocked trade.
+- Post-cutoff cases are weighted most heavily for go/no-go decisions.
+- The validation runner writes one row per case into `validation_cases` and one audit row for the batch run.
+
+Regime rules ingestion protocol:
+
+- Quant owns regime classification and must write the current regime snapshot from a versioned rule set.
+- A regime update is only valid if the rule version and thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule version in audit metadata.
+- Rule updates require a `DECISION_LOG.md` entry and a new `experiment_id`.
+- Until the regime rule page is authored, default behavior is fail-closed to `neutral`/`caution`-style gating rather than inventing implicit thresholds.
+
+## 8. Pre-flight checklist for live paper
+
+- Telegram routing: account `druck` → agent `trader` (persona displayed to Aaron: Druck). No other Telegram bindings for trading agents.
+- Legacy `druck` agent-id collision resolved (legacy id removed or renamed) to prevent routing/operator ambiguity.
+- `tools.agentToAgent.allow` includes `researcher`, `quant`, `critic`, `archivist`, `trader`.
+- Cron jobs enabled for the schedules in section 3.
+- Daily SQLite backup configured.
+- `system_pauses` table empty (no leftover pauses from testing).
+
+## 9. Change control
+
+- Any change to authority docs requires an entry in `DECISION_LOG.md`.
+- Any new active doc requires updating `DOC_INDEX.md` and confirming the active set stays at five.
+- Every policy/scoring/prompt change must create an `experiment_id` stamped onto downstream intents, audits, patterns, and postmortems.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/sql/schema.sql
+========================================================================================================================
+-- Trading Intelligence — Canonical Shared State Schema
+-- Authority: docs/04_SHARED_STATE_SCHEMA.md
+-- Engine: SQLite (WAL recommended)
+-- Effective: 2026-05-28
+
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '2');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
+
+-- ----------------------------------------------------------------------------
+-- Hypotheses
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS hypotheses (
+  id                        TEXT PRIMARY KEY,
+  created_at                TEXT NOT NULL,
+  created_by                TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','trader','archivist','human')),
+  tickers                   TEXT NOT NULL,                    -- JSON array
+  thesis_summary            TEXT NOT NULL,
+  state                     TEXT NOT NULL CHECK (state IN ('raw','scored','challenged','ready','active','dormant','resolved','retired')),
+  confidence                TEXT CHECK (confidence IN ('low','medium','high')),
+  time_horizon              TEXT,
+  quant_score               REAL,
+  scored_at                 TEXT,
+  edge_decay_monthly_pct    REAL,
+  last_critic_review_at     TEXT,
+  resolved_at               TEXT,
+  resolved_state            TEXT CHECK (resolved_state IN ('correct_right_reasons','correct_wrong_reasons','wrong') OR resolved_state IS NULL),
+  archivist_grade           TEXT,
+  rationale_concise         TEXT CHECK (rationale_concise IS NULL OR length(rationale_concise) <= 500),
+  journal_ref               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_state       ON hypotheses(state);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_resolved_at ON hypotheses(resolved_at);
+
+-- ----------------------------------------------------------------------------
+-- Hypothesis Evidence
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS hypothesis_evidence (
+  id              TEXT PRIMARY KEY,
+  hypothesis_id   TEXT NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+  indicator       TEXT NOT NULL,
+  value           TEXT NOT NULL,
+  source          TEXT NOT NULL,
+  source_url      TEXT,
+  retrieved_at    TEXT NOT NULL,
+  released_at     TEXT,
+  as_of           TEXT,
+  vintage         TEXT,
+  signal_type     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_hypothesis ON hypothesis_evidence(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_signal     ON hypothesis_evidence(signal_type, hypothesis_id);
+
+-- ----------------------------------------------------------------------------
+-- Falsifier Signals
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS falsifier_signals (
+  id                 TEXT PRIMARY KEY,
+  hypothesis_id      TEXT NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+  condition          TEXT NOT NULL,
+  monitor_frequency  TEXT,
+  current_status     TEXT NOT NULL CHECK (current_status IN ('no_signal','monitoring','warning','broken')),
+  updated_at         TEXT NOT NULL,
+  source_ref         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_falsifier_hyp_status ON falsifier_signals(hypothesis_id, current_status);
+
+-- ----------------------------------------------------------------------------
+-- Expression Candidates
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS expression_candidates (
+  id                   TEXT PRIMARY KEY,
+  hypothesis_id        TEXT NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+  vehicle              TEXT NOT NULL CHECK (vehicle IN ('direct_equity','etf','leaps','short_options','competitor_short','pair_trade')),
+  ticker               TEXT NOT NULL,
+  option_contract      TEXT,
+  event_date           TEXT,
+  conviction_weight    REAL CHECK (conviction_weight IS NULL OR (conviction_weight >= 0 AND conviction_weight <= 1)),
+  quant_rationale      TEXT CHECK (quant_rationale IS NULL OR length(quant_rationale) <= 500),
+  recommended          INTEGER NOT NULL DEFAULT 0 CHECK (recommended IN (0,1)),
+  score_json           TEXT,
+  created_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_expr_hyp ON expression_candidates(hypothesis_id);
+
+-- ----------------------------------------------------------------------------
+-- Regime
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS regime (
+  id                TEXT PRIMARY KEY,
+  determined_at     TEXT NOT NULL,
+  determined_by     TEXT NOT NULL DEFAULT 'quant',
+  current           TEXT NOT NULL CHECK (current IN ('risk_on','neutral','caution','risk_off','crisis')),
+  signals_json      TEXT,
+  implications_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_regime_determined_at ON regime(determined_at);
+
+-- ----------------------------------------------------------------------------
+-- Trade Intents
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trade_intents (
+  id                       TEXT PRIMARY KEY,
+  hypothesis_id            TEXT NOT NULL REFERENCES hypotheses(id),
+  expression_candidate_id  TEXT NOT NULL REFERENCES expression_candidates(id),
+  created_by               TEXT NOT NULL,
+  created_at               TEXT NOT NULL,
+  action                   TEXT NOT NULL CHECK (action IN ('open','add','trim','exit','rotate')),
+  tranche_type             TEXT CHECK (tranche_type IN ('starter','confirmation_add','conviction_add','max_conviction') OR tranche_type IS NULL),
+  ticker                   TEXT NOT NULL,
+  vehicle                  TEXT NOT NULL,
+  size                     REAL NOT NULL,
+  entry_price_target       TEXT,
+  stop_rule                TEXT,
+  time_horizon             TEXT,
+  triggered_by             TEXT,
+  edge_scorecard_json      TEXT,
+  evidence_freshness_status TEXT CHECK (evidence_freshness_status IN ('pass','fail') OR evidence_freshness_status IS NULL),
+  factor_overlap_status    TEXT CHECK (factor_overlap_status IN ('pass','fail') OR factor_overlap_status IS NULL),
+  provenance_completeness_pct REAL,
+  counterargument_quality_score REAL,
+  explainability_status    TEXT CHECK (explainability_status IN ('pass','fail') OR explainability_status IS NULL),
+  experiment_id            TEXT,
+  max_fillable_size        REAL,
+  modeled_slippage_bps     REAL,
+  modeled_fill_price       REAL,
+  state                    TEXT NOT NULL CHECK (state IN ('proposed','critic_review','approved','blocked','submitted','filled','partial','canceled','rejected')),
+  blocked_reason           TEXT,
+  submitted_at             TEXT,
+  executed_at              TEXT,
+  actual_price             REAL,
+  actual_size              REAL,
+  broker_order_id          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_intent_state ON trade_intents(state);
+CREATE INDEX IF NOT EXISTS idx_intent_hyp   ON trade_intents(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_intent_experiment_state ON trade_intents(experiment_id, state);
+
+-- ----------------------------------------------------------------------------
+-- Critic Reviews
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS critic_reviews (
+  id                          TEXT PRIMARY KEY,
+  target_type                 TEXT NOT NULL CHECK (target_type IN ('hypothesis','trade_intent')),
+  target_id                   TEXT NOT NULL,
+  reviewed_at                 TEXT NOT NULL,
+  reviewed_by                 TEXT NOT NULL DEFAULT 'critic',
+  challenges_json             TEXT NOT NULL,
+  all_challenges_addressed    INTEGER NOT NULL CHECK (all_challenges_addressed IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_critic_target ON critic_reviews(target_type, target_id);
+
+-- ----------------------------------------------------------------------------
+-- Orders (mirror of Alpaca order events)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS orders (
+  broker_order_id   TEXT PRIMARY KEY,
+  trade_intent_id   TEXT NOT NULL REFERENCES trade_intents(id),
+  symbol            TEXT NOT NULL,
+  side              TEXT NOT NULL CHECK (side IN ('buy','sell')),
+  qty               REAL NOT NULL,
+  type              TEXT NOT NULL CHECK (type IN ('market','limit','stop','stop_limit')),
+  limit_price       REAL,
+  status            TEXT NOT NULL,
+  submitted_at      TEXT NOT NULL,
+  filled_at         TEXT,
+  avg_fill_price    REAL,
+  raw_payload_path  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orders_intent ON orders(trade_intent_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+
+-- ----------------------------------------------------------------------------
+-- Positions and Tranches
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS positions (
+  id                       TEXT PRIMARY KEY,
+  hypothesis_id            TEXT NOT NULL REFERENCES hypotheses(id),
+  ticker                   TEXT NOT NULL,
+  vehicle                  TEXT NOT NULL,
+  qty                      REAL NOT NULL DEFAULT 0,
+  cost_basis               REAL NOT NULL DEFAULT 0,
+  current_price            REAL,
+  current_value            REAL,
+  unrealized_pnl_pct       REAL,
+  pnl_ideal                REAL,
+  pnl_slippage_adjusted    REAL,
+  regime_at_first_open     TEXT,
+  state                    TEXT NOT NULL CHECK (state IN ('opening','open','scaling','trimming','closing','closed')),
+  opened_at                TEXT NOT NULL,
+  closed_at                TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_positions_hyp_state ON positions(hypothesis_id, state);
+
+CREATE TABLE IF NOT EXISTS tranches (
+  id                TEXT PRIMARY KEY,
+  position_id       TEXT NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+  trade_intent_id   TEXT NOT NULL REFERENCES trade_intents(id),
+  tranche_type      TEXT NOT NULL,
+  qty               REAL NOT NULL,
+  entry_price       REAL NOT NULL,
+  entry_at          TEXT NOT NULL,
+  exit_price        REAL,
+  exit_at           TEXT,
+  exit_reason       TEXT,
+  return_pct        REAL
+);
+CREATE INDEX IF NOT EXISTS idx_tranches_position ON tranches(position_id);
+
+-- ----------------------------------------------------------------------------
+-- System Pauses
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS system_pauses (
+  id              TEXT PRIMARY KEY,
+  scope           TEXT NOT NULL CHECK (scope IN ('new_entries_only','adds_only','shorts_only','exits_trims_only','full_system')),
+  reason          TEXT NOT NULL,
+  started_at      TEXT NOT NULL,
+  ended_at        TEXT,
+  source_actor    TEXT NOT NULL,
+  block_list_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pauses_active ON system_pauses(scope, ended_at);
+
+-- ----------------------------------------------------------------------------
+-- Reconciliation Runs
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reconciliation_runs (
+  id                TEXT PRIMARY KEY,
+  started_at        TEXT NOT NULL,
+  finished_at       TEXT,
+  divergences_json  TEXT,
+  resolved          INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0,1))
+);
+
+-- ----------------------------------------------------------------------------
+-- Postmortems and Patterns
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS postmortems (
+  id                          TEXT PRIMARY KEY,
+  hypothesis_id               TEXT NOT NULL REFERENCES hypotheses(id),
+  resolved_at                 TEXT NOT NULL,
+  grade                       TEXT,
+  thesis_analysis_json        TEXT,
+  expression_analysis_json    TEXT,
+  critic_analysis_json        TEXT,
+  researcher_analysis_json    TEXT,
+  external_mechanism_check_json TEXT,
+  experiment_id               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+  id                    TEXT PRIMARY KEY,
+  created_at            TEXT NOT NULL,
+  pattern               TEXT NOT NULL,
+  confidence            TEXT CHECK (confidence IN ('low','medium','high')),
+  applies_to_json       TEXT,
+  source_postmortem_id  TEXT REFERENCES postmortems(id),
+  external_validation_status TEXT CHECK (external_validation_status IN ('pass','fail','unknown') OR external_validation_status IS NULL),
+  experiment_id         TEXT
+);
+
+-- ----------------------------------------------------------------------------
+-- Validation Cases and Regime Rules
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS validation_cases (
+  id                    TEXT PRIMARY KEY,
+  masked_case_json      TEXT NOT NULL,
+  case_class            TEXT NOT NULL CHECK (case_class IN ('winner','negative_control','post_cutoff')),
+  fake_date_variant     TEXT,
+  model_decision_json   TEXT,
+  resolved_outcome_json TEXT,
+  passed                INTEGER NOT NULL DEFAULT 0 CHECK (passed IN (0,1)),
+  created_at            TEXT NOT NULL,
+  experiment_id         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_validation_class_passed ON validation_cases(case_class, passed);
+
+CREATE TABLE IF NOT EXISTS regime_rules (
+  id              TEXT PRIMARY KEY,
+  rule_version    TEXT NOT NULL,
+  effective_at    TEXT NOT NULL,
+  thresholds_json TEXT NOT NULL,
+  notes           TEXT,
+  experiment_id   TEXT
+);
+
+-- ----------------------------------------------------------------------------
+-- Audits (append-only)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audits (
+  id                  TEXT PRIMARY KEY,
+  timestamp           TEXT NOT NULL,
+  actor               TEXT NOT NULL CHECK (actor IN ('researcher','quant','critic','trader','archivist','human','system')),
+  entity_type         TEXT NOT NULL,
+  entity_id           TEXT NOT NULL,
+  action              TEXT NOT NULL,
+  before_state        TEXT,
+  after_state         TEXT,
+  rationale_concise   TEXT CHECK (rationale_concise IS NULL OR length(rationale_concise) <= 500),
+  journal_ref         TEXT,
+  experiment_id       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audits_entity ON audits(entity_type, entity_id, timestamp);
+
+-- ----------------------------------------------------------------------------
+-- Regime current view convention
+-- ----------------------------------------------------------------------------
+CREATE VIEW IF NOT EXISTS regime_current AS
+SELECT r.*
+FROM regime r
+WHERE r.determined_at = (SELECT MAX(determined_at) FROM regime);
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/reference/regime_rules_v1.md
+========================================================================================================================
+# Regime Rules — v1
+
+Status: active reference. Loaded into `regime_rules` as `rule_version = "v1"`.
+Effective: 2026-05-29.
+Owner: `quant`.
+Authority: this page is the concrete numeric realization of the regime model declared in
+`docs/03_EXECUTION_STATE_MACHINE.md` §9.1 and `docs/04_SHARED_STATE_SCHEMA.md` `regime` /
+`regime_rules`.
+
+## 1. Inputs
+
+All four signals are computed deterministically from public sources. No model-derived inputs.
+
+| Signal | Source | Computation |
+| --- | --- | --- |
+| `spy_trend` | Alpaca Market Data API (daily bars, `SPY`) | Close vs 200-day simple moving average; also 50-day vs 200-day cross. |
+| `credit_spreads` | FRED series `BAMLH0A0HYM2` (ICE BofA US High Yield OAS), daily | Latest value plus 20-day delta. |
+| `vix_term_structure` | Alpaca Market Data (`VIX`, `VIX3M`) or CBOE published values | Ratio `VIX / VIX3M` (contango when `< 1.0`, backwardation when `> 1.0`). |
+| `yield_curve` | FRED series `T10Y2Y` (10y - 2y Treasury), daily | Latest level in basis points, plus 60-day slope of the series. |
+
+Each signal is computed at the close of the prior US trading day. The `signals_json` payload
+recorded in `regime` MUST contain numeric values for all four signals or the classifier
+fails closed (see §4).
+
+## 2. Per-signal state mapping
+
+Each signal is reduced to one of `risk_on | neutral | caution | risk_off | crisis`.
+
+### 2.1 `spy_trend`
+
+| Condition | State |
+| --- | --- |
+| Close > 200d SMA by ≥ 3% AND 50d > 200d (golden cross posture) | `risk_on` |
+| Close > 200d SMA by 0–3% | `neutral` |
+| Close ≤ 200d SMA AND > -5% below it | `caution` |
+| Close 5–10% below 200d SMA | `risk_off` |
+| Close > 10% below 200d SMA OR 50d < 200d AND falling for ≥ 20 sessions | `crisis` |
+
+### 2.2 `credit_spreads` (BAMLH0A0HYM2, in basis points)
+
+| Condition | State |
+| --- | --- |
+| ≤ 350 bps AND 20-day delta ≤ +25 bps | `risk_on` |
+| 350–450 bps AND 20-day delta ≤ +50 bps | `neutral` |
+| 450–600 bps OR 20-day delta > +75 bps | `caution` |
+| 600–900 bps | `risk_off` |
+| > 900 bps OR 20-day delta > +200 bps | `crisis` |
+
+### 2.3 `vix_term_structure` (ratio `VIX / VIX3M`)
+
+| Condition | State |
+| --- | --- |
+| ≤ 0.90 (deep contango) | `risk_on` |
+| 0.90–0.95 | `neutral` |
+| 0.95–1.05 | `caution` |
+| 1.05–1.20 (backwardation) | `risk_off` |
+| > 1.20 OR VIX spot > 40 | `crisis` |
+
+### 2.4 `yield_curve` (T10Y2Y, basis points)
+
+| Condition | State |
+| --- | --- |
+| ≥ +50 bps AND 60-day slope ≥ 0 | `risk_on` |
+| 0 to +50 bps | `neutral` |
+| -25 to 0 bps (mild inversion) | `caution` |
+| -100 to -25 bps (deep inversion) | `risk_off` |
+| < -100 bps OR re-steepening from deep inversion within 60 days (recession trigger) | `crisis` |
+
+## 3. Aggregation to `regime.current`
+
+The aggregate uses the **worst-of with credit override** rule, deterministically:
+
+1. Map each of the four signal states to a numeric severity:
+   `risk_on=0`, `neutral=1`, `caution=2`, `risk_off=3`, `crisis=4`.
+2. Compute `worst = max(severity[s])` across the four signals.
+3. If `credit_spreads` severity is `crisis`, the aggregate is `crisis` regardless of other signals
+   (credit-led shocks dominate).
+4. If three or more signals are at severity ≥ 2 (`caution` or worse), bump the aggregate severity
+   up by 1 (capped at `crisis`).
+5. Map the final severity back to the enum.
+
+This rule is what `regime_rules.thresholds_json.aggregation` encodes; quant must implement it
+exactly. Any change requires a new `rule_version`, a `DECISION_LOG.md` entry, and a new
+`experiment_id`.
+
+## 4. Fail-closed behavior
+
+If any of the following is true, quant MUST write `regime.current = 'caution'` with
+`signals_json.fail_closed = true` and a structured `notes` field:
+
+- Any of the four signals is missing or stale (> 36 hours old for daily series).
+- FRED, Alpaca, or CBOE source returned an error and no fallback snapshot is available.
+- Active `regime_rules.rule_version` is older than `effective_at` floor (i.e., misconfigured).
+
+The system never invents an implicit `risk_on` or `neutral` from partial inputs.
+
+## 5. Gate coupling
+
+Trader gate consequences as defined in `docs/01_OPERATING_AUTHORITY.md` and
+`docs/03_EXECUTION_STATE_MACHINE.md`:
+
+| Aggregate | New `open` allowed | `add` allowed | Shorts allowed | Max single-position sizing |
+| --- | --- | --- | --- | --- |
+| `risk_on` | Yes | Yes (all tranches) | Yes | 5–15% |
+| `neutral` | Yes | Yes (≤ mid tranche) | Yes | 5–10% |
+| `caution` | Yes (smaller) | No | Yes | 3–7% |
+| `risk_off` | No (defensive only) | No | Yes | 2–5% |
+| `crisis` | No | No | Yes (exits/hedges) | 0–3% |
+
+`exits` and `trims` are always allowed regardless of regime.
+
+## 6. Seed row
+
+The canonical first row is shipped at `sql/seeds/regime_rules_v1.json` and loaded into
+`regime_rules` on schema bootstrap. The seed `thresholds_json` exactly mirrors the tables above.
+
+## 7. Change procedure
+
+- Author a new file `reference/regime_rules_vN.md` for the proposed rule set.
+- Add a new seed `sql/seeds/regime_rules_vN.json`.
+- Append a `DECISION_LOG.md` entry with rationale and `experiment_id`.
+- Insert the new row into `regime_rules` with `effective_at = now`.
+- Quant begins emitting `regime` rows that reference `rule_version = "vN"`.
+- The old row stays in `regime_rules` for historical attribution; never delete prior rule rows.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/sql/seeds/regime_rules_v1.json
+========================================================================================================================
+{
+  "id": "regime_rules_v1",
+  "rule_version": "v1",
+  "effective_at": "2026-05-29T00:00:00Z",
+  "notes": "Initial deterministic regime classifier. See reference/regime_rules_v1.md for narrative.",
+  "experiment_id": "regime_rules_v1_init",
+  "thresholds_json": {
+    "signals": {
+      "spy_trend": {
+        "source": "alpaca_market_data:SPY:1Day",
+        "compute": "close_vs_sma200_pct_and_sma50_vs_sma200",
+        "states": {
+          "risk_on":  { "close_vs_sma200_pct_min": 3.0,  "require_sma50_gt_sma200": true },
+          "neutral":  { "close_vs_sma200_pct_range": [0.0, 3.0] },
+          "caution":  { "close_vs_sma200_pct_range": [-5.0, 0.0] },
+          "risk_off": { "close_vs_sma200_pct_range": [-10.0, -5.0] },
+          "crisis":   { "close_vs_sma200_pct_max": -10.0, "or": { "sma50_lt_sma200_falling_sessions_min": 20 } }
+        }
+      },
+      "credit_spreads": {
+        "source": "fred:BAMLH0A0HYM2",
+        "compute": "latest_bps_and_20d_delta_bps",
+        "states": {
+          "risk_on":  { "level_bps_max": 350, "delta_20d_bps_max": 25 },
+          "neutral":  { "level_bps_range": [350, 450], "delta_20d_bps_max": 50 },
+          "caution":  { "level_bps_range": [450, 600], "or": { "delta_20d_bps_min": 75 } },
+          "risk_off": { "level_bps_range": [600, 900] },
+          "crisis":   { "level_bps_min": 900, "or": { "delta_20d_bps_min": 200 } }
+        }
+      },
+      "vix_term_structure": {
+        "source": "cboe:VIX_over_VIX3M",
+        "compute": "ratio_vix_vix3m",
+        "states": {
+          "risk_on":  { "ratio_max": 0.90 },
+          "neutral":  { "ratio_range": [0.90, 0.95] },
+          "caution":  { "ratio_range": [0.95, 1.05] },
+          "risk_off": { "ratio_range": [1.05, 1.20] },
+          "crisis":   { "ratio_min": 1.20, "or": { "vix_spot_min": 40 } }
+        }
+      },
+      "yield_curve": {
+        "source": "fred:T10Y2Y",
+        "compute": "latest_bps_and_60d_slope",
+        "states": {
+          "risk_on":  { "level_bps_min": 50,  "slope_60d_min": 0 },
+          "neutral":  { "level_bps_range": [0, 50] },
+          "caution":  { "level_bps_range": [-25, 0] },
+          "risk_off": { "level_bps_range": [-100, -25] },
+          "crisis":   { "level_bps_max": -100, "or": { "resteepening_from_deep_inversion_days_max": 60 } }
+        }
+      }
+    },
+    "severity_map": {
+      "risk_on": 0, "neutral": 1, "caution": 2, "risk_off": 3, "crisis": 4
+    },
+    "aggregation": {
+      "rule": "worst_of_with_credit_override_and_breadth_bump",
+      "steps": [
+        "worst = max(severity[s] for s in signals)",
+        "if severity[credit_spreads] == 4: aggregate = 4",
+        "elif count(severity[s] >= 2 for s in signals) >= 3: aggregate = min(4, worst + 1)",
+        "else: aggregate = worst",
+        "current = inverse_severity_map[aggregate]"
+      ]
+    },
+    "fail_closed": {
+      "default_current": "caution",
+      "triggers": [
+        "any_signal_missing",
+        "any_signal_stale_hours_gt_36",
+        "source_error_no_fallback",
+        "rule_version_misconfigured"
+      ]
+    },
+    "freshness_hours_max": 36
+  }
+}
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trading-intel/reference/validation_corpus/README.md
+========================================================================================================================
+# Validation Corpus
+
+Status: active reference. The directory is the canonical staging area for cases that load into
+`validation_cases` via the validation runner.
+
+Authority: `docs/05_IMPLEMENTATION_POLICY.md` §7 and `sql/schema.sql` `validation_cases`.
+
+## Layout
+
+- `cases/<case_id>.json` — one case per file, matches the JSON contract below.
+- `seeds/` — high-quality exemplar cases shipped as templates for hand-building the rest.
+- `index.json` — generated manifest of all cases (id, class, fake_date_variant, passed, source_file).
+
+## JSON contract (one file per case)
+
+```json
+{
+  "id": "vc_<class>_<short_slug>_<NNN>",
+  "case_class": "winner | negative_control | post_cutoff",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "Anonymized prose. No ticker, no company name, no deal name, no date.",
+    "sector_or_theme": "energy_midstream | small_biotech | regional_bank | ...",
+    "structural_features": ["..."],
+    "primary_source_class": "8-K | trial_update | macro_release | ..."
+  },
+  "model_decision_json": {
+    "decision": "open | no_trade | block",
+    "direction": "long | short | none",
+    "confidence_bucket": "low | medium | high",
+    "rationale_hash": "sha256:..."
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_confirmed | thesis_refuted | inconclusive",
+    "horizon_days": 30,
+    "external_mechanism_check": "what observable event resolved it"
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_seed"
+}
+```
+
+`passed = 1` iff the model decision matches the resolved outcome under the anonymized
+representation AND, if a `fake_date_variant` exists for the same underlying case, the variant
+does not flip the decision.
+
+## Build targets (gating Phase 1)
+
+Per `docs/05_IMPLEMENTATION_POLICY.md` §7 default thresholds:
+
+- ≥ 30 `post_cutoff` cases with resolved outcomes.
+- ≥ 60 `negative_control` cases (cases that should produce `no_trade` or `block`).
+- `winner` cases as the in-distribution sanity baseline (no minimum, but build a few).
+- For each substantive case, ship at least one `fake_date_variant` to test date sensitivity.
+
+These cases must be built by hand. Do not auto-generate them; the value is in the careful
+anonymization and the external mechanism check.
+
+## Anonymization rules
+
+- Strip: ticker, company name, deal name, executive name, country (when identifying), exact date,
+  exact dollar amounts that uniquely identify a deal.
+- Keep: sector, structural pattern, primary-source class, qualitative magnitude, qualitative timing
+  (e.g., "during a Fed hiking cycle"), causal mechanism.
+- The `rationale_hash` field exists so the model decision is committed before resolution is
+  recorded; do not record the rationale in plaintext alongside the outcome to prevent post-hoc
+  rationalization during corpus review.
+
+## Runner contract
+
+A validation runner (to be implemented in Phase 1) reads every `cases/*.json`, validates the JSON
+shape, inserts one row per case into `validation_cases`, and writes a single batch row into
+`audits` with `actor = 'system'`, `action = 'validation_batch'`, and `experiment_id` set from the
+batch.
+
+## Seed contents shipped now
+
+See `seeds/` for one high-fidelity exemplar per class plus one paired `fake_date_variant`. These
+seeds are the format-of-record reference; do not modify them when building real cases — add new
+files under `cases/` instead.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/researcher/skills/reasoning_chain_v1.md
+========================================================================================================================
+# Researcher Reasoning Chain — v1
+
+Status: active versioned skill. Loaded by `researcher` for every hypothesis creation and every
+material evidence update.
+
+- `skill_id`: `researcher.reasoning_chain`
+- `version`: `v1`
+- `experiment_id`: `researcher_reasoning_v1`
+- Effective: 2026-05-29.
+- Authority: subordinate to `workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md` and
+  `docs/02_ARCHITECTURE.md`. If this skill ever conflicts with the canonical docs, the docs win.
+
+## Purpose
+
+This chain is the single, versioned reasoning procedure researcher follows to convert a primary
+source delta into a falsifiable hypothesis. The chain output is structured and machine-readable
+so quant, critic, and archivist can consume it deterministically. Long-form prose belongs in the
+journal, not in this chain's output.
+
+## When to invoke
+
+- On any new primary-source delta researcher decides may be material.
+- On any material evidence update that could change the thesis state, falsifier state, or horizon.
+- Never invoke this chain for routine ingestion that does not alter thesis posture.
+
+## Output contract
+
+The chain emits one JSON object that is attached to the audit and used to update `hypotheses`,
+`hypothesis_evidence`, and `falsifier_signals`. All eight fields are required.
+
+```json
+{
+  "experiment_id": "researcher_reasoning_v1",
+  "q1_world_change": "...",
+  "q2_mechanism_to_cash_flows": "...",
+  "q3_who_is_affected": { "winners": [], "losers": [] },
+  "q4_market_implied_view": "...",
+  "q5_edge_source": "...",
+  "q6_horizon_and_path": { "horizon": "weeks|months|quarters", "path": "..." },
+  "q7_falsifiers": [ { "name": "...", "trip_condition": "..." } ],
+  "q8_disconfirming_evidence_sought": [ "..." ]
+}
+```
+
+A chain output is invalid if any field is empty, if `q7_falsifiers` has fewer than 2 entries, or
+if `q8_disconfirming_evidence_sought` has fewer than 2 entries.
+
+## The chain (8 questions)
+
+### Q1. What concrete world change has occurred?
+
+State the change in one sentence using primary-source language. Cite the source row id from
+`hypothesis_evidence`. Forbidden words: "could", "may", "rumor". If the change is not directly
+observable in a primary source, stop and do not create a hypothesis.
+
+### Q2. What is the mechanism from this change to corporate cash flows?
+
+Describe the causal path in 1–3 steps: world change → operational impact → revenue/cost/margin
+impact → cash flow impact. Each step must be physically or contractually plausible. If you cannot
+state the mechanism without speculation, downgrade the hypothesis to `monitoring` only.
+
+### Q3. Who is affected, and how concentrated is the exposure?
+
+List winners and losers as structured entities (company, sector, ETF, sovereign). For each, note
+the approximate exposure share (qualitative bucket: dominant, material, marginal). Mark any name
+where exposure share is not estimable; that uncertainty is itself an input to quant sizing.
+
+### Q4. What does the current market price already imply?
+
+In one sentence, state the implied prior consensus view the price action assumes. The hypothesis
+only has edge if the proposed view differs from the implied consensus. If the price already
+reflects the change, mark the hypothesis as `no_edge` and stop.
+
+### Q5. What is the source of the edge?
+
+Pick one or more: `information_asymmetry` (we read the primary source first),
+`processing_asymmetry` (we connect two public facts), `time_asymmetry` (slow diffusion through
+analyst coverage), or `behavioral_asymmetry` (known overreaction/underreaction pattern). If you
+cannot name the asymmetry, there is no edge; stop.
+
+### Q6. What is the horizon, and what does the path look like?
+
+Pick a horizon bucket. Describe the expected trajectory milestones (e.g., next earnings, next
+regulatory filing, next macro print, next trial readout). Path milestones become check-in dates
+the archivist will grade.
+
+### Q7. What are the falsifiers?
+
+List at least two specific, observable conditions that would refute the thesis. Each falsifier
+must be a `trip_condition` evaluable from primary sources (e.g., "BAMLH0A0HYM2 closes above 550
+bps for 3 consecutive sessions" or "next 10-Q segment revenue declines QoQ"). Vague falsifiers
+are rejected by critic.
+
+### Q8. What disconfirming evidence will you actively seek?
+
+List at least two concrete sources or queries researcher will check on each refresh to look for
+disconfirming evidence (e.g., "scan SEC EDGAR for 8-K filings from competitor X", "check FERC
+filings for capacity additions in region Y"). This is the anti-confirmation-bias hook.
+
+## Coupling to other agents
+
+- `quant` consumes Q3, Q5, Q6 for scoring and ranking; Q6 horizon sets default tranche pacing.
+- `critic` enforces structure: validates Q1 primary-source citation, demands ≥2 falsifiers in Q7,
+  ≥2 disconfirming-evidence sources in Q8, and rejects any field that reads as boilerplate.
+- `archivist` uses Q2 mechanism + Q7 falsifiers + Q6 milestones to grade outcomes and to extract
+  patterns. A postmortem must reference the `experiment_id` of the chain version used.
+
+## Versioning rules
+
+- Any change to question count, ordering, or output schema is a new `version`, a new
+  `experiment_id`, a new skill file `reasoning_chain_vN.md`, and a `DECISION_LOG.md` entry.
+- The chain output JSON always carries `experiment_id`. Downstream rows inherit it via
+  `audits.experiment_id` and `hypotheses.experiment_id`.
+- Old versions stay on disk; never delete.
+
+
+========================================================================================================================
+/home/aaron/.openclaw/workspaces/trader/AGENTS.md
+========================================================================================================================
+# Trader — AGENTS.md
+
+You are `trader`, the only Telegram-facing agent and the only agent that submits Alpaca paper orders for the OpenClaw 5-agent trading system.
+Your human-facing persona name is Druck.
+
+## Authority
+
+All operational, architectural, lifecycle, schema, and policy rules live under the canonical root:
+
+- `/home/aaron/.openclaw/workspaces/trading-intel/DOC_INDEX.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md`
+- `/home/aaron/.openclaw/workspaces/trading-intel/sql/schema.sql`
+
+## Write scope
+
+- `trade_intents` (execution fields)
+- `orders`
+- `positions`
+- `tranches`
+- `system_pauses` (in response to human commands)
+- `reconciliation_runs`
+- `audits`
+
+## Hard rules
+
+- Every trade must reference a valid `hypothesis_id` whose `state` is `ready` or `active`.
+- Never submit a trade intent that hasn't passed the gates in `03_EXECUTION_STATE_MACHINE.md` section 2.
+- Reconcile Alpaca state on every checkpoint; record divergences as `reconciliation_runs` and pause new opens for the affected hypothesis.
+- Telegram commands available: `/summary`, `/hypothesis`, `/intent`, `/approve`, `/reject`, `/exit`, `/trim`, `/regime`, `/critic`, `/archivist`, `/audit`.
+- Telegram routing: account `druck` is bound to this agent. Do not assume any other Telegram presence.
+- "Druck" is your persona label, not a separate supervisory agent.
+

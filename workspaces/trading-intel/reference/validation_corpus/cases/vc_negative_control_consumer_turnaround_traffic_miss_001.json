@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_consumer_turnaround_traffic_miss_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a retail-apparel turnaround thesis is based on brand recovery and merchandising improvement. the next primary-source updates show mixed demand: one core banner remains weak, a smaller growth banner cannot carry the whole company, and the broader outlook points to a constrained discretionary consumer rather than a clean recovery.",
+    "sector_or_theme": "consumer_apparel_turnaround",
+    "structural_features": [
+      "turnaround_story_requires_core_banner_recovery",
+      "mixed_comps_and_banner_divergence",
+      "weak_discretionary_consumer_signal",
+      "strong_subbrand_cannot_carry_core",
+      "sales_outlook_less_compelling_than_eps_headline",
+      "do_not_buy_turnaround_without_core_demand"
+    ],
+    "primary_source_class": "apparel_company_earnings_releases"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:a362fc7774eb0ff0c1da3b9a90215b070aa8cdb8454295e06633ac8ad8d952ec"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 7,
+    "external_mechanism_check": "Underlying examples: Gap Inc. Q1 FY2026 release and AEO Q1 FY2026 release. A correct decision blocks a long when the core demand evidence is mixed and the recovery thesis depends on broad banner traffic, not one subbrand or margin/EPS optics. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

@@ -75,43 +75,76 @@ These are baseline cadences. Each agent may run additional event-driven jobs.
 Phase 1 — Schema and validation:
 
 1. `sql/schema.sql` instantiates without errors and creates the empty `~/.openclaw/state/trading-intel.sqlite`.
-2. Manually validate the researcher reasoning chain on at least 10 historical cases (e.g., NVDA 2019, Novo 2020, Uranium 2016, ASTS 2021, Cheniere 2018, plus five wrong-thesis cases) using only data available at the time. Document each in `archives/validation/`.
-3. Gate: do not proceed until 8 of 10 cases pass.
+2. Run leakage-resistant validation with anonymized case packets (no ticker/company/date identifiers), negative controls, and fake-date sensitivity checks. Store cases and outcomes in canonical state (`validation_cases`).
+3. Add post-cutoff holdout cases that resolved after model training cutoff. Report in-training-window and post-cutoff metrics separately.
+4. Gate: do not proceed unless post-cutoff performance and false-positive rate clear threshold on the anonymized set.
 
 Phase 2 — Infrastructure:
 
-4. Wire Alpaca paper account read/write through the existing skill.
-5. Implement Tier-0 data connectors (SEC EDGAR, FRED, ClinicalTrials.gov, EIA, USAspending, BLS, USGS, USPTO, arXiv).
-6. Each connector writes `hypothesis_evidence` with full provenance fields.
+5. Wire Alpaca paper account read/write through the existing skill.
+6. Implement Tier-0 data connectors (SEC EDGAR, FRED, ClinicalTrials.gov, EIA, USAspending, BLS, USGS, USPTO, arXiv).
+7. Each connector writes `hypothesis_evidence` with full provenance fields.
+8. Implement fill-realism layer: slippage/spread model by vehicle and ADV bucket, and max-size caps by historical ADV fraction.
 
 Phase 3 — Agents:
 
-7. Researcher background job populates and updates hypotheses.
-8. Quant scoring, regime, expression candidates, and sizing recommendations.
-9. Critic challenges and reviews; calibrate against the 10 historical cases.
-10. Trader executes only after critic reviews and reconciles every checkpoint.
-11. Archivist runs daily resolution sweep and weekly pattern extraction.
+9. Researcher background job populates and updates hypotheses.
+10. Quant scoring, deterministic regime classification, expression candidates, and sizing recommendations.
+11. Critic challenges and reviews; calibrate on anonymized + post-cutoff validation cases.
+12. Trader executes only after critic reviews, data-freshness gates, explainability thresholds, and reconciliation checks pass.
+13. Archivist runs daily resolution sweep and weekly pattern extraction with external mechanism checks.
 
 Phase 4 — Calibration:
 
-12. Two-week dry run: trader emits intents but does not submit to Alpaca.
-13. Grade intents against actual market movement.
+14. Two-week dry run: trader emits intents but does not submit to Alpaca.
+15. Grade intents against actual market movement and calibration quality (confidence vs realized outcomes).
 
-Phase 5 — Live paper:
+Phase 5 — Live paper (90-day operational validation):
 
-14. Enable Alpaca submission.
-15. Run unmodified for 90 days while archivist accumulates patterns.
+16. Enable Alpaca submission.
+17. Run unmodified for 90 days to validate operations (execution, reconciliation, gating, data freshness).
+18. Do not treat the 90-day run as edge proof. Any live-capital decision requires at least 30 resolved post-cutoff theses graded by Archivist.
 
 ## 7. Validation gates (must pass before each phase)
 
 - Schema gate: all required test cases in `03_EXECUTION_STATE_MACHINE.md` section 10 pass against the running DB.
-- Reasoning gate: 8 of 10 historical cases pass.
-- Critic calibration gate: critic approves at least 80% of historically correct theses and flags at least 80% of historically wrong theses.
+- Reasoning gate: anonymized + negative-control + fake-date suite clears threshold, with post-cutoff metrics reported separately and treated as primary evidence.
+- Critic calibration gate: evaluated on the same anonymized + post-cutoff suite; report confidence intervals and false-positive rate.
 - Reconciliation gate: 5 consecutive end-of-day reconciliations with zero unresolved divergences.
+- Fill realism gate: every performance report includes both idealized and slippage-adjusted P&L; benchmark comparisons use slippage-adjusted series.
+- Explainability gate: no intent reaches `submitted` without required thesis/falsifier/provenance/counterargument quality fields.
+
+Default A1 threshold values (can be tightened later):
+
+- Minimum sample: at least 30 post-cutoff resolved cases and 60 negative-control cases.
+- Post-cutoff directional accuracy: >= 57%.
+- Negative-control false-positive rate: <= 25%.
+- Fake-date sensitivity: >= 95% conclusion invariance across fake-date variants.
+- Confidence calibration: expected calibration error (ECE) <= 0.10 on resolved post-cutoff cases.
+- Reasoning gate fail-closed rule: if minimum sample is not met, gate status is `fail`.
+
+Validation corpus ingestion protocol:
+
+- Researcher is the default producer of validation cases because it already sees source material first.
+- Cases must be anonymized before storage: strip ticker, company name, deal name, date, and any direct mnemonic that could let the model memorize the answer.
+- Each case must be labeled `winner`, `negative_control`, or `post_cutoff`, with optional `fake_date_variant` metadata.
+- Every case must include a machine-readable model decision and a resolved outcome object before being counted as pass/fail evidence.
+- `passed = true` means the model conclusion matched the resolved outcome under the anonymized representation and the fake-date variant did not flip the conclusion.
+- Negative controls must intentionally produce no trade or a correctly blocked trade.
+- Post-cutoff cases are weighted most heavily for go/no-go decisions.
+- The validation runner writes one row per case into `validation_cases` and one audit row for the batch run.
+
+Regime rules ingestion protocol:
+
+- Quant owns regime classification and must write the current regime snapshot from a versioned rule set.
+- A regime update is only valid if the rule version and thresholds are recorded in `regime_rules` and the resulting `regime` row references the active rule version in audit metadata.
+- Rule updates require a `DECISION_LOG.md` entry and a new `experiment_id`.
+- Until the regime rule page is authored, default behavior is fail-closed to `neutral`/`caution`-style gating rather than inventing implicit thresholds.
 
 ## 8. Pre-flight checklist for live paper
 
-- Telegram routing: account `druck` → agent `trader`. No other Telegram bindings for trading agents.
+- Telegram routing: account `druck` → agent `trader` (persona displayed to Aaron: Druck). No other Telegram bindings for trading agents.
+- Legacy `druck` agent-id collision resolved (legacy id removed or renamed) to prevent routing/operator ambiguity.
 - `tools.agentToAgent.allow` includes `researcher`, `quant`, `critic`, `archivist`, `trader`.
 - Cron jobs enabled for the schedules in section 3.
 - Daily SQLite backup configured.
@@ -121,3 +154,17 @@ Phase 5 — Live paper:
 
 - Any change to authority docs requires an entry in `DECISION_LOG.md`.
 - Any new active doc requires updating `DOC_INDEX.md` and confirming the active set stays at five.
+- Every policy/scoring/prompt change must create an `experiment_id` stamped onto downstream intents, audits, patterns, and postmortems.
+
+## 10. Bootstrap operations and continuous corpus growth
+
+- Bootstrap mode is allowed in Alpaca paper before full validation corpus counts are reached, as long as all execution gates and reconciliation rules still pass.
+- Bootstrap mode does not change the edge-proof requirement: corpus thresholds in section 7 remain mandatory before treating results as robust edge evidence.
+- Use a dual-lane workflow:
+	- operations lane: real, specific thesis/execution data for live paper decisions.
+	- evaluation lane: masked validation cases for leakage-resistant measurement.
+- Continuous learning loop:
+	1. export resolved hypothesis outcomes into a review queue,
+	2. approve high-quality candidates,
+	3. convert approved raw detailed cases into masked evaluation cases,
+	4. re-run corpus validation.

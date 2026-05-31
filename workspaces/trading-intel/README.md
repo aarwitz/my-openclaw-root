@@ -16,8 +16,8 @@ Five OpenClaw agents share one canonical SQLite store and one repo of authoritat
 - `quant` — scoring, regime, expression selection, sizing
 - `critic` — prospective challenge of every hypothesis and trade intent
 - `archivist` — post-resolution grading and pattern extraction
-- `trader` — only Telegram-facing agent; only agent that executes Alpaca paper orders
+- `trader` — only Telegram-facing agent (persona name: Druck); only agent that executes Alpaca paper orders
 
 ## Authority
 
-If anything outside this root contradicts a doc here, the doc here wins. Legacy docs in `/home/aaron/.openclaw/workspaces/druck` are superseded as of 2026-05-28 (see `DECISION_LOG.md`).
+If anything outside this root contradicts a doc here, the doc here wins. Legacy druck workspace state has been decommissioned as of 2026-05-28 (see `DECISION_LOG.md`).

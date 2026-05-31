@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "validation_case.schema.json",
+  "title": "ValidationCase",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "case_class",
+    "fake_date_variant",
+    "masked_case_json",
+    "model_decision_json",
+    "resolved_outcome_json",
+    "passed",
+    "created_at",
+    "experiment_id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^vc_(winner|negative_control|post_cutoff)_[a-z0-9_]+_[0-9]{3}(_fakedate)?$"
+    },
+    "case_class": {
+      "type": "string",
+      "enum": ["winner", "negative_control", "post_cutoff"]
+    },
+    "fake_date_variant": {
+      "type": ["string", "null"]
+    },
+    "masked_case_json": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["world_change", "sector_or_theme", "structural_features", "primary_source_class"],
+      "properties": {
+        "world_change": { "type": "string", "minLength": 20 },
+        "sector_or_theme": { "type": "string", "minLength": 3 },
+        "structural_features": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "primary_source_class": { "type": "string", "minLength": 3 }
+      }
+    },
+    "model_decision_json": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["decision", "direction", "confidence_bucket", "rationale_hash"],
+      "properties": {
+        "decision": { "type": "string", "enum": ["open", "no_trade", "block"] },
+        "direction": { "type": "string", "enum": ["long", "short", "none"] },
+        "confidence_bucket": { "type": "string", "enum": ["low", "medium", "high"] },
+        "rationale_hash": { "type": "string", "pattern": "^sha256:.+" }
+      }
+    },
+    "resolved_outcome_json": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["outcome", "horizon_days", "external_mechanism_check"],
+      "properties": {
+        "outcome": { "type": "string", "enum": ["thesis_confirmed", "thesis_refuted", "inconclusive"] },
+        "horizon_days": { "type": "integer", "minimum": 1 },
+        "external_mechanism_check": { "type": "string", "minLength": 10 }
+      }
+    },
+    "passed": { "type": "integer", "enum": [0, 1] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "experiment_id": { "type": "string", "minLength": 3 }
+  }
+}

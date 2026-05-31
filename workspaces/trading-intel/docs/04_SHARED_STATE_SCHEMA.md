@@ -97,6 +97,8 @@ Single-row-per-snapshot table.
 | `signals_json` | TEXT | spy_trend, credit_spreads, vix_term_structure, yield_curve |
 | `implications_json` | TEXT | new thesis cadence, add cadence, position mgmt, cash target |
 
+Convention: live `regime.current` is the latest snapshot by `determined_at`.
+
 ### 3.6 `trade_intents`
 
 | Field | Type | Notes |
@@ -115,6 +117,16 @@ Single-row-per-snapshot table.
 | `stop_rule` | TEXT | |
 | `time_horizon` | TEXT | |
 | `triggered_by` | TEXT | concise signal description |
+| `edge_scorecard_json` | TEXT | expected edge by horizon (daily/weekly/monthly/quarterly) vs SPY and cash |
+| `evidence_freshness_status` | TEXT | `pass` / `fail` |
+| `factor_overlap_status` | TEXT | `pass` / `fail` |
+| `provenance_completeness_pct` | REAL | 0–100 |
+| `counterargument_quality_score` | REAL | critic quality score |
+| `explainability_status` | TEXT | `pass` / `fail` |
+| `experiment_id` | TEXT | policy/prompt/scoring version tag |
+| `max_fillable_size` | REAL | ADV-aware maximum realistic size |
+| `modeled_slippage_bps` | REAL | expected slippage assumption |
+| `modeled_fill_price` | REAL | slippage-adjusted expected fill |
 | `state` | TEXT | from `03_EXECUTION_STATE_MACHINE.md` section 1 |
 | `blocked_reason` | TEXT | nullable |
 | `submitted_at` | TEXT | nullable |
@@ -160,6 +172,8 @@ Mirror of Alpaca order events relevant to this system.
 
 `positions` columns: `id`, `hypothesis_id`, `ticker`, `vehicle`, `qty`, `cost_basis`, `current_price`, `current_value`, `unrealized_pnl_pct`, `regime_at_first_open`, `state`, `opened_at`, `closed_at`.
 
+Add P&L realism fields on `positions`: `pnl_ideal`, `pnl_slippage_adjusted`.
+
 `tranches` columns: `id`, `position_id`, `trade_intent_id`, `tranche_type`, `qty`, `entry_price`, `entry_at`, `exit_price`, `exit_at`, `exit_reason`, `return_pct`.
 
 ### 3.10 `system_pauses`
@@ -167,7 +181,7 @@ Mirror of Alpaca order events relevant to this system.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | TEXT PK | |
-| `scope` | TEXT | `new_entries_only` / `adds_only` / `shorts_only` / `full_system` |
+| `scope` | TEXT | `new_entries_only` / `adds_only` / `shorts_only` / `exits_trims_only` / `full_system` |
 | `reason` | TEXT | |
 | `started_at` | TEXT | |
 | `ended_at` | TEXT | nullable |
@@ -186,9 +200,9 @@ Mirror of Alpaca order events relevant to this system.
 
 ### 3.12 `postmortems` and `patterns`
 
-`postmortems` columns: `id`, `hypothesis_id`, `resolved_at`, `grade`, `thesis_analysis_json`, `expression_analysis_json`, `critic_analysis_json`, `researcher_analysis_json`.
+`postmortems` columns: `id`, `hypothesis_id`, `resolved_at`, `grade`, `thesis_analysis_json`, `expression_analysis_json`, `critic_analysis_json`, `researcher_analysis_json`, `external_mechanism_check_json`, `experiment_id`.
 
-`patterns` columns: `id`, `created_at`, `pattern`, `confidence`, `applies_to_json`, `source_postmortem_id`.
+`patterns` columns: `id`, `created_at`, `pattern`, `confidence`, `applies_to_json`, `source_postmortem_id`, `external_validation_status`, `experiment_id`.
 
 ### 3.13 `audits`
 
@@ -206,6 +220,19 @@ Append-only. Every state transition writes an audit row.
 | `after_state` | TEXT (JSON) | nullable |
 | `rationale_concise` | TEXT | <= 500 chars |
 | `journal_ref` | TEXT | nullable path to long-form journal |
+| `experiment_id` | TEXT | nullable experiment tag |
+
+### 3.14 `validation_cases`
+
+Leakage-resistant validation corpus and outcomes.
+
+Fields: `id`, `masked_case_json`, `case_class` (`winner` / `negative_control` / `post_cutoff`), `fake_date_variant`, `model_decision_json`, `resolved_outcome_json`, `passed`, `created_at`, `experiment_id`.
+
+### 3.15 `regime_rules`
+
+Versioned deterministic mapping from input signals to regime enum.
+
+Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `experiment_id`.
 
 ## 4. Required indexes
 
@@ -217,6 +244,8 @@ Append-only. Every state transition writes an audit row.
 - `positions(hypothesis_id, state)`
 - `system_pauses(scope, ended_at)`
 - `audits(entity_type, entity_id, timestamp)`
+- `trade_intents(experiment_id, state)`
+- `validation_cases(case_class, passed)`
 
 ## 5. Mapping notes (retired prototypes)
 
@@ -233,3 +262,4 @@ Append-only. Every state transition writes an audit row.
 
 - Schema changes are additive when possible. Breaking changes require a numbered migration file under `sql/migrations/` and an entry in `DECISION_LOG.md`.
 - The DB always carries a `_schema_version` row in a `meta` table.
+- SQLite writer policy: configure `busy_timeout`, keep write transactions short, and avoid holding write transactions across model calls. If write contention appears, use a single serialized writer queue.

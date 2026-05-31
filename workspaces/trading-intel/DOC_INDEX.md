@@ -14,12 +14,17 @@ Effective: 2026-05-28.
 ## Reference
 
 - `sql/schema.sql` — canonical DDL for the shared state store.
+- `sql/seed_bootstrap.py` — idempotent loader for canonical seed rows.
+- `sql/seeds/regime_rules_v1.json` — versioned regime classifier thresholds (loaded into `regime_rules`).
+- `reference/regime_rules_v1.md` — narrative spec for the v1 regime classifier.
+- `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
+- `../researcher/skills/reasoning_chain_v1.md` — versioned 8-question researcher reasoning chain.
 - `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
 - `archives/` — date-stamped retirement of superseded docs and prototypes.
 
-## Superseded (do not consult except as history)
+## Legacy decommissioned
 
-All trading docs under `/home/aaron/.openclaw/workspaces/druck/` are superseded by this stack as of 2026-05-28. Archive copies are in `archives/` once migrated.
+Legacy druck workspace state has been removed. This stack is the only active trading-system authority as of 2026-05-28.
 
 ## Hard rules
 

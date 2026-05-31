@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '1');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '2');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
 
 -- ----------------------------------------------------------------------------
@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS trade_intents (
   stop_rule                TEXT,
   time_horizon             TEXT,
   triggered_by             TEXT,
+  edge_scorecard_json      TEXT,
+  evidence_freshness_status TEXT CHECK (evidence_freshness_status IN ('pass','fail') OR evidence_freshness_status IS NULL),
+  factor_overlap_status    TEXT CHECK (factor_overlap_status IN ('pass','fail') OR factor_overlap_status IS NULL),
+  provenance_completeness_pct REAL,
+  counterargument_quality_score REAL,
+  explainability_status    TEXT CHECK (explainability_status IN ('pass','fail') OR explainability_status IS NULL),
+  experiment_id            TEXT,
+  max_fillable_size        REAL,
+  modeled_slippage_bps     REAL,
+  modeled_fill_price       REAL,
   state                    TEXT NOT NULL CHECK (state IN ('proposed','critic_review','approved','blocked','submitted','filled','partial','canceled','rejected')),
   blocked_reason           TEXT,
   submitted_at             TEXT,
@@ -130,6 +140,7 @@ CREATE TABLE IF NOT EXISTS trade_intents (
 );
 CREATE INDEX IF NOT EXISTS idx_intent_state ON trade_intents(state);
 CREATE INDEX IF NOT EXISTS idx_intent_hyp   ON trade_intents(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_intent_experiment_state ON trade_intents(experiment_id, state);
 
 -- ----------------------------------------------------------------------------
 -- Critic Reviews
@@ -178,6 +189,8 @@ CREATE TABLE IF NOT EXISTS positions (
   current_price            REAL,
   current_value            REAL,
   unrealized_pnl_pct       REAL,
+  pnl_ideal                REAL,
+  pnl_slippage_adjusted    REAL,
   regime_at_first_open     TEXT,
   state                    TEXT NOT NULL CHECK (state IN ('opening','open','scaling','trimming','closing','closed')),
   opened_at                TEXT NOT NULL,
@@ -205,7 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_tranches_position ON tranches(position_id);
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS system_pauses (
   id              TEXT PRIMARY KEY,
-  scope           TEXT NOT NULL CHECK (scope IN ('new_entries_only','adds_only','shorts_only','full_system')),
+  scope           TEXT NOT NULL CHECK (scope IN ('new_entries_only','adds_only','shorts_only','exits_trims_only','full_system')),
   reason          TEXT NOT NULL,
   started_at      TEXT NOT NULL,
   ended_at        TEXT,
@@ -236,7 +249,9 @@ CREATE TABLE IF NOT EXISTS postmortems (
   thesis_analysis_json        TEXT,
   expression_analysis_json    TEXT,
   critic_analysis_json        TEXT,
-  researcher_analysis_json    TEXT
+  researcher_analysis_json    TEXT,
+  external_mechanism_check_json TEXT,
+  experiment_id               TEXT
 );
 
 CREATE TABLE IF NOT EXISTS patterns (
@@ -245,7 +260,34 @@ CREATE TABLE IF NOT EXISTS patterns (
   pattern               TEXT NOT NULL,
   confidence            TEXT CHECK (confidence IN ('low','medium','high')),
   applies_to_json       TEXT,
-  source_postmortem_id  TEXT REFERENCES postmortems(id)
+  source_postmortem_id  TEXT REFERENCES postmortems(id),
+  external_validation_status TEXT CHECK (external_validation_status IN ('pass','fail','unknown') OR external_validation_status IS NULL),
+  experiment_id         TEXT
+);
+
+-- ----------------------------------------------------------------------------
+-- Validation Cases and Regime Rules
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS validation_cases (
+  id                    TEXT PRIMARY KEY,
+  masked_case_json      TEXT NOT NULL,
+  case_class            TEXT NOT NULL CHECK (case_class IN ('winner','negative_control','post_cutoff')),
+  fake_date_variant     TEXT,
+  model_decision_json   TEXT,
+  resolved_outcome_json TEXT,
+  passed                INTEGER NOT NULL DEFAULT 0 CHECK (passed IN (0,1)),
+  created_at            TEXT NOT NULL,
+  experiment_id         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_validation_class_passed ON validation_cases(case_class, passed);
+
+CREATE TABLE IF NOT EXISTS regime_rules (
+  id              TEXT PRIMARY KEY,
+  rule_version    TEXT NOT NULL,
+  effective_at    TEXT NOT NULL,
+  thresholds_json TEXT NOT NULL,
+  notes           TEXT,
+  experiment_id   TEXT
 );
 
 -- ----------------------------------------------------------------------------
@@ -261,6 +303,15 @@ CREATE TABLE IF NOT EXISTS audits (
   before_state        TEXT,
   after_state         TEXT,
   rationale_concise   TEXT CHECK (rationale_concise IS NULL OR length(rationale_concise) <= 500),
-  journal_ref         TEXT
+  journal_ref         TEXT,
+  experiment_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audits_entity ON audits(entity_type, entity_id, timestamp);
+
+-- ----------------------------------------------------------------------------
+-- Regime current view convention
+-- ----------------------------------------------------------------------------
+CREATE VIEW IF NOT EXISTS regime_current AS
+SELECT r.*
+FROM regime r
+WHERE r.determined_at = (SELECT MAX(determined_at) FROM regime);

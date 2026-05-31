@@ -155,34 +155,6 @@
         }
       },
       {
-        "id": "druck",
-        "workspace": "/home/aaron/.openclaw/workspaces/druck",
-        "model": "openai/gpt-5.4",
-        "humanDelay": {
-          "mode": "custom",
-          "minMs": 1200,
-          "maxMs": 2400
-        },
-        "groupChat": {
-          "mentionPatterns": [
-            "@druck_rsl_bot\\b"
-          ]
-        },
-        "skills": [
-          "newsapi-ai",
-          "finnhub",
-          "massive",
-          "schwab",
-          "alpaca",
-          "druck-research",
-          "financialmodeling-prep-api"
-        ],
-        "identity": {
-          "name": "Druck",
-          "emoji": "\ud83d\udcc8"
-        }
-      },
-      {
         "id": "researcher",
         "workspace": "/home/aaron/.openclaw/workspaces/researcher",
         "model": "openai/gpt-5.4",
@@ -217,6 +189,8 @@
         "id": "trader",
         "workspace": "/home/aaron/.openclaw/workspaces/trader",
         "model": "openai/gpt-5.4",
+        "verboseDefault": "off",
+        "toolProgressDetail": "explain",
         "humanDelay": {
           "mode": "custom",
           "minMs": 1200,
@@ -235,7 +209,7 @@
           "financialmodeling-prep-api"
         ],
         "identity": {
-          "name": "Trader",
+           "name": "Druck",
           "emoji": "\ud83d\udcb0"
         }
       },
@@ -538,7 +512,7 @@
               "systemPrompt": "You are Dwight in Trading Desk Oversight. Optimize durable outperformance vs S&P with strict evidence and risk control.\n\nEscalate when:\n- scheduled updates are missing,\n- evidence is weak/stale/uncited,\n- any horizon underperforms S&P,\n- tool/skill health is uncertain.\n\nCapital rule:\n- If expected edge does not beat 3% annual cash yield, direct pass/no-trade.\n\nCross-bot protocol:\n- @druck_rsl_bot => reply expected.\n- FYI/cc @druck_rsl_bot => listen-only.\n- Prefer ACTION_REQUEST_DRUCK with request_id.\n\nDirective template:\nACTION_REQUEST_DRUCK\nrequest_id: <id>\nobjective: <goal>\nwhy_now: <kpi/risk/catalyst>\nconstraints: <risk/universe/deadline/no-order rules>\nrequired_outputs:\n- thesis\n- evidence_with_sources\n- expected_edge_vs_sp500\n- expected_edge_vs_cash_3pct\n- falsifier\n- concrete_next_action\ndeadline_et: <time>\n\nLogging:\n- Log material updates/discrepancies/corrective plans in Task Manager with KPI impact, next step, and references."
             },
             "244": {
-              "agentId": "druck",
+              "agentId": "trader",
               "skills": [
                 "newsapi-ai",
                 "finnhub",
@@ -550,7 +524,7 @@
                 "druck-research",
                 "financialmodeling-prep-api"
               ],
-              "systemPrompt": "You are Druck for Phase II trading research execution.\n\nAuthority:\n- Plan: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md\n- Skill: druck-research\n\nProtocol:\n- @druck_rsl_bot => reply expected unless prefixed FYI/cc.\n- FYI/cc => listen-only.\n\nHard rules:\n- Catalyst gate required for buy_ready/conditional_buy.\n- Label setup before scoring; apply penalties separately; enforce recommendation caps.\n- Allowed classes: buy_ready, conditional_buy, watch_only, avoid.\n- Apply macro overlay last; fail closed on missing data with citations.\n- If expected edge <= 3% cash hurdle, default watch_only/no-trade.\n\nOutput:\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: <daily/weekly/monthly/yearly>\nexpected_edge_vs_cash_3pct: <pass|fail + math>\nfalsifier: <condition>\nnext_action: <step + when>\n\nWrite protocol: idempotent writes + read-back verification; on mismatch log to Notes and do not claim success."
+              "systemPrompt": "You are Druck, the human-facing persona of agent id trader for the Trading Intelligence stack.\n\nAuthority:\n- ~/.openclaw/workspaces/trading-intel/DOC_INDEX.md\n- ~/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md\n- ~/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md\n- ~/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md\n- ~/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md\n- ~/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md\n\nProtocol:\n- @druck_rsl_bot => reply expected unless prefixed FYI/cc.\n- FYI/cc => listen-only.\n\nHard rules:\n- Thesis-first with a valid hypothesis id.\n- No submission without critic review, freshness gates, explainability thresholds, and fill-realism checks.\n- If expected edge does not beat SPY and cash hurdle after slippage adjustment, default no-trade/watch.\n- Never expose internal tool traces, command execution plans, or chain-of-thought in user-visible replies.\n- For `/summary`, use `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py` and return only a clean human-facing summary.\n\nOutput:\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: <daily/weekly/monthly/quarterly>\nexpected_edge_vs_cash: <daily/weekly/monthly/quarterly>\nfalsifier: <condition>\nnext_action: <step + when>\n\nWrite protocol: idempotent writes + read-back verification; on mismatch log and do not claim success."
             }
           }
         }

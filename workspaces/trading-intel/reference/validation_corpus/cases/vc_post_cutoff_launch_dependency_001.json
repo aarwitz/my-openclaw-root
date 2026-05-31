@@ -1,0 +1,33 @@
+{
+  "id": "vc_post_cutoff_launch_dependency_001",
+  "case_class": "post_cutoff",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a pre-revenue satellite communications company depended on scarce third-party launch capacity to execute an aggressive constellation deployment plan. a catastrophic launch-provider test explosion introduced uncertain return-to-flight timing and materially increased deployment-delay risk, directly weakening the near-term capacity and cash-flow path.",
+    "sector_or_theme": "pre_revenue_space_infrastructure",
+    "structural_features": [
+      "valuation_depends_on_future_deployment",
+      "scarce_third_party_launch_capacity",
+      "catastrophic_provider_incident_disrupts_launch_schedule",
+      "timeline_slippage_hits_cash_flow_path",
+      "pre_revenue_model_has_limited_buffer",
+      "alternative_provider_capacity_does_not_fully_remove_dependency",
+      "uncertain_return_to_flight_window"
+    ],
+    "primary_source_class": "official_incident_disclosure_plus_company_update"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:ac32391117394f7c42f6dc27aa0eada9b170bcbbdb361c3438ba50c4882216df"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 7,
+    "external_mechanism_check": "Underlying: AST SpaceMobile and major launch-provider incident period (late May 2026). Primary sources: launch-provider incident disclosures and company-facing deployment dependency context. Outcome check: catastrophic provider failure with uncertain return-to-flight timing increased schedule risk and weakened near-term deployment confidence; a disciplined model should not open a long on deployment optimism immediately after this event. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

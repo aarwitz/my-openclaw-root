@@ -19,6 +19,10 @@ A `trade_intent` may transition to `submitted` only if all of the following hold
 4. Concentration and per-trade risk limits in `01_OPERATING_AUTHORITY.md` are satisfied after the would-be fill.
 5. No active pause scope blocks the atomic action (`open`, `add`, `trim`, `exit`).
 6. For options vehicles, the hypothesis confidence is `high` and an explicit catalyst window is recorded.
+7. Decision-critical evidence satisfies per-source freshness budgets (`evidence_freshness_status = pass`).
+8. Factor-overlap and concentration checks pass (`factor_overlap_status = pass`) after hypothetical fill.
+9. Explainability thresholds pass: hypothesis reference present, falsifier set present, provenance completeness above threshold, and counterargument quality above threshold.
+10. Fill-realism checks pass: intent size does not exceed ADV-based cap and modeled slippage/spread assumptions are attached.
 
 If any gate fails, the trade intent moves to `blocked` with a structured `blocked_reason`.
 
@@ -56,15 +60,23 @@ Tranche eligibility is computed by quant on signal or schedule and emitted as a 
 
 - Trader reconciles Alpaca account, orders, and positions against shared state every checkpoint and on every order event.
 - A divergence (e.g., an `order` Alpaca says is filled but no `position` tranche recorded) creates a `reconciliation_run` record and pauses new opens for the affected hypothesis until resolved.
+- On broker-wide anomalies or unresolved reconciliation divergence, system auto-enters degraded mode via `system_pauses.scope = exits_trims_only` until cleared.
 - End-of-day reconciliation writes a daily account snapshot used by the archivist for attribution.
 
 ## 8. Pause-state model
 
-Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`, `shorts_only`, `full_system`.
+Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`, `shorts_only`, `exits_trims_only`, `full_system`.
 
 - Each pause record lives in `system_pauses` with scope, reason, start, optional end, and source actor.
 - Trader evaluates all active pauses against each candidate atomic action before submission.
 - Rotations decompose into `exit` then `open` and are blocked if either atomic component is blocked.
+- Drawdown circuit-breaker: at portfolio drawdown threshold events, system writes a mandatory pause record automatically (no manual step).
+
+## 9.1 Deterministic regime convention
+
+- `regime.current` means the `current` value from the latest `regime` snapshot by `determined_at`.
+- The classification logic from signals to enum must be versioned and deterministic (`regime_rules.rule_version`).
+- Any regime-rule change requires a new `experiment_id` and a `DECISION_LOG.md` entry.
 
 ## 9. Resolution and post-mortem
 
@@ -88,3 +100,9 @@ These cases must pass before the system goes live in Alpaca paper:
 6. Options trade intent without a recorded catalyst window is rejected.
 7. Rotation decomposes correctly and is blocked when its `exit` half is blocked.
 8. Reconciliation divergence creates a `reconciliation_run` and pauses new opens for that hypothesis.
+9. Stale decision-critical evidence blocks `open` and records a structured `blocked_reason`.
+10. Factor-overlap breach blocks or downsizes an `open`/`add` according to policy.
+11. Missing explainability fields (falsifier/provenance/counterargument score) prevents exit from `critic_review`.
+12. ADV-cap breach marks intent as not realistically fillable and blocks submission.
+13. Broker-wide anomaly auto-creates `exits_trims_only` pause and blocks new entries portfolio-wide.
+14. Regime classifier is deterministic: known signal snapshot maps to expected regime label.

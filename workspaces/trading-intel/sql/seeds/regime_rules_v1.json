@@ -1,0 +1,78 @@
+{
+  "id": "regime_rules_v1",
+  "rule_version": "v1",
+  "effective_at": "2026-05-29T00:00:00Z",
+  "notes": "Initial deterministic regime classifier. See reference/regime_rules_v1.md for narrative.",
+  "experiment_id": "regime_rules_v1_init",
+  "thresholds_json": {
+    "signals": {
+      "spy_trend": {
+        "source": "alpaca_market_data:SPY:1Day",
+        "compute": "close_vs_sma200_pct_and_sma50_vs_sma200",
+        "states": {
+          "risk_on":  { "close_vs_sma200_pct_min": 3.0,  "require_sma50_gt_sma200": true },
+          "neutral":  { "close_vs_sma200_pct_range": [0.0, 3.0] },
+          "caution":  { "close_vs_sma200_pct_range": [-5.0, 0.0] },
+          "risk_off": { "close_vs_sma200_pct_range": [-10.0, -5.0] },
+          "crisis":   { "close_vs_sma200_pct_max": -10.0, "or": { "sma50_lt_sma200_falling_sessions_min": 20 } }
+        }
+      },
+      "credit_spreads": {
+        "source": "fred:BAMLH0A0HYM2",
+        "compute": "latest_bps_and_20d_delta_bps",
+        "states": {
+          "risk_on":  { "level_bps_max": 350, "delta_20d_bps_max": 25 },
+          "neutral":  { "level_bps_range": [350, 450], "delta_20d_bps_max": 50 },
+          "caution":  { "level_bps_range": [450, 600], "or": { "delta_20d_bps_min": 75 } },
+          "risk_off": { "level_bps_range": [600, 900] },
+          "crisis":   { "level_bps_min": 900, "or": { "delta_20d_bps_min": 200 } }
+        }
+      },
+      "vix_term_structure": {
+        "source": "cboe:VIX_over_VIX3M",
+        "compute": "ratio_vix_vix3m",
+        "states": {
+          "risk_on":  { "ratio_max": 0.90 },
+          "neutral":  { "ratio_range": [0.90, 0.95] },
+          "caution":  { "ratio_range": [0.95, 1.05] },
+          "risk_off": { "ratio_range": [1.05, 1.20] },
+          "crisis":   { "ratio_min": 1.20, "or": { "vix_spot_min": 40 } }
+        }
+      },
+      "yield_curve": {
+        "source": "fred:T10Y2Y",
+        "compute": "latest_bps_and_60d_slope",
+        "states": {
+          "risk_on":  { "level_bps_min": 50,  "slope_60d_min": 0 },
+          "neutral":  { "level_bps_range": [0, 50] },
+          "caution":  { "level_bps_range": [-25, 0] },
+          "risk_off": { "level_bps_range": [-100, -25] },
+          "crisis":   { "level_bps_max": -100, "or": { "resteepening_from_deep_inversion_days_max": 60 } }
+        }
+      }
+    },
+    "severity_map": {
+      "risk_on": 0, "neutral": 1, "caution": 2, "risk_off": 3, "crisis": 4
+    },
+    "aggregation": {
+      "rule": "worst_of_with_credit_override_and_breadth_bump",
+      "steps": [
+        "worst = max(severity[s] for s in signals)",
+        "if severity[credit_spreads] == 4: aggregate = 4",
+        "elif count(severity[s] >= 2 for s in signals) >= 3: aggregate = min(4, worst + 1)",
+        "else: aggregate = worst",
+        "current = inverse_severity_map[aggregate]"
+      ]
+    },
+    "fail_closed": {
+      "default_current": "caution",
+      "triggers": [
+        "any_signal_missing",
+        "any_signal_stale_hours_gt_36",
+        "source_error_no_fallback",
+        "rule_version_misconfigured"
+      ]
+    },
+    "freshness_hours_max": 36
+  }
+}

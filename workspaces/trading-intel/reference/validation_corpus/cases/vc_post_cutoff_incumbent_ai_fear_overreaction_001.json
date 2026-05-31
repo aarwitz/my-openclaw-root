@@ -1,0 +1,32 @@
+{
+  "id": "vc_post_cutoff_incumbent_ai_fear_overreaction_001",
+  "case_class": "post_cutoff",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a dominant consumer-search and advertising incumbent traded under a disruption narrative: investors feared that ai-native interfaces would erode query behavior and the ad model. the company\u2019s subsequent primary-source update showed core search usage and monetization still growing, cloud demand accelerating, and internal model quality/cost improving, contradicting the simple \u201cincumbent is obsolete\u201d narrative.",
+    "sector_or_theme": "mega_cap_search_advertising_incumbent",
+    "structural_features": [
+      "bearish_disruption_narrative",
+      "core_revenue_engine_still_growing",
+      "user_behavior_not_yet_broken",
+      "cloud_and_ai_products_accelerating",
+      "model_cost_declining",
+      "market_confused_product_threat_with_cash_flow_impairment"
+    ],
+    "primary_source_class": "company_earnings_call_and_operating_metrics"
+  },
+  "model_decision_json": {
+    "decision": "open",
+    "direction": "long",
+    "confidence_bucket": "high",
+    "rationale_hash": "sha256:1d3f4d04f2e4559adbddf6256248dc7e0951f717a86e4c5c33a2933d15072a02"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_confirmed",
+    "horizon_days": 120,
+    "external_mechanism_check": "Underlying: Alphabet. Primary source: Alphabet Q1 2026 earnings call and investor materials, which reported continued Search growth, Cloud acceleration, strong AI usage, and lower AI response costs. Outcome check: subsequent earnings/operating metrics refuted the feared near-term collapse of the core ad engine. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

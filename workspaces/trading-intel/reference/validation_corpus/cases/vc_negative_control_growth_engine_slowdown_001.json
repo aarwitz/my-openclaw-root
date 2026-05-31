@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_growth_engine_slowdown_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a medical-device compounder carries a premium valuation because one flagship procedure/product is treated as the principal growth engine. management commentary then points to slower standalone usage and near-term flat growth for that engine, making the rest of the portfolio insufficient to defend the multiple.",
+    "sector_or_theme": "medtech_single_engine_compounder",
+    "structural_features": [
+      "premium_multiple_built_on_one_growth_engine",
+      "management_warns_core_usage_slowing",
+      "near_term_growth_guidance_flattens",
+      "rest_of_portfolio_cannot_offset_engine_deceleration",
+      "demand_side_slowdown_not_just_timing",
+      "single_engine_dependency_is_falsifier"
+    ],
+    "primary_source_class": "management_guidance_and_earnings_materials"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:46e15f8080ae462c13bbfe6d0fc6c897e2cccf4474e8d52c044d87ca39834c65"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 7,
+    "external_mechanism_check": "Underlying: Boston Scientific / WATCHMAN. Sources: company Q1 2026 results plus subsequent management commentary covered by Reuters/Barron\u2019s. Correct behavior is no_trade because a one-engine compounder loses its thesis when the engine decelerates. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

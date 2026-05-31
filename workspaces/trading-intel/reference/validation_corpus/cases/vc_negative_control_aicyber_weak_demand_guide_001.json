@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_aicyber_weak_demand_guide_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "an ai-cybersecurity company has an appealing autonomous-defense narrative and still reports double-digit revenue and recurring-revenue growth. but the same update contains a demand warning: guidance is weak relative to expectations and management actions point to budget pressure or competitive friction.",
+    "sector_or_theme": "ai_cybersecurity_autonomous_defense",
+    "structural_features": [
+      "compelling_ai_security_story",
+      "double_digit_growth_not_enough",
+      "forward_guidance_disappoints",
+      "budget_or_competitive_pressure",
+      "management_actions_signal_demand_friction",
+      "story_loses_to_forward_truth"
+    ],
+    "primary_source_class": "company_earnings_release_and_guidance"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:2d4f08fcdef61a1d437182d5a18078e92f764e59202fa6a88f167f3b2697e911"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 7,
+    "external_mechanism_check": "Underlying: SentinelOne Q1 FY2027. Source: company investor materials. Correct behavior is no_trade because the forward guide and demand indicators override the qualitative AI-security story. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}

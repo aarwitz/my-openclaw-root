@@ -1,0 +1,32 @@
+{
+  "id": "vc_negative_control_infra_halo_execution_miss_001",
+  "case_class": "negative_control",
+  "fake_date_variant": null,
+  "masked_case_json": {
+    "world_change": "a construction-and-services company is re-rated as a beneficiary of a hot power/data-center infrastructure theme, and a recent acquisition appears to increase thematic exposure. the company then reports a broad execution miss and guidance disappointment driven by cost pressure and problems away from the fashionable segment.",
+    "sector_or_theme": "infrastructure_construction_thematic_rerating",
+    "structural_features": [
+      "theme_membership_not_enough",
+      "acquisition_adds_hot_exposure",
+      "earnings_and_guidance_miss",
+      "execution_problem_in_non_theme_segment",
+      "cost_pressure_breaks_margin_story",
+      "company_specific_execution_overrides_thematic_halo"
+    ],
+    "primary_source_class": "company_earnings_release"
+  },
+  "model_decision_json": {
+    "decision": "no_trade",
+    "direction": "none",
+    "confidence_bucket": "medium",
+    "rationale_hash": "sha256:bdf6904fdc6221faba0b6520110c84ef818694eae277b9b2e66bebab176e9a37"
+  },
+  "resolved_outcome_json": {
+    "outcome": "thesis_refuted",
+    "horizon_days": 7,
+    "external_mechanism_check": "Underlying: Primoris Q1 2026. Primary source: company earnings release. A correct decision blocks a long because thematic exposure does not offset company-specific execution and cost failures. Do not expose this field to the model during decision generation."
+  },
+  "passed": 0,
+  "created_at": "2026-05-29T00:00:00Z",
+  "experiment_id": "validation_corpus_v1_curated_batch1"
+}
