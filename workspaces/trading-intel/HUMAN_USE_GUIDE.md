@@ -106,6 +106,11 @@ Summarize the current portfolio posture in plain English: what we own, why we ow
 
 ## 3. Best command patterns
 
+Telegram readability rule:
+- Ask for numbered bullets, not tables, when sending long outputs to Telegram.
+- Ask for message splitting (`Part 1/2`, `Part 2/2`) for long responses.
+- Ask to suppress internal runtime/tool diagnostics in final Telegram replies.
+
 Requests work best when they specify:
 - objective
 - constraints
@@ -119,6 +124,16 @@ Good pattern:
 Objective: produce the top 3 actionable ideas for the current regime.
 Constraints: no orders yet, evidence must be primary-source-backed, compare against SPY and cash.
 Return: one ranked table plus a DRUCK_UPDATE block for the top idea.
+```
+
+Safer Telegram pattern (recommended):
+
+```text
+@druck_rsl_bot
+Objective: produce the top 3 actionable ideas for the current regime.
+Constraints: no orders yet, evidence must be primary-source-backed, compare against SPY and cash.
+Return: numbered bullets (no markdown tables), one ticker per bullet, plus one DRUCK_UPDATE block for the top idea.
+If long: split into Part 1/2 and Part 2/2.
 ```
 
 If you want machine-friendly replies, ask for one `DRUCK_UPDATE` block and provide a `request_id`:
