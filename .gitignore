@@ -70,6 +70,10 @@ plugins/
 qqbot/
 
 # Generic secret and transient patterns.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
 **/*token*
 **/*secret*
 **/*password*
