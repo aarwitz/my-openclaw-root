@@ -138,10 +138,11 @@ Current implemented behavior:
   - detached spawn of `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --execute`
   - lane routing through `/home/aaron/.openclaw/scripts/launch-coding-task.sh`
   - launcher result postback to Task Manager via `POST /api/issues/{id}/launch-result`
-- Optional observer/backup watcher still exists at:
-  - `/home/aaron/.openclaw/scripts/tm-ready-watcher.sh`
-  - current mode: safe polling that consumes Task Manager readiness state, adopts externally queued launches without duplicating them, and can still perform controlled execute-mode launches when explicitly invoked
-  - current default: dry-run unless `--execute`
+- Polling watcher execution path is retired. Launch orchestration is event-driven only:
+  - Task Manager issue readiness transition
+  - detached canonical Dwight launcher
+  - launcher result postback to Task Manager
+  - GitHub webhook PR events for review/completion contract updates
 
 Readiness contract for automatic launch:
 - `auto_launch_enabled = true`
@@ -168,12 +169,11 @@ Current operator visibility:
   - in progress without PR-open evidence
 - this is now the primary operator surface for backlog/launch hygiene before adding more automation
 
-Watcher re-entry rule:
-- initial watcher behavior is conservative
-- one Task Manager launch signature launches once per watcher mode
-- `launch_state=queued` is treated as already queued/launched by Task Manager and is recorded, not relaunched
+Event re-entry rule:
+- one Task Manager launch signature launches once
+- `launch_state=queued` is treated as already queued/launched by Task Manager and is never re-launched by polling
 - comment-only progress does not requeue work
-- a real issue edit in Task Manager can create a new ready signature and permit re-launch
+- a real issue edit in Task Manager can create a new ready signature and permit a new launch
 - queue discipline default is one active `queued|launched` code task per executing agent at a time
 - structured completion evidence now requires explicit branch and PR status, even when no PR is opened
 

@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROUTER="$SCRIPT_DIR/select-coding-lane.sh"
 RUNS_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/tmp/coding-lane-runs"
+source "$SCRIPT_DIR/lib/repo-boundary-policy.sh"
 
 orchestrator_agent="dwight"
 coder_codex_agent="main"
@@ -32,6 +33,9 @@ fallback_applied="false"
 fallback_reason=""
 acp_preflight_status="not-run"
 acp_preflight_detail=""
+is_ewag_owner="false"
+effective_repo_path=""
+ewag_container_name="${OPENCLAW_EWAG_CONTAINER_NAME:-ewag-bot-sandbox}"
 
 should_trigger_acp_runtime_fallback() {
   local output="$1"
@@ -86,6 +90,7 @@ Required:
   --task-id <id>          Stable task identifier.
   --repo <abs-path>       Absolute repo path for coding work.
   --goal <text>           Task objective.
+  --owner-agent <id>      Required assignee id for boundary enforcement.
 
 Routing inputs:
   --scope <low|medium|high>      Default: medium
@@ -97,7 +102,7 @@ Routing inputs:
 Execution options:
   --acceptance <text>            Optional acceptance criteria.
   --orchestrator-agent <id>      Default: dwight
-  --owner-agent <id>             Optional assignee (for example: resi or main)
+  --owner-agent <id>             Required assignee (for example: main)
   --coder-codex-agent <id>       Default: main (Jerry)
   --acp-agent <id>               Default: cursor
   --timeout <seconds>            ACP run timeout hint. Default: 1800
@@ -105,9 +110,16 @@ Execution options:
   --execute                      Actually invoke OpenClaw command (default is dry-run)
   --help
 
+Policy:
+  Boundary checks are fail-closed. EWAG owner agents may target only EWAG repos,
+  and RSL owner agents are blocked from EWAG repos.
+  EWAG execute runs are container-only: launch aborts unless the EWAG sandbox
+  container is present and running.
+
 Examples:
   launch-coding-task.sh \
     --task-id TM-421 \
+    --owner-agent main \
     --repo /home/aaron/repos/lidi-task-manager \
     --goal "Fix OAuth callback race" \
     --acceptance "All auth tests green" \
@@ -115,6 +127,7 @@ Examples:
 
   launch-coding-task.sh \
     --task-id TM-422 \
+    --owner-agent main \
     --repo /home/aaron/repos/lidi-task-manager \
     --goal "Typo fix in CLI output" \
     --scope low --expected-files 1 --risk low --acp-available false \
@@ -201,8 +214,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$task_id" || -z "$repo_path" || -z "$goals" ]]; then
-  echo "Missing required arguments: --task-id, --repo, --goal" >&2
+if [[ -z "$task_id" || -z "$repo_path" || -z "$goals" || -z "$owner_agent" ]]; then
+  echo "Missing required arguments: --task-id, --repo, --goal, --owner-agent" >&2
   usage >&2
   exit 2
 fi
@@ -215,6 +228,18 @@ fi
 if [[ ! -d "$repo_path" ]]; then
   echo "Repo path not found: $repo_path" >&2
   exit 2
+fi
+
+enforce_repo_owner_policy "$owner_agent" "$repo_path"
+
+effective_repo_path="$repo_path"
+if is_ewag_owner_agent "$owner_agent"; then
+  is_ewag_owner="true"
+  if ! effective_repo_path="$(resolve_ewag_container_repo_path "$repo_path")"; then
+    echo "EWAG container repo mapping missing for: $repo_path" >&2
+    echo "Set OPENCLAW_EWAG_CONTAINER_REPO_MAP to include this repo root mapping." >&2
+    exit 2
+  fi
 fi
 
 if ! [[ "$scope" =~ ^(low|medium|high)$ ]]; then
@@ -252,8 +277,8 @@ if ! [[ "$acp_available" =~ ^(true|false)$ ]]; then
   exit 2
 fi
 
-if [[ ! -x "$ROUTER" ]]; then
-  echo "Routing helper missing or not executable: $ROUTER" >&2
+if [[ ! -f "$ROUTER" ]]; then
+  echo "Routing helper missing: $ROUTER" >&2
   exit 2
 fi
 
@@ -394,7 +419,7 @@ if [[ "$acp_agent_overridden" != "true" ]]; then
   acp_agent="$(default_acp_agent_for_owner "$inferred_owner")"
 fi
 
-lane_json="$($ROUTER \
+lane_json="$(bash "$ROUTER" \
   --scope "$scope" \
   --expected-files "$expected_files" \
   --risk "$risk" \
@@ -412,6 +437,15 @@ fi
 
 requested_lane="$lane"
 selected_lane="$lane"
+
+if [[ "$selected_lane" == "acp-external" ]]; then
+  if [[ "$is_ewag_owner" == "true" ]]; then
+    selected_lane="codex-subagent"
+    fallback_applied="true"
+    fallback_reason="ewag-container-policy-acp-disabled"
+    echo "EWAG container policy disabled ACP lane; forcing codex-subagent." >&2
+  fi
+fi
 
 if [[ "$selected_lane" == "acp-external" ]]; then
   if ! acp_preflight_check; then
@@ -650,7 +684,7 @@ PY
 write_metadata_file
 
 if [[ "$selected_lane" == "acp-external" ]]; then
-  prompt="Use sessions_spawn with runtime=\"acp\", agentId=\"${acp_agent}\", mode=\"run\", cwd=\"${repo_path}\", runTimeoutSeconds=${run_timeout}."
+  prompt="Use sessions_spawn with runtime=\"acp\", agentId=\"${acp_agent}\", mode=\"run\", cwd=\"${effective_repo_path}\", runTimeoutSeconds=${run_timeout}."
   if [[ -n "$owner_agent" ]]; then
     prompt+=" Assigned owner agent: ${owner_agent}."
   fi
@@ -673,7 +707,7 @@ elif [[ "$selected_lane" == "codex-subagent" ]]; then
   if [[ -n "$acceptance" ]]; then
     prompt+=" Acceptance criteria: ${acceptance}."
   fi
-  prompt+=" Work in repo ${repo_path}."
+  prompt+=" Work in repo ${effective_repo_path}."
   prompt+=" Execute this as a native Codex subagent task (spawn_agent)."
   prompt+=" Return JSON only with this exact schema: {\"lane\":\"codex-subagent\",\"taskId\":\"${task_id}\",\"spawnAgentUsed\":true,\"status\":\"succeeded|failed\",\"branch\":\"<branch-name>\",\"pr\":{\"status\":\"opened|not-opened|not-needed|unknown\",\"url\":\"https://...\"|null},\"evidence\":[\"...\"]}."
   prompt+=" If no PR is opened, state why in evidence and use pr.status=\"not-opened\" or \"not-needed\"."
@@ -694,12 +728,32 @@ else
   if [[ -n "$owner_agent" ]]; then
     prompt+=" Assigned owner agent: ${owner_agent}."
   fi
-  prompt+=" Work in repo ${repo_path}."
+  prompt+=" Work in repo ${effective_repo_path}."
   if [[ -z "$OPENCLAW_BIN" || ! -x "$OPENCLAW_BIN" ]]; then
     echo "OpenClaw CLI not found. Set OPENCLAW_BIN or install openclaw on PATH." >&2
     exit 2
   fi
   cmd=("$OPENCLAW_BIN" agent --agent "$codex_target_agent" --message "$prompt" --timeout "$agent_timeout" --json)
+fi
+
+if [[ "$is_ewag_owner" == "true" && "$execute" == "true" ]]; then
+  container_openclaw_bin="${OPENCLAW_EWAG_CONTAINER_OPENCLAW_BIN:-openclaw}"
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "EWAG container policy violation: docker is not available; refusing host execution." >&2
+    exit 2
+  fi
+  if ! docker inspect "$ewag_container_name" >/dev/null 2>&1; then
+    echo "EWAG container policy violation: container '$ewag_container_name' not found." >&2
+    echo "Start it with: docker compose -f /home/aaron/.openclaw/docker-compose.ewag-bots.yml up -d --build" >&2
+    exit 2
+  fi
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$ewag_container_name" 2>/dev/null)" != "true" ]]; then
+    echo "EWAG container policy violation: container '$ewag_container_name' is not running." >&2
+    echo "Start it with: docker compose -f /home/aaron/.openclaw/docker-compose.ewag-bots.yml up -d --build" >&2
+    exit 2
+  fi
+  cmd[0]="$container_openclaw_bin"
+  cmd=(docker exec -i "$ewag_container_name" "${cmd[@]}")
 fi
 
 printf 'Routing decision: requested=%s selected=%s (%s), fallback=%s applied=%s\n' "$requested_lane" "$selected_lane" "$reason" "$fallback_lane" "$fallback_applied"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
+source "/home/aaron/.openclaw/scripts/lib/ewag-node-queue.sh"
 set -euo pipefail
 
 # ewag-test.sh — Run any XCUITest on the Mac node deterministically (no LLM)
@@ -128,6 +129,7 @@ case "${1:-}" in
     ;;
 
   list)
+    acquire_ewag_node_lock "ewag-test:list" "${BASH_SOURCE[0]}"
     echo "Fetching test list from Mac node..."
     run_node_command "$IOS_AGENT_BIN" test-list \
       | grep -E "^(func test|test[A-Z]|  - |ResidentUITests|OwnerUITests|ResidentInteraction)" \
@@ -135,6 +137,7 @@ case "${1:-}" in
     ;;
 
   smoke)
+    acquire_ewag_node_lock "ewag-test:smoke" "${BASH_SOURCE[0]}"
     echo "Running smoke tests..."
     TESTS=(
       "ResidentUITests/testResidentSmokeScreenshot"
@@ -165,6 +168,7 @@ case "${1:-}" in
     ;;
 
   all)
+    acquire_ewag_node_lock "ewag-test:all" "${BASH_SOURCE[0]}"
     echo "Running full UI test suite (this takes several minutes)..."
     if [[ "$LIVE_DEMO_AUTH" == "1" ]]; then
       run_node_command "$IOS_AGENT_BIN" test-all ${EWAG_GIT_BRANCH:+--branch "$EWAG_GIT_BRANCH"} ${EWAG_GIT_COMMIT:+--commit "$EWAG_GIT_COMMIT"} --live-demo-auth \
@@ -179,6 +183,7 @@ case "${1:-}" in
 
   *)
     TEST_CASE="$1"
+    acquire_ewag_node_lock "ewag-test:${TEST_CASE}" "${BASH_SOURCE[0]}"
     echo "Running test: $TEST_CASE"
     run_test_case_with_retry "$TEST_CASE"
     ;;

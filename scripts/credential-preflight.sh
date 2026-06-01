@@ -120,7 +120,7 @@ check_output "github account (dwight)" "^aaronclawrsl-bot$" \
   "$GH_ROUTER_BIN" --agent dwight api user --jq '.login'
 check_output "github account (druck)" "^aaronclawrsl-bot$" \
   "$GH_ROUTER_BIN" --agent druck api user --jq '.login'
-check_output "github account (resi)" "^EWAG-dev$" \
+check_output "github account (resi)" "^aaronclawrsl-bot$" \
   "$GH_ROUTER_BIN" --agent resi api user --jq '.login'
 check "github mcp quick validation" "$GH_MCP_VALIDATE_BIN" --quick
 

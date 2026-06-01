@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
+source "/home/aaron/.openclaw/scripts/lib/ewag-node-queue.sh"
 set -euo pipefail
 
 # ewag-capture.sh — LLM-free screenshot/video capture → Google Drive upload
@@ -181,6 +182,8 @@ if [[ "$MODE" != "screenshot" && "$MODE" != "record" && "$MODE" != "scroll" ]]; 
   echo "ERROR: mode must be 'screenshot', 'record', or 'scroll', got '$MODE'"
   exit 1
 fi
+
+acquire_ewag_node_lock "ewag-capture:${VIEW}:${MODE}" "${BASH_SOURCE[0]}"
 
 if [[ "$VIEW" == "all" ]]; then
   VIEWS=(home coaching nutrition community rewards profile challenges connector calendar notifications bookmarks messages settings spa pool)

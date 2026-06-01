@@ -55,6 +55,10 @@ if [[ ! -x "$WATCHER" ]]; then
   exit 2
 fi
 
+echo "tm-ready-launch-once.sh is disabled: watcher polling/execute path has been retired." >&2
+echo "Use event-driven Task Manager readiness + webhook contracts." >&2
+exit 2
+
 TM_READY_WATCHER_ALLOW_EXECUTE=true \
 MAX_LAUNCHES_PER_RUN=1 \
 "$WATCHER" --execute --issue-id "$issue_id"

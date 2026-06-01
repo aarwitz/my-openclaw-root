@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
+source "/home/aaron/.openclaw/scripts/lib/ewag-node-queue.sh"
 set -euo pipefail
 
 # ewag-sim.sh — Simulator interaction from Telegram (no LLM)
@@ -42,6 +43,7 @@ case "${1:-}" in
     ;;
 
   screenshot)
+    acquire_ewag_node_lock "ewag-sim:screenshot" "${BASH_SOURCE[0]}"
     echo "Capturing simulator screenshot..."
     TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$MEDIA_DIR"
@@ -53,6 +55,7 @@ case "${1:-}" in
     ;;
 
   tap)
+    acquire_ewag_node_lock "ewag-sim:tap" "${BASH_SOURCE[0]}"
     X="${2:?'x coordinate required'}"
     Y="${3:?'y coordinate required'}"
     echo "Tapping ($X, $Y)..."
@@ -60,12 +63,14 @@ case "${1:-}" in
     ;;
 
   swipe)
+    acquire_ewag_node_lock "ewag-sim:swipe" "${BASH_SOURCE[0]}"
     DIR="${2:?'direction required (up/down/left/right)'}"
     echo "Swiping $DIR..."
     run_on_node "$IOS_AGENT_BIN" swipe "$DIR" | tail -5
     ;;
 
   input)
+    acquire_ewag_node_lock "ewag-sim:input" "${BASH_SOURCE[0]}"
     shift
     TEXT="$*"
     echo "Typing: $TEXT"
@@ -73,16 +78,19 @@ case "${1:-}" in
     ;;
 
   home)
+    acquire_ewag_node_lock "ewag-sim:home" "${BASH_SOURCE[0]}"
     echo "Pressing home..."
     run_on_node "$IOS_AGENT_BIN" home | tail -5
     ;;
 
   deviceinfo)
+    acquire_ewag_node_lock "ewag-sim:deviceinfo" "${BASH_SOURCE[0]}"
     echo "Device info:"
     run_on_node "$IOS_AGENT_BIN" deviceinfo | tail -15
     ;;
 
   openurl)
+    acquire_ewag_node_lock "ewag-sim:openurl" "${BASH_SOURCE[0]}"
     URL="${2:?'URL required'}"
     echo "Opening: $URL"
     ssh $SSH_OPTS "$SSH_HOST" "xcrun simctl openurl booted '$URL'" 2>&1

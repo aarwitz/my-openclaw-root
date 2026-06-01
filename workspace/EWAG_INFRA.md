@@ -1,6 +1,6 @@
 # EWAG Infrastructure — Single Source of Truth
 
-Last updated: 2026-05-06
+Last updated: 2026-05-31
 
 This is the **only** doc Jerry should consult for EWAG iOS build/test/capture infrastructure. If something contradicts this file, this file wins.
 
@@ -76,6 +76,14 @@ Runs `openclaw node run` as launchd service `ai.openclaw.node`.
 - Never run `test-all` and a targeted test simultaneously.
 - Each heartbeat must serialize node ops: build → run → ONE test → extract.
 - If a node op times out, **stop and report — do not retry in a loop.**
+- Shared queue lock now enforced by `~/.openclaw/scripts/lib/ewag-node-queue.sh`.
+- Scripts that use the queue lock: `ewag-build.sh`, `ewag-test.sh`, `ewag-capture.sh`, `ewag-sim.sh`.
+- Behavior: new requests wait in queue (block with timeout) instead of being dropped when the node is busy.
+- Queue timeout env: `EWAG_NODE_QUEUE_TIMEOUT_SEC` (default `3600`).
+- Queue observability:
+   - lock: `~/.openclaw/state/ewag-node-queue/ios-build-node.lock`
+   - active job marker: `~/.openclaw/state/ewag-node-queue/active.json`
+   - queue log: `~/.openclaw/logs/ewag-node-queue.log`
 
 ## Operator Surface (what Jerry actually uses)
 

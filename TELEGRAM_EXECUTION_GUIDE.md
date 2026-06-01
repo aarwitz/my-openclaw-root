@@ -170,7 +170,7 @@ openclaw health
 openclaw gateway status
 ~/.openclaw/scripts/safe-restart.sh
 ~/.openclaw/scripts/test-coding-lane-regression.sh
-TM_READY_WATCHER_ALLOW_EXECUTE=true ~/.openclaw/scripts/tm-ready-watcher.sh --execute --issue-id <tm_id>
+Task Manager readiness events now launch work directly; no polling watcher command is used.
 ~/.openclaw/scripts/tm-ready-launch-once.sh --issue-id <tm_id>
 ```
 
@@ -204,11 +204,7 @@ For controlled live verification of the auto-launch system on a real issue:
    - acceptance criteria
 3. Ensure `auto_launch_enabled=true`
 4. Make one real issue edit so Task Manager recomputes readiness and shows `launch_state=ready` or `queued`
-5. If you want a watcher-path canary instead of relying on the normal TM trigger, run exactly one controlled execute pass:
-
-```bash
-~/.openclaw/scripts/tm-ready-launch-once.sh --issue-id <tm_id>
-```
+5. Verify event flow by confirming Task Manager transitions and launcher postback (no watcher execution path).
 
 Normal/default path now:
 - update the issue into a valid ready state in Task Manager
@@ -216,7 +212,7 @@ Normal/default path now:
 - launcher posts back `launched|failed` evidence into the issue
 - completion evidence should include `branch=... pr_status=...` and `pr_url=...` when a PR is opened
 
-The watcher path is now optional backup/inspection tooling, not the primary source of truth.
+Polling watcher execution is retired. Event handlers/hooks/contracts are the source of truth.
 
 Useful operator checks in Task Manager Search now:
 - `Ready, Not Queued`

@@ -54,7 +54,7 @@ if [[ $quick -eq 0 ]]; then
   validate_login "github PAT main" "$GITHUB_PAT_MAIN" "aaronclawrsl-bot"
   validate_login "github PAT dwight" "$GITHUB_PAT_DWIGHT" "aaronclawrsl-bot"
   validate_login "github PAT druck" "$GITHUB_PAT_DRUCK" "aaronclawrsl-bot"
-  validate_login "github PAT resi" "$GITHUB_PAT_RESI" "EWAG-dev"
+  validate_login "github PAT resi" "$GITHUB_PAT_RESI" "aaronclawrsl-bot"
 fi
 
 if [[ $failures -gt 0 ]]; then

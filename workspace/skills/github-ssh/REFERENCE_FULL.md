@@ -44,10 +44,9 @@ These host-level settings are required and maintained globally:
 
 ## Deterministic HTTPS Credential Routing
 
-When Git uses HTTPS for `github.com`, profile selection is path-based:
+When Git uses HTTPS for `github.com`, profile selection is unified for bots:
 
-- `EWAG-dev/*` -> `ewag` profile (`EWAG-dev` username)
-- all other repos -> `rsl-bot` profile (`aaronclawrsl-bot` username)
+- all bot workflows -> `rsl-bot` profile (`aaronclawrsl-bot` username)
 
 Credential source of truth:
 
@@ -107,10 +106,10 @@ All `gh` commands must run through the router so account selection is determinis
 Examples:
 
 ```bash
-# Jerry/Dwight/Druck -> aaronclawrsl-bot
+# Jerry/Dwight/Druck/Resi -> aaronclawrsl-bot
 /home/aaron/.openclaw/scripts/gh-account-router.sh --agent main pr create --fill
 
-# Resi -> EWAG-dev
+# Resi -> aaronclawrsl-bot
 /home/aaron/.openclaw/scripts/gh-account-router.sh --agent resi pr list --repo EWAG-dev/iosApp
 ```
 

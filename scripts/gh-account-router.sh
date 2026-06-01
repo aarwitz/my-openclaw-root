@@ -9,8 +9,7 @@ usage() {
 Usage: gh-account-router.sh [--agent <main|resi|dwight|druck>] <gh args...>
 
 Routes gh CLI auth deterministically by agent:
-  - resi -> ewag profile
-  - all others -> rsl-bot profile
+  - all supported agents -> rsl-bot profile
 
 You can also set OPENCLAW_AGENT_ID, OPENCLAW_AGENT, or AGENT_ID.
 EOF
@@ -32,9 +31,6 @@ fi
 }
 
 profile="rsl-bot"
-if [[ "$agent" == "resi" ]]; then
-  profile="ewag"
-fi
 
 username="$(jq -r --arg p "$profile" '.profiles[$p].username // empty' "$CRED_FILE")"
 token="$(jq -r --arg p "$profile" '.profiles[$p].token // empty' "$CRED_FILE")"

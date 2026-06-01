@@ -28,9 +28,6 @@ if [[ "$protocol" != "https" || "$host" != "github.com" ]]; then
 fi
 
 profile="rsl-bot"
-if [[ "$path" == EWAG-dev/* ]]; then
-  profile="ewag"
-fi
 
 username="$(jq -r --arg p "$profile" '.profiles[$p].username // empty' "$CRED_FILE")"
 token="$(jq -r --arg p "$profile" '.profiles[$p].token // empty' "$CRED_FILE")"

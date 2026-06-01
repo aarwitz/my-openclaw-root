@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="$SCRIPT_DIR/launch-coding-task.sh"
+source "$SCRIPT_DIR/lib/repo-boundary-policy.sh"
 
 owner_agent=""
 
@@ -45,6 +46,10 @@ Optional:
   --agent-timeout <seconds>        openclaw agent timeout. Default: 300
   --execute                         Actually launch (default dry-run)
   --help
+
+Policy:
+  Boundary checks are fail-closed. EWAG owner agents may target only EWAG repos,
+  and RSL owner agents are blocked from EWAG repos.
 EOF
 }
 
@@ -120,8 +125,10 @@ if [[ -z "$owner_agent" || -z "$task_id" || -z "$repo_path" || -z "$goals" ]]; t
   exit 2
 fi
 
+enforce_repo_owner_policy "$owner_agent" "$repo_path"
+
 cmd=(
-  "$LAUNCHER"
+  bash "$LAUNCHER"
   --owner-agent "$owner_agent"
   --task-id "$task_id"
   --repo "$repo_path"

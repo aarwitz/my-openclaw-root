@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: start-github-mcp-official.sh --agent <main|resi|dwight|druck>
 
-Starts official GitHub MCP server (stdio) with deterministic per-agent token mapping.
+Starts official GitHub MCP server (stdio) with deterministic bot token mapping.
 EOF
 }
 
@@ -43,11 +43,8 @@ if [[ ! -f "$CRED_FILE" ]]; then
 fi
 
 case "$agent" in
-  main|dwight|druck)
+  main|dwight|druck|resi)
     profile="rsl-bot"
-    ;;
-  resi)
-    profile="ewag"
     ;;
   *)
     echo "[start-github-mcp-official] unknown agent '$agent'" >&2

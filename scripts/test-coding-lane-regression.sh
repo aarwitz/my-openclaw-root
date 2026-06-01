@@ -38,25 +38,25 @@ assert_contains() {
 
 echo "== Coding Lane Regression =="
 
-a="$($ROUTER --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
+a="$(bash "$ROUTER" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
 assert_contains "$a" '"lane":"inline"' "Router: low/acp-unavailable -> inline"
 
-b="$($ROUTER --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
+b="$(bash "$ROUTER" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
 assert_contains "$b" '"lane":"codex-subagent"' "Router: medium/acp-unavailable -> codex-subagent"
 
-c="$($ROUTER --scope high --expected-files 12 --risk high --acp-available true --tag-heavy true)"
+c="$(bash "$ROUTER" --scope high --expected-files 12 --risk high --acp-available true --tag-heavy true)"
 assert_contains "$c" '"lane":"acp-external"' "Router: heavy tag -> acp-external"
 assert_contains "$c" '"fallbackLane":"codex-subagent"' "Router: acp-external fallback -> codex-subagent"
 
-d="$($LAUNCHER --task-id TST-100 --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
+d="$(bash "$LAUNCHER" --task-id TST-100 --owner-agent main --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
 assert_contains "$d" 'selected=inline' "Launcher: inline dry-run decision"
 
 
-e="$($LAUNCHER --task-id TST-101 --repo "$HOME/.openclaw" --goal "medium scope" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
+e="$(bash "$LAUNCHER" --task-id TST-101 --owner-agent main --repo "$HOME/.openclaw" --goal "medium scope" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
 assert_contains "$e" 'selected=codex-subagent' "Launcher: codex-subagent dry-run decision"
 assert_contains "$e" 'spawnAgentUsed' "Launcher: codex-subagent contract hint present"
 
-f="$($ASSIGNER --owner-agent resi --task-id TST-102 --repo "$HOME/.openclaw" --goal "heavy" --scope high --expected-files 12 --risk high --tag-heavy true --acp-available true 2>&1 || true)"
+f="$(bash "$ASSIGNER" --owner-agent resi --task-id TST-102 --repo "$HOME/.openclaw" --goal "heavy" --scope high --expected-files 12 --risk high --tag-heavy true --acp-available true 2>&1 || true)"
 if echo "$f" | grep -Eq 'selected=acp-external|selected=codex-subagent'; then
   pass "Assigner: heavy route selected with deterministic fallback"
 else

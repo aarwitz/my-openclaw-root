@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
+source "/home/aaron/.openclaw/scripts/lib/ewag-node-queue.sh"
 set -euo pipefail
 
 # ewag-build.sh — Build/clean/branch operations on Mac node (no LLM)
@@ -40,6 +41,7 @@ case "${1:-}" in
     ;;
 
   build)
+    acquire_ewag_node_lock "ewag-build:build ${2:-current}" "${BASH_SOURCE[0]}"
     BRANCH="${2:-}"
     COMMIT="${EWAG_GIT_COMMIT:-}"
     if [[ -n "$BRANCH" && -n "$COMMIT" ]]; then
@@ -62,11 +64,13 @@ case "${1:-}" in
     ;;
 
   clean)
+    acquire_ewag_node_lock "ewag-build:clean" "${BASH_SOURCE[0]}"
     echo "Cleaning build..."
     run_on_node "$IOS_AGENT_BIN" clean | tail -10
     ;;
 
   branch)
+    acquire_ewag_node_lock "ewag-build:branch" "${BASH_SOURCE[0]}"
     echo "Branch info:"
     run_on_node "$IOS_AGENT_BIN" branch | tail -20
     ;;

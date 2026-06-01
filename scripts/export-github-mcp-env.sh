@@ -15,10 +15,9 @@ get_token() {
 }
 
 RSL_BOT_TOKEN="$(get_token rsl-bot)"
-EWAG_TOKEN="$(get_token ewag)"
 
-if [[ -z "$RSL_BOT_TOKEN" || -z "$EWAG_TOKEN" ]]; then
-  echo "[export-github-mcp-env] missing required tokens in profiles {rsl-bot, ewag}" >&2
+if [[ -z "$RSL_BOT_TOKEN" ]]; then
+  echo "[export-github-mcp-env] missing required token in profile {rsl-bot}" >&2
   exit 1
 fi
 
@@ -26,5 +25,5 @@ cat <<EOF
 export GITHUB_PAT_MAIN='$RSL_BOT_TOKEN'
 export GITHUB_PAT_DWIGHT='$RSL_BOT_TOKEN'
 export GITHUB_PAT_DRUCK='$RSL_BOT_TOKEN'
-export GITHUB_PAT_RESI='$EWAG_TOKEN'
+export GITHUB_PAT_RESI='$RSL_BOT_TOKEN'
 EOF

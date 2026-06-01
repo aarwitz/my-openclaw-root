@@ -70,6 +70,10 @@ if [[ "$execute" == "true" && "$ALLOW_EXECUTE" != "true" ]]; then
   exit 2
 fi
 
+echo "tm-ready-watcher.sh is disabled: polling-based launch orchestration has been removed in favor of event handlers/hooks/contracts." >&2
+echo "Use Task Manager readiness events + GitHub webhook contracts instead." >&2
+exit 2
+
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
 
