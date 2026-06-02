@@ -36,13 +36,14 @@ config_get_json() {
   "$OPENCLAW_BIN" config get "$key" --json 2>/dev/null || true
 }
 
-check_binary() {
-  local name="$1"
-  local bin="$2"
-  if command -v "$bin" >/dev/null 2>&1; then
-    pass "$name harness binary available: $bin"
+check_codex_sdk_readiness() {
+  local codex_plugin_enabled=""
+  codex_plugin_enabled="$(config_get "plugins.entries.codex.enabled" || true)"
+
+  if [[ "$codex_plugin_enabled" == "true" ]]; then
+    pass "Codex SDK provider plugin enabled (plugins.entries.codex.enabled=true)"
   else
-    warn "$name harness binary missing: $bin"
+    fail "Codex SDK provider plugin is not enabled (plugins.entries.codex.enabled=true required)"
   fi
 }
 
@@ -74,7 +75,7 @@ else
   fail "ACP bridge policy mismatch (expected disabled): acp.enabled=$acp_enabled, acpx.enabled=$acpx_enabled"
 fi
 
-check_binary "Codex" "codex"
+check_codex_sdk_readiness
 
 echo
 echo "Summary: pass=$pass_count warn=$warn_count fail=$fail_count"
