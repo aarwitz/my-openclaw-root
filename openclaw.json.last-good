@@ -443,7 +443,7 @@
           "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker \u2014 route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
         },
         "-1003910955362": {
-          "requireMention": false,
+          "requireMention": true,
           "skills": [
             "task-manager",
             "resilife-product",

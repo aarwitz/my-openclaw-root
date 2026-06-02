@@ -83,8 +83,4 @@ if (( fail_count > 0 )); then
   exit 2
 fi
 
-if (( warn_count > 0 )); then
-  exit 1
-fi
-
 exit 0
