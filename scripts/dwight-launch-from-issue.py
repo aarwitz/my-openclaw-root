@@ -470,9 +470,9 @@ def run(argv: List[str]) -> int:
         "--acp-available",
         default="false",
         choices=["true", "false"],
-        help="Whether external ACP is currently available",
+        help="Compatibility flag only; ACP is disabled by policy",
     )
-    parser.add_argument("--acp-agent", default="", help="Optional ACP harness override")
+    parser.add_argument("--acp-agent", default="", help="Compatibility flag only; ignored (ACP disabled)")
     parser.add_argument("--agent-timeout", default="300", help="openclaw agent timeout seconds")
     parser.add_argument("--claim-token", default="", help="Pre-acquired Task Manager launch claim token")
     parser.add_argument("--claim-source", default="manual", help="Launch claim source label")
@@ -495,6 +495,9 @@ def run(argv: List[str]) -> int:
     heavy_tag = infer_heavy_tag(issue, args.tag_heavy)
     claim_token = args.claim_token.strip()
 
+    if args.acp_available == "true" or args.acp_agent:
+        print("ACP is disabled by policy; ignoring --acp-available/--acp-agent overrides.", file=sys.stderr)
+
     cmd = [
         args.launcher,
         "--owner-agent",
@@ -514,15 +517,13 @@ def run(argv: List[str]) -> int:
         "--tag-heavy",
         heavy_tag,
         "--acp-available",
-        args.acp_available,
+        "false",
         "--agent-timeout",
         args.agent_timeout,
     ]
 
     if acceptance:
         cmd.extend(["--acceptance", acceptance])
-    if args.acp_agent:
-        cmd.extend(["--acp-agent", args.acp_agent])
     if args.execute:
         cmd.append("--execute")
 

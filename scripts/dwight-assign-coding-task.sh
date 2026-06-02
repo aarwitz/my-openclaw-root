@@ -3,6 +3,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # Dwight assignment wrapper: sets owner explicitly and delegates routing/execution.
+# ACP is disabled by policy; ACP flags are accepted only for CLI compatibility.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="$SCRIPT_DIR/launch-coding-task.sh"
@@ -41,8 +42,8 @@ Optional:
   --expected-files <int>           Default: 1
   --risk <low|medium|high>         Default: low
   --tag-heavy <true|false>         Default: false
-  --acp-available <true|false>     Default: false
-  --acp-agent <id>                 Optional ACP harness override
+  --acp-available <true|false>     Compatibility only; ignored (ACP disabled)
+  --acp-agent <id>                 Compatibility only; ignored (ACP disabled)
   --agent-timeout <seconds>        openclaw agent timeout. Default: 300
   --execute                         Actually launch (default dry-run)
   --help
@@ -137,12 +138,12 @@ cmd=(
   --expected-files "$auto_expected_files"
   --risk "$auto_risk"
   --tag-heavy "$auto_heavy_tag"
-  --acp-available "$auto_acp_available"
+  --acp-available false
   --agent-timeout "$auto_agent_timeout"
 )
 
-if [[ -n "$auto_acp_agent" ]]; then
-  cmd+=(--acp-agent "$auto_acp_agent")
+if [[ "$auto_acp_available" == "true" || -n "$auto_acp_agent" ]]; then
+  echo "ACP is disabled by policy; ignoring ACP options in dwight-assign-coding-task.sh." >&2
 fi
 
 if [[ -n "$acceptance" ]]; then

@@ -2,14 +2,14 @@
 
 Date: 2026-05-25
 Status: authoritative
-Scope: control plane, coding lane routing, execution contract, fallbacks, operator safety.
+Scope: control plane, coding lane routing, execution contract, operator safety.
 
 ## 1) Core model (literal)
 
 - Runtime layering is hybrid and intentional:
   - OpenClaw agent runtime host executes turns.
-  - Codex app-server is the model loop for openai/gpt-* turns.
-  - ACP is external harness escalation, not the default runtime.
+  - Codex SDK is the model loop for openai/gpt-* turns.
+  - ACP is disabled by policy (no fallback).
 - Telegram is control/status UX, not the coding execution loop.
 - Coding execution is detached task style, not a chat-only turn.
 - Repo isolation target is git worktree per task.
@@ -17,12 +17,9 @@ Scope: control plane, coding lane routing, execution contract, fallbacks, operat
 ## 2) Current hard facts from live config/scripts
 
 - `models.providers.openai.agentRuntime.id = "codex"` is configured.
-- ACP backend is enabled through acpx:
-  - `acp.enabled = true`
-  - `plugins.entries.acpx.enabled = true`
-- Non-interactive ACP permission policy is set:
-  - `plugins.entries.acpx.config.permissionMode = "approve-all"`
-  - `plugins.entries.acpx.config.nonInteractivePermissions = "deny"`
+- ACP backend is disabled through config policy:
+  - `acp.enabled = false`
+  - `plugins.entries.acpx.enabled = false`
 - Dwight execution trigger is defined in prompt policy:
   - `run issue <id> --repo <abs-path> ...` maps to
   - `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py ... --execute`
@@ -36,7 +33,8 @@ Scope: control plane, coding lane routing, execution contract, fallbacks, operat
 
 - `inline`: owner agent executes directly in its Codex-backed turn.
 - `codex-subagent`: owner/coder agent executes via native Codex subagent (`spawn_agent`) contract.
-- `acp-external`: orchestrator asks ACP runtime to spawn external harness (`runtime="acp"`, `agentId=<harness>`).
+
+ACP external lane is retired and must not be used.
 
 Lane meanings are strict. Do not use `codex` as a lane label.
 
@@ -47,47 +45,20 @@ Inputs:
 - `risk`: `low|medium|high`
 - `expected-files`: integer
 - `tag-heavy`: `true|false`
-- `acp-available`: `true|false`
 
 Decision rules in order:
-1. If `acp-available=false`:
-   - if `scope=medium|high` OR `risk=high` OR `expected-files>=2` -> `codex-subagent`
-   - else -> `inline`
-2. Else if `tag-heavy=true` -> `acp-external`
-3. Else if `scope=high` OR `risk=high` OR `expected-files>=8` -> `acp-external`
-4. Else if `scope=medium` OR `risk=medium` OR `expected-files>=2` -> `codex-subagent`
-5. Else -> `inline`
+1. If `scope=medium|high` OR `risk=high` OR `expected-files>=2` -> `codex-subagent`
+2. Else if `tag-heavy=true` -> `codex-subagent`
+3. Else -> `inline`
 
 Fallback chain:
-- `acp-external -> codex-subagent`
 - `codex-subagent -> inline`
 - `inline -> inline`
 
-## 5) ACP preflight gate (implemented)
+## 5) ACP policy (retired)
 
-When selected lane is `acp-external`, launcher blocks or downgrades on these failures:
-
-- `acp_or_acpx_disabled`
-- `agent_not_allowed` (requested harness not in `acp.allowedAgents`)
-- `permission_policy_mismatch` (`approve-all` + `deny` not satisfied)
-- `harness_binary_missing` (local executable missing for selected harness)
-
-If fallback lane is `codex-subagent`, launcher auto-downgrades and records fallback metadata.
-
-## 6) ACP runtime fallback (implemented)
-
-Even after preflight `ready`, launcher can auto-fallback if runtime output indicates hard ACP failure.
-
-Runtime fallback trigger patterns:
-- `Failed to spawn agent command`
-- `spawn <bin> ENOENT`
-- `AcpRuntimeError`
-- `Permission prompt unavailable in non-interactive mode`
-
-Behavior:
-- First leg metadata: requested/selected `acp-external`.
-- Auto-redispatch with `--acp-available false`.
-- Second leg metadata: requested/selected `codex-subagent`.
+ACP preflight and ACP runtime fallback are retired.
+Any legacy ACP inputs are coerced to `codex-subagent` and annotated in routing metadata.
 
 ## 7) Metadata contract (implemented)
 
@@ -98,26 +69,26 @@ Routing payload fields:
 
 ```json
 {
-  "requestedLane": "acp-external|codex-subagent|inline",
-  "lane": "acp-external|codex-subagent|inline",
+  "requestedLane": "codex-subagent|inline",
+  "lane": "codex-subagent|inline",
   "reason": "...",
   "fallbackLane": "codex-subagent|inline",
   "fallbackApplied": true,
-  "fallbackReason": "acp-preflight-failed:<detail>|...",
+  "fallbackReason": "...",
   "scope": "low|medium|high",
   "expectedFiles": 8,
   "risk": "low|medium|high",
   "heavyTag": true,
-  "acpAvailable": true,
-  "acpAgent": "cursor|copilot|claude|codex|...",
-  "acpPreflight": { "status": "ok|failed|not-run", "detail": "..." }
+  "acpAvailable": false,
+  "acpAgent": "disabled",
+  "acpPreflight": { "status": "not-run", "detail": "acp-disabled-by-policy" }
 }
 ```
 
 ## 8) Execution entrypoints (canonical)
 
 - Telegram to Dwight (preferred control plane):
-  - `run issue <id> --repo <abs-path> [--scope ... --expected-files ... --risk ... --acp-available ... --acp-agent ... --agent-timeout ...]`
+  - `run issue <id> --repo <abs-path> [--scope ... --expected-files ... --risk ... --agent-timeout ...]`
 - Deterministic server CLI path:
   - `/home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> ... --execute`
 - Direct lane launcher path:
@@ -191,20 +162,16 @@ Event re-entry rule:
           |
           v
 [Lane Router: select-coding-lane.sh]
-  - scope/risk/files/heavy/acp-available
+  - scope/risk/files/heavy
           |
           +------------------------------+
           |                              |
           v                              v
- [acp-external]                    [codex-subagent]
-  runtime="acp"                    native spawn_agent path
-  agentId=<harness>                 JSON contract check
+[inline]                        [codex-subagent]
+ owner-agent direct             native spawn_agent path
+                                      JSON contract check
           |                              |
           +---------------+--------------+
-                          |
-                          v
-                       [inline]
-                    owner-agent direct
                           |
                           v
                  [Repo Execution Plane]
@@ -226,8 +193,6 @@ Event re-entry rule:
 
 ## 12) Known gaps (current)
 
-- ACP-ready lane selection can still fail in some runtime contexts if harness binary is unavailable in that execution environment (example observed: `spawn copilot ENOENT`).
-- This is mitigated by implemented runtime fallback to `codex-subagent`, but root environment parity should still be fixed.
 - Queue discipline is still loose when several ready issues for the same agent become valid at once; a per-agent ordering policy would make operations cleaner.
 - Evidence postback now exists, but the broader completion contract still needs stronger standardization around PR creation/update and end-state hygiene.
 
@@ -235,5 +200,5 @@ Event re-entry rule:
 
 - Use Task Flow only for multi-step pipelines.
 - Use single detached task for one coding outcome.
-- Keep lane vocabulary, preflight checks, and fallback semantics unchanged unless script behavior is intentionally revised in the same change set.
+- Keep lane vocabulary and fallback semantics unchanged unless script behavior is intentionally revised in the same change set.
 - Use `workspace/docs/task-manager-execution-automation-plan.md` as the coding-lane implementation reference when you need low-level launcher details.

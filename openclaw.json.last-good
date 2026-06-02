@@ -704,7 +704,6 @@
   "plugins": {
     "allow": [
       "codex",
-      "acpx",
       "telegram",
       "brave",
       "openai",
@@ -714,15 +713,6 @@
     "entries": {
       "codex": {
         "enabled": true
-      },
-      "acpx": {
-        "enabled": true,
-        "config": {
-          "permissionMode": "approve-all",
-          "nonInteractivePermissions": "deny",
-          "pluginToolsMcpBridge": true,
-          "openClawToolsMcpBridge": true
-        }
       },
       "telegram": {
         "enabled": true
@@ -742,8 +732,8 @@
     }
   },
   "acp": {
-    "enabled": true,
-    "backend": "acpx",
+    "enabled": false,
+    "backend": "none",
     "maxConcurrentSessions": 3,
     "defaultAgent": "codex",
     "allowedAgents": [

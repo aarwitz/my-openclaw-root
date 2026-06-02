@@ -3,6 +3,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # Readiness preflight for the coding lane architecture.
+# ACP is disabled by policy; Codex SDK runtime is required.
 
 pass_count=0
 warn_count=0
@@ -67,41 +68,12 @@ fi
 
 acp_enabled="$(config_get "acp.enabled" || true)"
 acpx_enabled="$(config_get "plugins.entries.acpx.enabled" || true)"
-if [[ "$acp_enabled" == "true" && "$acpx_enabled" == "true" ]]; then
-  pass "ACP bridge enabled (acp.enabled=true, plugins.entries.acpx.enabled=true)"
+if [[ "$acp_enabled" == "false" && ( "$acpx_enabled" == "false" || -z "$acpx_enabled" ) ]]; then
+  pass "ACP bridge disabled by policy (acp.enabled=false, plugins.entries.acpx.enabled=false)"
 else
-  fail "ACP bridge not fully enabled (acp.enabled=$acp_enabled, acpx.enabled=$acpx_enabled)"
+  fail "ACP bridge policy mismatch (expected disabled): acp.enabled=$acp_enabled, acpx.enabled=$acpx_enabled"
 fi
 
-perm_mode="$(config_get "plugins.entries.acpx.config.permissionMode" || true)"
-non_interactive="$(config_get "plugins.entries.acpx.config.nonInteractivePermissions" || true)"
-if [[ "$perm_mode" == "approve-all" && "$non_interactive" == "deny" ]]; then
-  pass "ACP non-interactive permission policy is hardened"
-else
-  fail "ACP permission policy mismatch (permissionMode=$perm_mode, nonInteractivePermissions=$non_interactive)"
-fi
-
-max_sessions="$(config_get "acp.maxConcurrentSessions" || true)"
-if [[ -n "$max_sessions" && "$max_sessions" =~ ^[0-9]+$ ]]; then
-  if (( max_sessions >= 2 && max_sessions <= 4 )); then
-    pass "ACP concurrency cap is in recommended range (2-4): $max_sessions"
-  else
-    warn "ACP concurrency cap outside recommended range (2-4): $max_sessions"
-  fi
-else
-  warn "ACP concurrency cap not set"
-fi
-
-allowed_agents_json="$(config_get_json "acp.allowedAgents")"
-if [[ -n "$allowed_agents_json" ]] && echo "$allowed_agents_json" | grep -Eq '"(cursor|copilot|claude)"'; then
-  pass "ACP allowed agents include at least one preferred external harness"
-else
-  warn "ACP allowed agents do not include cursor/copilot/claude"
-fi
-
-check_binary "Cursor" "cursor-agent"
-check_binary "Copilot" "copilot"
-check_binary "Claude" "claude"
 check_binary "Codex" "codex"
 
 echo

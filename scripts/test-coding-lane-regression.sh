@@ -45,8 +45,8 @@ b="$(bash "$ROUTER" --scope medium --expected-files 2 --risk medium --acp-availa
 assert_contains "$b" '"lane":"codex-subagent"' "Router: medium/acp-unavailable -> codex-subagent"
 
 c="$(bash "$ROUTER" --scope high --expected-files 12 --risk high --acp-available true --tag-heavy true)"
-assert_contains "$c" '"lane":"acp-external"' "Router: heavy tag -> acp-external"
-assert_contains "$c" '"fallbackLane":"codex-subagent"' "Router: acp-external fallback -> codex-subagent"
+assert_contains "$c" '"lane":"codex-subagent"' "Router: heavy tag -> codex-subagent (ACP disabled)"
+assert_contains "$c" '"fallbackLane":"inline"' "Router: codex-subagent fallback -> inline"
 
 d="$(bash "$LAUNCHER" --task-id TST-100 --owner-agent main --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
 assert_contains "$d" 'selected=inline' "Launcher: inline dry-run decision"
@@ -57,17 +57,15 @@ assert_contains "$e" 'selected=codex-subagent' "Launcher: codex-subagent dry-run
 assert_contains "$e" 'spawnAgentUsed' "Launcher: codex-subagent contract hint present"
 
 f="$(bash "$ASSIGNER" --owner-agent resi --task-id TST-102 --repo "$HOME/.openclaw" --goal "heavy" --scope high --expected-files 12 --risk high --tag-heavy true --acp-available true 2>&1 || true)"
-if echo "$f" | grep -Eq 'selected=acp-external|selected=codex-subagent'; then
-  pass "Assigner: heavy route selected with deterministic fallback"
+if echo "$f" | grep -Eq 'selected=codex-subagent'; then
+  pass "Assigner: heavy route selected as codex-subagent (ACP disabled)"
 else
   fail "Assigner: heavy route selection missing"
 fi
-if echo "$f" | grep -Eq 'ACP preflight failed|agentId="copilot"|agentId="cursor"|agentId="claude"|applied=true'; then
-  pass "Assigner: owner-aware ACP harness selection/preflight behavior"
-elif echo "$f" | grep -Fq 'Use\ sessions_spawn\ with\ runtime='; then
-  pass "Assigner: ACP external command payload emitted"
+if echo "$f" | grep -Eq 'ACP is disabled by policy|selected=codex-subagent'; then
+  pass "Assigner: ACP compatibility flags are ignored by policy"
 else
-  fail "Assigner: ACP harness selection/preflight signal missing"
+  fail "Assigner: no-ACP policy signal missing"
 fi
 
 echo

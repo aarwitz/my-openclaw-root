@@ -3,12 +3,13 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
 # Deterministic policy router for coding lane selection.
+# ACP is disabled by policy; only inline and codex-subagent lanes are emitted.
 # Output is one JSON object with lane, reason, and fallback lane.
 
 scope="medium"
 expected_files="1"
 risk="low"
-acp_available="true"
+acp_available="false"
 heavy_tag="false"
 
 usage() {
@@ -20,12 +21,12 @@ Options:
   --scope <low|medium|high>
   --expected-files <int>
   --risk <low|medium|high>
-  --acp-available <true|false>
+  --acp-available <true|false>    Accepted for compatibility; ignored.
   --tag-heavy <true|false>
   --help
 
 Examples:
-  select-coding-lane.sh --scope high --expected-files 12 --risk high --acp-available true
+  select-coding-lane.sh --scope high --expected-files 12 --risk high --acp-available false
   select-coding-lane.sh --scope low --expected-files 1 --risk low --acp-available false
 EOF
 }
@@ -97,32 +98,20 @@ lane="inline"
 reason="default-inline"
 fallback_lane="inline"
 
-if ! is_true "$acp_available"; then
-  if [[ "$scope" == "high" || "$risk" == "high" || "$expected_files" -ge 2 || "$scope" == "medium" ]]; then
-    lane="codex-subagent"
-    reason="acp-unavailable-use-codex-subagent"
-  else
-    lane="inline"
-    reason="acp-unavailable-inline"
-  fi
-elif is_true "$heavy_tag"; then
-  lane="acp-external"
-  reason="explicit-heavy-tag"
-elif [[ "$scope" == "high" || "$risk" == "high" || "$expected_files" -ge 8 ]]; then
-  lane="acp-external"
-  reason="complexity-threshold"
+# ACP lanes are intentionally disabled. Keep the compatibility arg parsed so
+# callers do not break, but route deterministically to Codex lanes only.
+if [[ "$scope" == "high" || "$risk" == "high" || "$expected_files" -ge 2 || "$scope" == "medium" || "$heavy_tag" == "true" ]]; then
+  lane="codex-subagent"
+  reason="sdk-codex-subagent"
 elif [[ "$scope" == "medium" || "$risk" == "medium" || "$expected_files" -ge 2 ]]; then
   lane="codex-subagent"
-  reason="moderate-scope"
+  reason="sdk-codex-subagent"
 else
   lane="inline"
   reason="bounded-scope"
 fi
 
 case "$lane" in
-  acp-external)
-    fallback_lane="codex-subagent"
-    ;;
   codex-subagent)
     fallback_lane="inline"
     ;;

@@ -2,7 +2,7 @@
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
-# Lane-aware coding task launcher for hybrid inline/Codex-subagent/ACP architecture.
+# Lane-aware coding task launcher for inline/Codex-subagent architecture.
 # Default mode is dry-run so operators can inspect routing before execution.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,8 +13,7 @@ source "$SCRIPT_DIR/lib/repo-boundary-policy.sh"
 orchestrator_agent="dwight"
 coder_codex_agent="main"
 owner_agent=""
-acp_agent="cursor"
-acp_agent_overridden="false"
+acp_agent="disabled"
 task_id=""
 repo_path=""
 goals=""
@@ -37,17 +36,9 @@ is_ewag_owner="false"
 effective_repo_path=""
 ewag_container_name="${OPENCLAW_EWAG_CONTAINER_NAME:-ewag-bot-sandbox}"
 
-should_trigger_acp_runtime_fallback() {
-  local output="$1"
-  if echo "$output" | grep -Eq 'Failed to spawn agent command|spawn [^ ]+ ENOENT|AcpRuntimeError|Permission prompt unavailable in non-interactive mode'; then
-    return 0
-  fi
-  return 1
-}
-
 should_retry_codex_timeout() {
   local output="$1"
-  if echo "$output" | grep -Eq 'Request timed out before a response was generated|GatewayTransportError: gateway timeout|codex app-server turn idle timed out|Profile [^ ]+ timed out'; then
+  if echo "$output" | grep -Eq 'Request timed out before a response was generated|GatewayTransportError: gateway timeout|codex sdk turn idle timed out|Profile [^ ]+ timed out'; then
     return 0
   fi
   return 1
@@ -97,15 +88,15 @@ Routing inputs:
   --expected-files <int>         Default: 1
   --risk <low|medium|high>       Default: low
   --tag-heavy <true|false>       Default: false
-  --acp-available <true|false>   Default: false
+  --acp-available <true|false>   Compatibility flag only; ACP is disabled.
 
 Execution options:
   --acceptance <text>            Optional acceptance criteria.
   --orchestrator-agent <id>      Default: dwight
   --owner-agent <id>             Required assignee (for example: main)
   --coder-codex-agent <id>       Default: main (Jerry)
-  --acp-agent <id>               Default: cursor
-  --timeout <seconds>            ACP run timeout hint. Default: 1800
+  --acp-agent <id>               Compatibility flag only; ignored (ACP disabled).
+  --timeout <seconds>            Reserved timeout hint. Default: 1800
   --agent-timeout <seconds>      openclaw agent timeout. Default: 300
   --execute                      Actually invoke OpenClaw command (default is dry-run)
   --help
@@ -187,7 +178,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --acp-agent)
       acp_agent="${2:-}"
-      acp_agent_overridden="true"
       shift 2
       ;;
     --timeout)
@@ -277,6 +267,18 @@ if ! [[ "$acp_available" =~ ^(true|false)$ ]]; then
   exit 2
 fi
 
+if [[ "$acp_available" == "true" ]]; then
+  echo "ACP is disabled by policy; ignoring --acp-available=true and forcing false." >&2
+fi
+acp_available="false"
+acp_preflight_status="not-run"
+acp_preflight_detail="acp-disabled-by-policy"
+
+if [[ "$acp_agent" != "disabled" ]]; then
+  echo "ACP is disabled by policy; ignoring --acp-agent '$acp_agent'." >&2
+fi
+acp_agent="disabled"
+
 if [[ ! -f "$ROUTER" ]]; then
   echo "Routing helper missing: $ROUTER" >&2
   exit 2
@@ -305,120 +307,6 @@ get_config_json() {
   "$OPENCLAW_BIN" config get "$key" --json 2>/dev/null || return 1
 }
 
-acp_agent_command_available() {
-  local agent="$1"
-  case "$agent" in
-    cursor)
-      command -v cursor-agent >/dev/null 2>&1
-      ;;
-    claude)
-      command -v claude >/dev/null 2>&1
-      ;;
-    copilot)
-      command -v copilot >/dev/null 2>&1
-      ;;
-    codex)
-      command -v codex >/dev/null 2>&1
-      ;;
-    *)
-      # Unknown harness ids are allowed if configured by OpenClaw.
-      return 0
-      ;;
-  esac
-}
-
-default_acp_agent_for_owner() {
-  local owner="$1"
-  local -a preferred=()
-  local candidate
-
-  case "$owner" in
-    resi)
-      preferred=(claude cursor copilot)
-      ;;
-    main|jerry|dwight)
-      preferred=(cursor copilot claude)
-      ;;
-    druck)
-      preferred=(copilot cursor claude)
-      ;;
-    *)
-      preferred=(cursor copilot claude)
-      ;;
-  esac
-
-  for candidate in "${preferred[@]}"; do
-    if acp_agent_command_available "$candidate"; then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  done
-
-  printf '%s' "${preferred[0]}"
-}
-
-acp_preflight_check() {
-  local permission_mode=""
-  local non_interactive=""
-  local acp_enabled=""
-  local acpx_enabled=""
-  local allowed_agents_json=""
-
-  permission_mode="$(get_config_value "plugins.entries.acpx.config.permissionMode" || true)"
-  non_interactive="$(get_config_value "plugins.entries.acpx.config.nonInteractivePermissions" || true)"
-  acp_enabled="$(get_config_value "acp.enabled" || true)"
-  acpx_enabled="$(get_config_value "plugins.entries.acpx.enabled" || true)"
-  allowed_agents_json="$(get_config_json "acp.allowedAgents" || true)"
-
-  if [[ "$acp_enabled" != "true" || "$acpx_enabled" != "true" ]]; then
-    acp_preflight_status="failed"
-    acp_preflight_detail="acp_or_acpx_disabled"
-    echo "ACP preflight failed. ACP/acpx must both be enabled." >&2
-    echo "Detected: acp.enabled=${acp_enabled:-<unset>} plugins.entries.acpx.enabled=${acpx_enabled:-<unset>}" >&2
-    return 1
-  fi
-
-  if [[ -n "$allowed_agents_json" ]] && ! echo "$allowed_agents_json" | grep -Eq '"'"$acp_agent"'"'; then
-    acp_preflight_status="failed"
-    acp_preflight_detail="agent_not_allowed"
-    echo "ACP preflight failed. acp.allowedAgents does not include requested agent: $acp_agent" >&2
-    echo "Detected acp.allowedAgents: ${allowed_agents_json}" >&2
-    return 1
-  fi
-
-  if [[ "$permission_mode" != "approve-all" || "$non_interactive" != "deny" ]]; then
-    acp_preflight_status="failed"
-    acp_preflight_detail="permission_policy_mismatch"
-    echo "ACP preflight failed. Required config:" >&2
-    echo "  openclaw config set plugins.entries.acpx.config.permissionMode approve-all" >&2
-    echo "  openclaw config set plugins.entries.acpx.config.nonInteractivePermissions deny" >&2
-    echo "Detected:" >&2
-    echo "  permissionMode=${permission_mode:-<unset>}" >&2
-    echo "  nonInteractivePermissions=${non_interactive:-<unset>}" >&2
-    return 1
-  fi
-
-  if ! acp_agent_command_available "$acp_agent"; then
-    acp_preflight_status="failed"
-    acp_preflight_detail="harness_binary_missing"
-    echo "ACP preflight failed. Required harness executable for agent '$acp_agent' was not found on PATH." >&2
-    echo "Install/auth the harness or override --acp-agent to an available one." >&2
-    return 1
-  fi
-
-  acp_preflight_status="ok"
-  acp_preflight_detail="ready"
-  return 0
-}
-
-if [[ "$acp_agent_overridden" != "true" ]]; then
-  inferred_owner="$owner_agent"
-  if [[ -z "$inferred_owner" ]]; then
-    inferred_owner="$coder_codex_agent"
-  fi
-  acp_agent="$(default_acp_agent_for_owner "$inferred_owner")"
-fi
-
 lane_json="$(bash "$ROUTER" \
   --scope "$scope" \
   --expected-files "$expected_files" \
@@ -438,28 +326,11 @@ fi
 requested_lane="$lane"
 selected_lane="$lane"
 
-if [[ "$selected_lane" == "acp-external" ]]; then
-  if [[ "$is_ewag_owner" == "true" ]]; then
-    selected_lane="codex-subagent"
-    fallback_applied="true"
-    fallback_reason="ewag-container-policy-acp-disabled"
-    echo "EWAG container policy disabled ACP lane; forcing codex-subagent." >&2
-  fi
-fi
-
-if [[ "$selected_lane" == "acp-external" ]]; then
-  if ! acp_preflight_check; then
-    if [[ "$fallback_lane" == "codex-subagent" ]]; then
-      selected_lane="codex-subagent"
-      fallback_applied="true"
-      fallback_reason="acp-preflight-failed:${acp_preflight_detail}"
-      echo "ACP preflight failed; falling back to ${selected_lane}." >&2
-    elif [[ "$execute" == "true" ]]; then
-      exit 2
-    else
-      echo "Dry-run: ACP preflight is not satisfied; execution would fail until fixed." >&2
-    fi
-  fi
+if [[ "$selected_lane" != "inline" && "$selected_lane" != "codex-subagent" ]]; then
+  selected_lane="codex-subagent"
+  fallback_applied="true"
+  fallback_reason="acp-disabled-by-policy"
+  echo "Legacy non-Codex lane requested; forcing codex-subagent." >&2
 fi
 
 mkdir -p "$RUNS_DIR"
@@ -683,22 +554,7 @@ PY
 
 write_metadata_file
 
-if [[ "$selected_lane" == "acp-external" ]]; then
-  prompt="Use sessions_spawn with runtime=\"acp\", agentId=\"${acp_agent}\", mode=\"run\", cwd=\"${effective_repo_path}\", runTimeoutSeconds=${run_timeout}."
-  if [[ -n "$owner_agent" ]]; then
-    prompt+=" Assigned owner agent: ${owner_agent}."
-  fi
-  prompt+=" Task ${task_id}: ${goals}."
-  if [[ -n "$acceptance" ]]; then
-    prompt+=" Acceptance criteria: ${acceptance}."
-  fi
-  prompt+=" Return task id, lane, branch, explicit PR status/url, and completion evidence."
-  if [[ -z "$OPENCLAW_BIN" || ! -x "$OPENCLAW_BIN" ]]; then
-    echo "OpenClaw CLI not found. Set OPENCLAW_BIN or install openclaw on PATH." >&2
-    exit 2
-  fi
-  cmd=("$OPENCLAW_BIN" agent --agent "$orchestrator_agent" --message "$prompt" --timeout "$agent_timeout" --json)
-elif [[ "$selected_lane" == "codex-subagent" ]]; then
+if [[ "$selected_lane" == "codex-subagent" ]]; then
   codex_target_agent="$coder_codex_agent"
   if [[ -n "$owner_agent" ]]; then
     codex_target_agent="$owner_agent"
@@ -800,44 +656,6 @@ $retry_output"
   fi
 
   printf '%s\n' "$cmd_output"
-
-  if [[ "$selected_lane" == "acp-external" ]]; then
-    if [[ $cmd_rc -ne 0 ]] || should_trigger_acp_runtime_fallback "$cmd_output"; then
-      if [[ "$fallback_lane" == "codex-subagent" ]]; then
-        echo "ACP execution appears failed at runtime; retrying via codex-subagent fallback." >&2
-        fallback_cmd=(
-          "$SCRIPT_DIR/launch-coding-task.sh"
-          --task-id "$task_id"
-          --repo "$repo_path"
-          --goal "$goals"
-          --scope "$scope"
-          --expected-files "$expected_files"
-          --risk "$risk"
-          --tag-heavy "$heavy_tag"
-          --acp-available false
-          --orchestrator-agent "$orchestrator_agent"
-          --coder-codex-agent "$coder_codex_agent"
-          --agent-timeout "$agent_timeout"
-          --execute
-        )
-        if [[ -n "$owner_agent" ]]; then
-          fallback_cmd+=(--owner-agent "$owner_agent")
-        fi
-        if [[ -n "$acceptance" ]]; then
-          fallback_cmd+=(--acceptance "$acceptance")
-        fi
-        if [[ -n "$acp_agent" ]]; then
-          fallback_cmd+=(--acp-agent "$acp_agent")
-        fi
-        set +e
-        fallback_output="$("${fallback_cmd[@]}" 2>&1)"
-        fallback_rc=$?
-        set -e
-        printf '%s\n' "$fallback_output"
-        exit $fallback_rc
-      fi
-    fi
-  fi
 
   if [[ $cmd_rc -ne 0 ]]; then
     update_metadata_execution "execute" "$cmd_rc"
