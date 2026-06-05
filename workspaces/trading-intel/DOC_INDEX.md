@@ -1,6 +1,6 @@
 # Trading Intelligence — Doc Index
 
-Status: active doc map for the canonical 5-agent OpenClaw trading system.
+Status: active doc map for the canonical 6-agent OpenClaw trading system.
 Effective: 2026-05-28.
 
 ## Active docs (the only authoritative set)

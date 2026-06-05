@@ -16,7 +16,7 @@ Machine source: reference/telegram_routing_matrix.json
 | DM | jerry | @jerry_rsl_bot | main | Jerry | General OpenClaw operations and health checks |
 | DM | dwight | @dwight_rsl_bot | dwight | Dwight | Oversight and task execution status |
 | DM | resi | @resi_rsl_bot | resi | Resi | Resi workspace direct execution |
-| DM | druck | @druck_rsl_bot | trader | Druck | Trader persona direct execution |
+| DM | druck | @druck_rsl_bot | trader | Druck | Chat front door and orchestration |
 
 ## Group and topic routes
 

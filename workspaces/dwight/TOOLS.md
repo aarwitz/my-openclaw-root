@@ -38,3 +38,13 @@ Skills are shared. Your setup is yours. Keeping them apart means you can update 
 ---
 
 Add whatever helps you do your job. This is your cheat sheet.
+
+
+## Scripts policy (shared across all OpenClaw agents)
+
+All `.sh`/`.py` scripts under `~/.openclaw/scripts/` and registered workspace script dirs are governed by a single policy. Source of truth: `~/.openclaw/scripts/README.md`.
+
+Rules for you:
+- Run scripts via `~/.openclaw/scripts/run-with-trace.sh <script> [args...]` so the call is logged to `~/.openclaw/logs/script-runs.jsonl`. Direct invocation is rejected (exit 126).
+- Create new scripts with `~/.openclaw/scripts/new-script.sh <name>.{sh,py}` — never hand-write boilerplate.
+- Before retiring a script, run `~/.openclaw/scripts/scripts-policy-lint.sh` and the inventory audit, and follow the deletion rule in the README.

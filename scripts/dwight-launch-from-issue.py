@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import urllib.error
 import urllib.parse
@@ -21,17 +22,94 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_TM_BASE = "http://127.0.0.1:8000"
 DEFAULT_LAUNCHER = os.path.expanduser("~/.openclaw/scripts/dwight-assign-coding-task.sh")
+TM_CONTAINER = os.environ.get("TM_CONTAINER_NAME", "dwight-taskmanager")
+TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))
+
+
+class TMEndpointMissing(RuntimeError):
+    """Raised when a TM endpoint returns 404; lets callers degrade gracefully."""
+
+
+def _docker_exec_request(method: str, url: str, payload: Optional[Dict[str, Any]]) -> tuple[int, Any]:
+    """Mirror tmctl.sh fallback: run the HTTP request from inside the TM container."""
+    if shutil.which("docker") is None:
+        raise RuntimeError("docker CLI not available for fallback")
+    parsed = urllib.parse.urlparse(url)
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    snippet = (
+        "import json, os, sys, urllib.error, urllib.request\n"
+        "method = os.environ['TM_METHOD']\n"
+        "path = os.environ['TM_PATH']\n"
+        "body = os.environ.get('TM_BODY') or ''\n"
+        "url = 'http://127.0.0.1:8000' + path\n"
+        "headers = {'Accept': 'application/json'}\n"
+        "data = None\n"
+        "if body:\n"
+        "    headers['Content-Type'] = 'application/json'\n"
+        "    data = body.encode('utf-8')\n"
+        "req = urllib.request.Request(url, method=method, data=data, headers=headers)\n"
+        "try:\n"
+        "    with urllib.request.urlopen(req, timeout=20) as resp:\n"
+        "        out = {'status': resp.status, 'body': resp.read().decode('utf-8')}\n"
+        "except urllib.error.HTTPError as exc:\n"
+        "    out = {'status': exc.code, 'body': exc.read().decode('utf-8', errors='replace')}\n"
+        "sys.stdout.write(json.dumps(out))\n"
+    )
+    env = os.environ.copy()
+    env["TM_METHOD"] = method
+    env["TM_PATH"] = path
+    env["TM_BODY"] = json.dumps(payload) if payload is not None else ""
+    proc = subprocess.run(
+        ["docker", "exec", "-i",
+         "-e", "TM_METHOD", "-e", "TM_PATH", "-e", "TM_BODY",
+         TM_CONTAINER, "python", "-"],
+        input=snippet,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=TM_HTTP_TIMEOUT + 10,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"docker exec fallback failed (rc={proc.returncode}): "
+            f"stderr={proc.stderr.strip()[:300]}"
+        )
+    payload_out = json.loads(proc.stdout)
+    status = int(payload_out.get("status", 0))
+    raw_body = payload_out.get("body") or ""
+    try:
+        parsed_body = json.loads(raw_body) if raw_body else None
+    except json.JSONDecodeError:
+        parsed_body = raw_body
+    return status, parsed_body
+
+
+def _should_fallback(exc: urllib.error.URLError) -> bool:
+    reason = getattr(exc, "reason", exc)
+    if isinstance(reason, OSError) and reason.errno in {111, 113, -2, -3}:
+        return True
+    text = str(reason)
+    return "Connection refused" in text or "Name or service not known" in text
 
 
 def http_get_json(url: str) -> Any:
     req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=TM_HTTP_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
+        if exc.code == 404:
+            raise TMEndpointMissing(f"HTTP 404 for GET {url}") from exc
         raise RuntimeError(f"HTTP {exc.code} for GET {url}: {detail}") from exc
     except urllib.error.URLError as exc:
+        if _should_fallback(exc):
+            status, body = _docker_exec_request("GET", url, None)
+            if status == 404:
+                raise TMEndpointMissing(f"HTTP 404 (via docker) for GET {url}")
+            if status >= 400:
+                raise RuntimeError(f"HTTP {status} (via docker) for GET {url}: {str(body)[:200]}")
+            return body
         raise RuntimeError(f"Request failed for GET {url}: {exc.reason}") from exc
 
 
@@ -43,13 +121,22 @@ def http_json_request(url: str, method: str, payload: Optional[Dict[str, Any]] =
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=TM_HTTP_TIMEOUT) as resp:
             body = resp.read().decode("utf-8")
             return json.loads(body) if body else None
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
+        if exc.code == 404:
+            raise TMEndpointMissing(f"HTTP 404 for {method} {url}") from exc
         raise RuntimeError(f"HTTP {exc.code} for {method} {url}: {detail}") from exc
     except urllib.error.URLError as exc:
+        if _should_fallback(exc):
+            status, body = _docker_exec_request(method, url, payload)
+            if status == 404:
+                raise TMEndpointMissing(f"HTTP 404 (via docker) for {method} {url}")
+            if status >= 400:
+                raise RuntimeError(f"HTTP {status} (via docker) for {method} {url}: {str(body)[:200]}")
+            return body
         raise RuntimeError(f"Request failed for {method} {url}: {exc.reason}") from exc
 
 
@@ -69,6 +156,15 @@ def normalize_owner(owner: str) -> str:
         "resi": "resi",
         "druck": "druck",
         "dwight": "dwight",
+        # Trading-stack lanes route directly to their OpenClaw agent ids.
+        "researcher": "researcher",
+        "quant": "quant",
+        "critic": "critic",
+        "trader": "trader",
+        "executor": "executor",
+        "archivist": "archivist",
+        "developer": "developer",
+        "overseer": "overseer",
     }
     return aliases.get(raw, raw)
 
@@ -228,13 +324,21 @@ def build_issue_launch_signature(issue: Dict[str, Any]) -> str:
     return "|".join(parts)
 
 
-def claim_issue_launch(tm_base: str, issue_id: str, claimant: str, source: str, expected_signature: str) -> str:
+def claim_issue_launch(tm_base: str, issue_id: str, claimant: str, source: str, expected_signature: str) -> Optional[str]:
+    """Acquire a launch claim if TM supports it. Returns the claim token, or None if the endpoint is absent."""
     payload = {
         "claimant": claimant,
         "source": source,
         "expected_signature": expected_signature,
     }
-    response = http_json_request(f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-claim", "POST", payload)
+    try:
+        response = http_json_request(f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-claim", "POST", payload)
+    except TMEndpointMissing:
+        print(
+            "INFO: TM launch-claim endpoint not available; proceeding without a claim token (idempotency provided by [LANE-BRIDGE] marker).",
+            file=sys.stderr,
+        )
+        return None
     if not isinstance(response, dict):
         raise RuntimeError("Unexpected launch claim response from Task Manager")
     claim_token = response.get("claim_token")
@@ -244,10 +348,13 @@ def claim_issue_launch(tm_base: str, issue_id: str, claimant: str, source: str, 
 
 
 def release_issue_launch_claim(tm_base: str, issue_id: str, claim_token: str) -> None:
-    http_json_request(
-        f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-claim?claim_token={urllib.parse.quote(claim_token, safe='')}",
-        "DELETE",
-    )
+    try:
+        http_json_request(
+            f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-claim?claim_token={urllib.parse.quote(claim_token, safe='')}",
+            "DELETE",
+        )
+    except TMEndpointMissing:
+        return
 
 
 def extract_meta_path(output: str) -> str:
@@ -444,7 +551,20 @@ def post_launch_result(
         "username": "Dwight",
         "claim_token": claim_token,
     }
-    http_json_request(f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-result", "POST", payload)
+    try:
+        http_json_request(f"{tm_base.rstrip('/')}/api/issues/{issue_id}/launch-result", "POST", payload)
+        return
+    except TMEndpointMissing:
+        # TM doesn't expose the structured launch-result endpoint; fall back to a plain comment.
+        prefix = f"[LANE-EXEC] state={launch_state}"
+        if launch_error:
+            prefix += f" error={launch_error[:200]}"
+        fallback = f"{prefix}\n\n{comment_content}"
+        http_json_request(
+            f"{tm_base.rstrip('/')}/api/issues/{issue_id}/comments",
+            "POST",
+            {"content": fallback, "username": "Dwight"},
+        )
 
 
 def run(argv: List[str]) -> int:
@@ -498,7 +618,14 @@ def run(argv: List[str]) -> int:
     if args.acp_available == "true" or args.acp_agent:
         print("ACP is disabled by policy; ignoring --acp-available/--acp-agent overrides.", file=sys.stderr)
 
+    # Invoke the shell launcher via `bash` rather than executing the file path
+    # directly. The exec bit is unreliable across git checkouts and container
+    # volume mounts; `bash <script>` only needs the file to be readable. This
+    # mirrors how dwight-assign-coding-task.sh itself calls launch-coding-task.sh
+    # (`bash "$LAUNCHER"`). The OPENCLAW_RUN_WITH_TRACE=1 env propagates to this
+    # child, so the require-wrapper guard still passes.
     cmd = [
+        "bash",
         args.launcher,
         "--owner-agent",
         owner_agent,

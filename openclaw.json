@@ -1,7 +1,7 @@
 {
   "meta": {
     "lastTouchedVersion": "2026.5.20",
-    "lastTouchedAt": "2026-05-25T10:50:20.817Z"
+    "lastTouchedAt": "2026-06-03T16:00:54.511Z"
   },
   "wizard": {
     "lastRunAt": "2026-03-29T12:38:10.227Z",
@@ -127,7 +127,17 @@
         "postCompactionMaxChars": 8000
       },
       "subagents": {
-        "delegationMode": "prefer"
+        "delegationMode": "prefer",
+        "allowAgents": [
+          "researcher",
+          "quant",
+          "critic",
+          "archivist",
+          "trader",
+          "executor",
+          "developer",
+          "overseer"
+        ]
       }
     },
     "list": [
@@ -186,31 +196,50 @@
         }
       },
       {
+        "id": "executor",
+        "workspace": "/home/aaron/.openclaw/workspaces/executor",
+        "model": "openai/gpt-5.4",
+        "verboseDefault": "full",
+        "toolProgressDetail": "raw",
+        "skills": [
+          "alpaca"
+        ],
+        "subagents": {
+          "delegationMode": "suggest",
+          "allowAgents": []
+        },
+        "identity": {
+          "name": "Executor",
+          "emoji": "\u2699\ufe0f"
+        }
+      },
+      {
         "id": "trader",
         "workspace": "/home/aaron/.openclaw/workspaces/trader",
         "model": "openai/gpt-5.4",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
-        "humanDelay": {
-          "mode": "custom",
-          "minMs": 1200,
-          "maxMs": 2400
-        },
-        "groupChat": {
-          "mentionPatterns": [
-            "@druck_rsl_bot\\b"
-          ]
-        },
         "skills": [
-          "alpaca",
           "massive",
           "finnhub",
           "druck-research",
-          "financialmodeling-prep-api"
+          "financialmodeling-prep-api",
+          "github-ssh"
         ],
+        "subagents": {
+          "delegationMode": "prefer",
+          "allowAgents": [
+            "executor",
+            "researcher",
+            "quant",
+            "critic",
+            "archivist",
+            "developer"
+          ]
+        },
         "identity": {
-           "name": "Druck",
-           "emoji": "💰"
+          "name": "Trader",
+          "emoji": "\ud83d\udcb0"
         }
       },
       {
@@ -229,7 +258,8 @@
           "emoji": "\u2696\ufe0f"
         }
       },
-      {        "id": "archivist",
+      {
+        "id": "archivist",
         "workspace": "/home/aaron/.openclaw/workspaces/archivist",
         "model": "openai/gpt-5.4",
         "skills": [
@@ -240,10 +270,33 @@
         ],
         "identity": {
           "name": "Archivist",
-          "emoji": "📚"
+          "emoji": "\ud83d\udcda"
         }
       },
-      {        "id": "dwight",
+      {
+        "id": "developer",
+        "workspace": "/home/aaron/.openclaw/workspaces/developer",
+        "model": "openai/gpt-5.4",
+        "verboseDefault": "full",
+        "toolProgressDetail": "raw",
+        "skills": [
+          "github-ssh",
+          "druck-research"
+        ],
+        "subagents": {
+          "delegationMode": "prefer",
+          "allowAgents": [
+            "archivist",
+            "dwight"
+          ]
+        },
+        "identity": {
+          "name": "Developer",
+          "emoji": "\ud83d\udee0\ufe0f"
+        }
+      },
+      {
+        "id": "dwight",
         "workspace": "/home/aaron/.openclaw/workspaces/dwight",
         "model": "openai/gpt-5.4",
         "humanDelay": {
@@ -271,6 +324,49 @@
           "name": "Dwight",
           "emoji": "\ud83d\udccb"
         }
+      },
+      {
+        "id": "overseer",
+        "workspace": "/home/aaron/.openclaw/workspaces/overseer",
+        "model": "openai/gpt-5.4",
+        "verboseDefault": "full",
+        "toolProgressDetail": "raw",
+        "humanDelay": {
+          "mode": "custom",
+          "minMs": 1200,
+          "maxMs": 2400
+        },
+        "groupChat": {
+          "mentionPatterns": [
+            "@druck_rsl_bot\\b"
+          ]
+        },
+        "skills": [
+          "druck-research",
+          "github-ssh",
+          "task-manager",
+          "newsapi-ai",
+          "finnhub",
+          "massive",
+          "financialmodeling-prep-api"
+        ],
+        "subagents": {
+          "delegationMode": "prefer",
+          "allowAgents": [
+            "researcher",
+            "quant",
+            "critic",
+            "trader",
+            "executor",
+            "archivist",
+            "developer",
+            "dwight"
+          ]
+        },
+        "identity": {
+          "name": "AutoTrade",
+          "emoji": "\ud83e\udd16"
+        }
       }
     ]
   },
@@ -296,7 +392,7 @@
         "channel": "telegram",
         "accountId": "druck"
       },
-      "agentId": "trader"
+      "agentId": "overseer"
     },
     {
       "match": {
@@ -320,9 +416,13 @@
       "allow": [
         "researcher",
         "quant",
-        "trader",
         "critic",
-        "archivist"
+        "trader",
+        "executor",
+        "archivist",
+        "developer",
+        "overseer",
+        "dwight"
       ]
     },
     "web": {
@@ -341,6 +441,7 @@
       }
     },
     "exec": {
+      "strictInlineEval": true,
       "host": "gateway",
       "node": "ios-build-node"
     },
@@ -370,6 +471,9 @@
           "timeoutSeconds": 60
         }
       ]
+    },
+    "sessions": {
+      "visibility": "all"
     }
   },
   "commands": {
@@ -507,7 +611,7 @@
             "druck-research",
             "financialmodeling-prep-api"
           ],
-          "systemPrompt": "You are in Trading Desk. Mention-gated policy is ON: only respond when explicitly addressed with @mention. Use topic specialization strictly: Dwight oversight in topic 1, Druck execution in topic 641. Keep messages structured, source-backed, and concise.",
+          "systemPrompt": "You are in Trading Desk. Mention-gated policy is ON: only respond when explicitly addressed with @mention. Use topic specialization strictly: Dwight oversight in topic 1, AutoTrade chat and orchestration in topic 641 (agent id overseer). Keep messages structured, source-backed, and concise.",
           "topics": {
             "1": {
               "agentId": "dwight",
@@ -519,7 +623,7 @@
               "systemPrompt": "You are Dwight in Trading Desk Oversight. Optimize durable outperformance vs S&P with strict evidence and risk control.\n\nEscalate when:\n- scheduled updates are missing,\n- evidence is weak/stale/uncited,\n- any horizon underperforms S&P,\n- tool/skill health is uncertain.\n\nCapital rule:\n- If expected edge does not beat 3% annual cash yield, direct pass/no-trade.\n\nCross-bot protocol:\n- @druck_rsl_bot => reply expected.\n- FYI/cc @druck_rsl_bot => listen-only.\n- Prefer ACTION_REQUEST_DRUCK with request_id.\n\nDirective template:\nACTION_REQUEST_DRUCK\nrequest_id: <id>\nobjective: <goal>\nwhy_now: <kpi/risk/catalyst>\nconstraints: <risk/universe/deadline/no-order rules>\nrequired_outputs:\n- thesis\n- evidence_with_sources\n- expected_edge_vs_sp500\n- expected_edge_vs_cash_3pct\n- falsifier\n- concrete_next_action\ndeadline_et: <time>\n\nLogging:\n- Log material updates/discrepancies/corrective plans in Task Manager with KPI impact, next step, and references."
             },
             "641": {
-              "agentId": "trader",
+              "agentId": "overseer",
               "skills": [
                 "newsapi-ai",
                 "finnhub",
@@ -529,9 +633,10 @@
                 "gog",
                 "github-ssh",
                 "druck-research",
-                "financialmodeling-prep-api"
+                "financialmodeling-prep-api",
+                "task-manager"
               ],
-              "systemPrompt": "You are Druck, the human-facing persona of agent id trader for the Trading Intelligence stack.\n\nAuthority:\n- ~/.openclaw/workspaces/trading-intel/DOC_INDEX.md\n- ~/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md\n- ~/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md\n- ~/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md\n- ~/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md\n- ~/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md\n\nProtocol:\n- @druck_rsl_bot => reply expected unless prefixed FYI/cc.\n- FYI/cc => listen-only.\n\nHard rules:\n- Thesis-first with a valid hypothesis id.\n- No submission without critic review, freshness gates, explainability thresholds, and fill-realism checks.\n- If expected edge does not beat SPY and cash hurdle after slippage adjustment, default no-trade/watch.\n- For `/summary`, use `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py`.\n\nTelegram formatting contract:\n- Never use markdown tables or pipe-separated rows (`|`) in Telegram replies.\n- Never use fenced code blocks in Telegram replies unless explicitly requested.\n- Prefer short numbered lists with one ticker per line.\n- If output is long, split intentionally into `Part 1/2`, `Part 2/2` instead of sending one oversized block.\n- Never expose internal tool/runtime diagnostics (for example: `run python3 inline script ... failed`) to the user. If a tool fails, retry with fallback data and give a clean final response plus a brief data-quality caveat.\n\nOutput:\nDRUCK_UPDATE\nrequest_id: <id|none>\nthesis: <1-3 lines>\nevidence_with_sources:\n- <source + finding>\nexpected_edge_vs_sp500: <daily/weekly/monthly/quarterly>\nexpected_edge_vs_cash: <daily/weekly/monthly/quarterly>\nfalsifier: <condition>\nnext_action: <step + when>\n\nWrite protocol: idempotent writes + read-back verification; on mismatch log and do not claim success."
+              "systemPrompt": "You are AutoTrade (agent id overseer) in Trading Desk topic 641. You are\nthe chat front door + pipeline orchestrator. You do not have a human name.\n\nPipeline order is strict: researcher -> quant -> critic -> trader -> executor.\narchivist runs as an async learning pass. developer owns scripts/schema/\nconnectors. dwight owns rsl-task-manager.\n\nChat behavior:\n- @druck_rsl_bot -> reply expected.\n- FYI/cc -> listen-only.\n- No markdown tables, no pipe-separated rows, no fenced code blocks unless\n  explicitly requested.\n- For trade execution: spawn trader to mint intents, then spawn executor.\n- For dev/infra changes: spawn developer.\n- For task manager work: spawn dwight.\n- For status: read data.json at\n  /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n- For the priority queue: use scripts under\n  /home/aaron/.openclaw/workspaces/overseer/scripts/\n"
             }
           }
         }

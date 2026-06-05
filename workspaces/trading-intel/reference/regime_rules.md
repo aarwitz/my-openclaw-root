@@ -68,31 +68,54 @@ Each signal is reduced to one of `risk_on | neutral | caution | risk_off | crisi
 
 ## 3. Aggregation to `regime.current`
 
-The aggregate uses the **worst-of with credit override** rule, deterministically:
+The aggregate uses the **majority-of-available with credit override** rule, deterministically.
+"Valid" means the signal value is present and fresh (≤ 36 hours old for daily series).
 
-1. Map each of the four signal states to a numeric severity:
+1. Map each available signal's state to a numeric severity:
    `risk_on=0`, `neutral=1`, `caution=2`, `risk_off=3`, `crisis=4`.
-2. Compute `worst = max(severity[s])` across the four signals.
-3. If `credit_spreads` severity is `crisis`, the aggregate is `crisis` regardless of other signals
-   (credit-led shocks dominate).
-4. If three or more signals are at severity ≥ 2 (`caution` or worse), bump the aggregate severity
-   up by 1 (capped at `crisis`).
-5. Map the final severity back to the enum.
+2. Let `V` = the set of valid signals, `M` = the missing/stale set. Require `|V| ≥ 3` to
+   classify normally. If `|V| < 3` see §4.
+3. **Credit override (always evaluated first when `credit_spreads ∈ V`):**
+   - If `severity[credit_spreads] == 4`, aggregate is `crisis` regardless of any other signal.
+   - If `credit_spreads ∈ M` AND at least one other valid signal has severity ≥ 2 (`caution`+),
+     force aggregate `caution` with `notes.credit_unknown = true` (see §4).
+4. **Normal classification over valid signals:**
+   a. `worst = max(severity[s] for s in V)`.
+   b. **Breadth bump:** if `count(severity[s] ≥ 2 for s in V) / |V| ≥ 0.75`
+      (i.e. ≥ 3 of 4 valid, or 3 of 3 valid), bump aggregate severity up by 1
+      (capped at `crisis`). Otherwise aggregate = `worst`.
+   c. Map the final severity back to the enum.
+5. Record `signals_json.partial = true` and `signals_json.missing_signals = [...]` whenever
+   `|M| ≥ 1`, even when the aggregate is not `caution`. Provenance is mandatory.
 
-This rule is what `regime_rules.thresholds_json.aggregation` encodes; quant must implement it
-exactly. Any change requires a `DECISION_LOG.md` entry and updated `experiment_id` tags in
-affected rows.
+This rule is what `regime_rules.thresholds_json.aggregation` encodes; quant (via
+`scripts/classify_regime.py`) must implement it exactly. Any change requires a
+`DECISION_LOG.md` entry and updated `experiment_id` tags on affected rows.
 
-## 4. Fail-closed behavior
+## 4. Fail-loud + fail-closed behavior
 
-If any of the following is true, quant MUST write `regime.current = 'caution'` with
-`signals_json.fail_closed = true` and a structured `notes` field:
+The classifier **fails loudly** (exits non-zero, writes an `audits` row with
+`action='regime_failed'`) when:
 
-- Any of the four signals is missing or stale (> 36 hours old for daily series).
-- FRED, Alpaca, or CBOE source returned an error and no fallback snapshot is available.
 - Active `regime_rules` row is missing or malformed.
+- The classifier itself cannot run (broken connector, missing skill, code error).
+- More than two of the four signals are missing or stale simultaneously and no recovery is
+  possible within the freshness budget.
 
-The system never invents an implicit `risk_on` or `neutral` from partial inputs.
+The classifier **fails closed to `caution`** (writes a `regime` row with
+`current='caution'`, `signals_json.fail_closed = true`, and structured `notes.missing_signals`)
+when, and only when:
+
+- `|M| ≥ 2` of the four signals are missing or stale (the system cannot read a majority).
+- `credit_spreads ∈ M` AND any other valid signal has severity ≥ 2 (`caution`+).
+
+The previous "any single missing signal forces `caution`" behavior is **retired**
+(see `DECISION_LOG.md` D38). A single missing signal with a valid majority must be classified
+normally over the remaining signals, with `partial=true` provenance recorded so the operator and
+the app know the picture is incomplete.
+
+The system never invents an implicit `risk_on` or `neutral` from partial inputs; missing-signal
+provenance must always be recorded.
 
 ## 5. Gate coupling
 

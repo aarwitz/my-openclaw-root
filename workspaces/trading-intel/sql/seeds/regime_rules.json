@@ -1,9 +1,9 @@
 {
   "id": "regime_rules_live",
   "rule_version": "live",
-  "effective_at": "2026-05-29T00:00:00Z",
-  "notes": "Deterministic regime classifier. See reference/regime_rules.md for narrative.",
-  "experiment_id": "regime_rules_live_init",
+  "effective_at": "2026-06-03T00:00:00Z",
+  "notes": "Deterministic regime classifier with majority-of-available aggregation. See reference/regime_rules.md and DECISION_LOG D38.",
+  "experiment_id": "regime_rules_majority_v2",
   "thresholds_json": {
     "signals": {
       "spy_trend": {
@@ -55,22 +55,32 @@
       "risk_on": 0, "neutral": 1, "caution": 2, "risk_off": 3, "crisis": 4
     },
     "aggregation": {
-      "rule": "worst_of_with_credit_override_and_breadth_bump",
+      "rule": "majority_of_available_with_credit_override",
+      "min_valid_signals_for_normal_classification": 3,
+      "breadth_bump_fraction": 0.75,
       "steps": [
-        "worst = max(severity[s] for s in signals)",
-        "if severity[credit_spreads] == 4: aggregate = 4",
-        "elif count(severity[s] >= 2 for s in signals) >= 3: aggregate = min(4, worst + 1)",
-        "else: aggregate = worst",
-        "current = inverse_severity_map[aggregate]"
+        "V = signals with present, fresh values (<= freshness_hours_max)",
+        "M = missing or stale signals",
+        "if |V| < min_valid_signals_for_normal_classification: aggregate = 'caution' with fail_closed=true",
+        "if credit_spreads in V and severity[credit_spreads] == 4: aggregate = 'crisis' (override)",
+        "elif credit_spreads in M and any(severity[s] >= 2 for s in V): aggregate = 'caution' with notes.credit_unknown=true",
+        "else: worst = max(severity[s] for s in V)",
+        "      if count(severity[s] >= 2 for s in V) / |V| >= breadth_bump_fraction: agg_sev = min(4, worst + 1)",
+        "      else: agg_sev = worst",
+        "      aggregate = inverse_severity_map[agg_sev]",
+        "always record signals_json.partial = (|M| >= 1) and signals_json.missing_signals = sorted(M)"
       ]
     },
+    "fail_loud_triggers": [
+      "active_regime_rules_row_missing_or_malformed",
+      "classifier_runtime_error",
+      "more_than_two_signals_missing_or_stale"
+    ],
     "fail_closed": {
       "default_current": "caution",
       "triggers": [
-        "any_signal_missing",
-        "any_signal_stale_hours_gt_36",
-        "source_error_no_fallback",
-        "rule_version_misconfigured"
+        "majority_signals_missing",
+        "credit_spreads_missing_and_any_other_caution_or_worse"
       ]
     },
     "freshness_hours_max": 36

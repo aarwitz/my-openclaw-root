@@ -237,6 +237,7 @@ Per the schedule in `docs/05_IMPLEMENTATION_POLICY.md` section 3:
 | Time (US/Eastern) | What runs |
 |---|---|
 | 09:00 | Pre-market decision pass |
+| 09:30 | Market-open reaction pass |
 | 11:00 | Confirmation / invalidation pass |
 | 13:30 | Replacement / rotation pass |
 | 15:30 | Close-risk pass |
@@ -244,6 +245,16 @@ Per the schedule in `docs/05_IMPLEMENTATION_POLICY.md` section 3:
 | Sunday 09:00 | Weekly portfolio pattern extraction (Archivist) |
 
 Druck will post updates to Telegram at each pass if there is anything material to report.
+
+Execution timing default:
+- Druck should prefer resting broker-native limit/bracket-style order staging for approved price-sensitive setups instead of relying on you to notice an intraday dip manually.
+- The execution reference is `reference/execution_timing_framework.md`.
+
+Practical meaning:
+- `09:00` builds the execution watchlist and defines entry bands.
+- `09:30` reacts to opening dislocations against that plan.
+- `11:00` and `13:30` reassess or rotate resting orders.
+- `15:30` cleans up stale resting buys and tightens close-risk posture.
 
 ---
 
@@ -424,24 +435,34 @@ required_outputs:
 ## 4. Notifications and passive monitoring
 
 What is already built in:
-- scheduled trading passes at `09:00`, `11:00`, `13:30`, and `15:30` ET
+- scheduled trading passes at `09:00`, `09:30`, `11:00`, `13:30`, and `15:30` ET
 - event-driven handling on Alpaca order and position events
 - weekly audit summary into the trader Telegram thread
 - material updates are posted when there is something worth reporting
+- execution timing now defaults to resting broker-native orders for approved price-sensitive setups, so the broker can act when price hits the band without waiting for manual observation
 
 What is not currently built as a separate surface:
 - no dedicated subscribe/unsubscribe notification settings
 - no separate notification command contract documented beyond the trading thread itself
+- no standalone streaming price-alert daemon; the preferred substitute is staged orders plus event-driven broker updates
 
 Practical implication:
 - the trading thread is the notification surface
 - if you want tighter reporting, ask Druck for an explicit standing reporting rule in that thread
+- if a thesis is already approved and the desired action is price-sensitive, ask Druck to stage the order plan rather than just watch the ticker
 
 Example:
 
 ```text
 @druck_rsl_bot
 Standing rule: whenever a trade intent changes state, an order is submitted, filled, canceled, or blocked, or a system pause opens/closes, post a concise update here with ticker, action, reason, and next step.
+```
+
+Execution-timing request pattern:
+
+```text
+@druck_rsl_bot
+For any approved setup with a defined buy-under or breakout-confirmation level, stage the preferred resting order instead of just monitoring manually. Notify me only on submit, fill, cancel, reject, or material thesis/risk change.
 ```
 
 For a lighter cadence:
@@ -2386,4 +2407,3 @@ All operational, architectural, lifecycle, schema, and policy rules live under t
 - "Druck" is your persona label, not a separate supervisory agent.
 - `/summary` source of truth: `python3 /home/aaron/.openclaw/workspaces/trader/scripts/summary_report.py`.
 - Do not call `sqlite3`; use Python SQLite access (sqlite3 CLI is not installed).
-

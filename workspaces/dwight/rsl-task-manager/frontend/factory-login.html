@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw Factory - Login</title>
+    <link rel="stylesheet" href="/static/factory.css">
+</head>
+<body>
+    <div class="factory-login-shell">
+        <div class="factory-login-card glass-panel">
+            <div class="eyebrow">AUTONOMOUS SOFTWARE FACTORY</div>
+            <h1>OpenClaw Control</h1>
+            <p>Elite Wellness delivery surface for humans and autonomous agents.</p>
+            <form id="loginForm" class="issue-form">
+                <label>
+                    Operator handle
+                    <input type="text" id="username" placeholder="Aaron / Jerry / Taylor" required autocomplete="username">
+                </label>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary">Enter control panel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            if (!username) return;
+            const response = await fetch('/api/users/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            if (response.ok) {
+                localStorage.setItem('username', username);
+                window.location.href = '/static/factory.html';
+            }
+        });
+    </script>
+</body>
+</html>

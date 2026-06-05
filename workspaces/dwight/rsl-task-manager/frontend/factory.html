@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw Task Map</title>
+  <link rel="stylesheet" href="/static/factory.css">
+</head>
+<body>
+  <div class="factory-app">
+    <div class="map-bg-grid"></div>
+    <header class="map-topbar glass-panel">
+      <div class="topbar-copy">
+        <div class="eyebrow">OPENCLAW // FACTORY MAP</div>
+        <h1 id="heroTitle">Loading task map…</h1>
+        <p id="heroSubtitle">Jerry schedules work. Humans move to assigned nodes and execute.</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="sync-pill"><span class="presence-dot live"></span><span id="lastSync">syncing…</span></div>
+        <button id="createIssueBtn" class="btn btn-primary">Create task</button>
+        <button id="logoutBtn" class="btn btn-secondary">Exit</button>
+      </div>
+    </header>
+
+    <section class="map-shell glass-panel">
+      <div class="map-hud">
+        <div class="map-title-wrap">
+          <div class="eyebrow">LIVE OPERATIONS</div>
+          <h2 id="sprintLabel">—</h2>
+        </div>
+        <div class="hud-chips">
+          <span class="hud-chip running"><b id="statRunning">0</b> building</span>
+          <span class="hud-chip human"><b id="statNeedsHuman">0</b> human</span>
+          <span class="hud-chip review"><b id="statReview">0</b> review</span>
+          <span class="hud-chip done"><b id="statDone">0</b> shipped</span>
+        </div>
+      </div>
+
+      <div id="factoryWorld" class="task-map"></div>
+    </section>
+
+    <section class="mini-bottom-strip glass-panel">
+      <div class="mini-stat"><b id="statTotal">0</b><span>total tasks</span></div>
+      <div class="mini-stat"><b id="statRunningMirror">0</b><span>active builds</span></div>
+      <div class="mini-stat"><b id="statNeedsHumanMirror">0</b><span>waiting humans</span></div>
+      <div class="mini-stat"><b id="statReviewMirror">0</b><span>review/PR</span></div>
+    </section>
+  </div>
+
+  <aside id="detailDrawer" class="detail-drawer hidden">
+    <div class="drawer-header">
+      <div><div class="eyebrow">TASK DETAIL</div><h3 id="drawerTitle">Task</h3></div>
+      <button id="closeDrawerBtn" class="icon-btn">✕</button>
+    </div>
+    <div class="drawer-meta" id="drawerMeta"></div>
+    <p id="drawerDescription" class="drawer-description"></p>
+    <div class="drawer-controls">
+      <label>Status<select id="drawerStatus"><option value="to_do">Queued</option><option value="in_progress">Executing</option><option value="in_review">Review Ready</option><option value="done">Completed</option></select></label>
+      <label>Assigned to<select id="drawerAssignedTo"></select></label>
+    </div>
+    <div class="drawer-actions">
+      <button id="saveIssueBtn" class="btn btn-primary">Save changes</button>
+      <a id="legacyIssueLink" class="btn btn-secondary" href="#">Raw issue</a>
+    </div>
+    <div class="drawer-section">
+      <div class="eyebrow">ADD NOTE</div>
+      <form id="commentForm" class="issue-form compact-form">
+        <label>Comment<textarea id="commentInput" rows="3" placeholder="Log a note, status update, or handoff message..."></textarea></label>
+        <div class="modal-actions">
+          <button type="submit" id="addCommentBtn" class="btn btn-secondary">Add comment</button>
+        </div>
+      </form>
+    </div>
+    <div class="drawer-section">
+      <div class="eyebrow">RUN LOG</div>
+      <div id="drawerComments" class="comments-list"></div>
+    </div>
+  </aside>
+
+  <div id="createIssueModal" class="modal hidden">
+    <div class="modal-card glass-panel">
+      <div class="section-header"><div><div class="eyebrow">NEW TASK</div><h3>Create task</h3></div><button id="closeModalBtn" class="icon-btn">✕</button></div>
+      <form id="createIssueForm" class="issue-form">
+        <label>Title<input type="text" id="issueTitle" required></label>
+        <label>Description<textarea id="issueDescription" rows="5" required></textarea></label>
+        <label>Assign to<select id="issueAssignedTo"></select></label>
+        <div class="modal-actions"><button type="button" id="cancelModalBtn" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Launch</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/factory.js"></script>
+</body>
+</html>

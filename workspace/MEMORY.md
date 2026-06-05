@@ -29,7 +29,7 @@ Procedures and reference data belong in skills or repo docs (not here).
 - Redstone Laboratories LLC is DBA Lidi Solutions (Aaron and Taylor's business).
 - Jerry owns broad business continuity context for Redstone/Lidi and should retain durable high-level awareness of Aaron's life context for correct orchestration.
 - Linux gateway is the control plane (Ubuntu, RTX 3060). All non-iOS work is local.
-- Task Manager: http://127.0.0.1:8000 (FastAPI + SQLAlchemy + SQLite at `~/repos/Task-Manager/`)
+- Task Manager: http://127.0.0.1:8000 (FastAPI + SQLAlchemy + SQLite at `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`, container-owned by Dwight)
 - Before resuming a TM issue or branching in EWAG, run `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
 - iOS work: see `EWAG_INFRA.md` (single source of truth for Mac node, ios-agent, Drive folders, scripts, test catalog)
 

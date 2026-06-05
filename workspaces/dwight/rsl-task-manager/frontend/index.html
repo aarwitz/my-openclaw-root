@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager - Login</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon-180x180.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/static/apple-touch-icon-167x167.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/static/apple-touch-icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/static/apple-touch-icon-120x120.png">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/LatestAppIcon.png">
+    <meta name="apple-mobile-web-app-title" content="Task Manager">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>Task Manager</h1>
+            <p class="subtitle">Simple project management for small teams</p>
+            <form id="loginForm">
+                <input 
+                    type="text" 
+                    id="username" 
+                    placeholder="Enter your username" 
+                    required 
+                    autocomplete="username"
+                    list="approvedUsers"
+                >
+                <datalist id="approvedUsers">
+                    <option value="Aaron"></option>
+                    <option value="Taylor"></option>
+                    <option value="Jerry"></option>
+                    <option value="Dwight"></option>
+                    <option value="Resi"></option>
+                    <option value="Druck"></option>
+                </datalist>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const allowedUsers = ['Aaron', 'Taylor', 'Jerry', 'Dwight', 'Resi', 'Druck'];
+            
+            if (!username) {
+                alert('Please enter a username');
+                return;
+            }
+
+            if (!allowedUsers.includes(username)) {
+                alert('Allowed Task Manager users are Aaron, Taylor, Jerry, Dwight, Resi, and Druck.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/users/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username })
+                });
+
+                if (response.ok) {
+                    const user = await response.json();
+                    localStorage.setItem('username', user.username);
+                    
+                    // Legacy app continues to open its original workflow.
+                    const sprintResponse = await fetch('/api/sprints/active');
+                    if (sprintResponse.ok) {
+                        window.location.href = '/static/sprint.html';
+                    } else {
+                        window.location.href = '/static/backlog.html';
+                    }
+                } else {
+                    alert('Login failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred. Please try again.');
+            }
+        });
+    </script>
+</body>
+</html>

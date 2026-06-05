@@ -51,6 +51,12 @@ Use the shared config in `mcp-client.all-agents.json` to expose Task Manager MCP
 - `task-manager-dwight` (`TM_DEFAULT_ACTOR=Dwight`)
 - `task-manager-druck` (`TM_DEFAULT_ACTOR=Druck`)
 
+Write policy:
+
+- `task-manager-dwight` is the only writable profile (`TM_READ_ONLY=false`)
+- all other profiles are view-only (`TM_READ_ONLY=true`)
+- write attempts from read-only profiles fail fast with an explicit error
+
 File:
 
 ```bash
@@ -64,12 +70,14 @@ Environment variables:
 - `TM_BASE_URL` (default: `http://127.0.0.1:8000`)
 - `TM_TIMEOUT_SECONDS` (default: `15`)
 - `TM_DEFAULT_ACTOR` (default: `Dwight`)
+- `TM_READ_ONLY` (`true|false`, default `false`)
+- `TM_WRITE_ACTOR` (default `Dwight`, used in read-only error guidance)
 
 ## Maintenance workflow (when Task Manager changes)
 
 Treat MCP as a compatibility layer with explicit checks.
 
-1. Make Task Manager backend change in `~/repos/Task-Manager/`.
+1. Make Task Manager backend change in `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`.
 2. Run contract check:
 
 ```bash

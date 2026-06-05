@@ -6,6 +6,10 @@ This guide complements `OPERATOR_GUIDE.md`.
 - Use `OPERATOR_GUIDE.md` for command reference and workflow order.
 - Use this guide for how to interact with Druck efficiently day to day.
 
+Role split:
+- Druck (`trader`) is the Telegram chat front door, orchestrator, and trading-infrastructure developer.
+- `executor` is the deterministic execution lane and the only Alpaca submit/cancel actor.
+
 ## 0. Fast start
 
 If you want the shortest path to useful output, send these in order.
@@ -155,24 +159,48 @@ required_outputs:
 ## 4. Notifications and passive monitoring
 
 What is already built in:
-- scheduled trading passes at `09:00`, `11:00`, `13:30`, and `15:30` ET
+- scheduled trading passes at `09:00`, `09:30`, `11:00`, `13:30`, and `15:30` ET
 - event-driven handling on Alpaca order and position events
 - weekly audit summary into the trader Telegram thread
 - material updates are posted when there is something worth reporting
+- execution timing now defaults to resting broker-native orders for approved price-sensitive setups, so the broker can act when price hits the band without waiting for manual observation
+
+Whole-pipeline behavior:
+- "Run the whole pipeline" means researcher -> quant -> critic -> trader -> executor in that order.
+- If a stage blocks, Druck should report the blocked stage and concrete failure reason.
+- If execution is blocked but upstream analysis can still run, Druck should complete upstream stages and return a no-submit posture.
 
 What is not currently built as a separate surface:
 - no dedicated subscribe/unsubscribe notification settings
 - no separate notification command contract documented beyond the trading thread itself
+- no standalone streaming price-alert daemon; the preferred substitute is staged orders plus event-driven broker updates
 
 Practical implication:
 - the trading thread is the notification surface
 - if you want tighter reporting, ask Druck for an explicit standing reporting rule in that thread
+- if a thesis is already approved and the desired action is price-sensitive, ask Druck to stage the order plan rather than just watch the ticker
+
+Minimum actionable quote context:
+- quote timestamp in UTC and ET,
+- session label (premarket/regular/after-hours),
+- move vs prior close,
+- move vs post-event reference,
+- hold/extend/fade reaction state.
+
+If these fields are missing, setup status should remain watch/blocked-data.
 
 Example:
 
 ```text
 @druck_rsl_bot
 Standing rule: whenever a trade intent changes state, an order is submitted, filled, canceled, or blocked, or a system pause opens/closes, post a concise update here with ticker, action, reason, and next step.
+```
+
+Execution-timing request pattern:
+
+```text
+@druck_rsl_bot
+For any approved setup with a defined buy-under or breakout-confirmation level, stage the preferred resting order instead of just monitoring manually. Notify me only on submit, fill, cancel, reject, or material thesis/risk change.
 ```
 
 For a lighter cadence:
@@ -213,7 +241,7 @@ Good recurring human loop:
 Use Druck when you want:
 - current trading state
 - hypothesis, intent, position, or regime details
-- execution, trim, exit, or approval actions
+- execution, trim, exit, or approval requests (Druck relays execution to executor)
 - direct portfolio monitoring
 
 Use Dwight when you want:
@@ -396,6 +424,7 @@ Avoid treating restart as the first fix. Normal operating order is:
 ## 11. Bottom line
 
 - Treat Druck as the trading front door, not as a vague chat bot.
+- Treat executor as the deterministic broker lane behind Druck.
 - Use `/summary` first, then drill down.
 - Prefer Ask Druck topic (`topic_id 641`) as the canonical summary surface; DM and topic responses can differ in detail and consistency.
 - Ask for explicit standing notification rules if you want a tighter update cadence.

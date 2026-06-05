@@ -68,6 +68,7 @@ npm/
 canvas/
 plugins/
 qqbot/
+workspaces/**/.tm-restore/
 
 # Generic secret and transient patterns.
 **/__pycache__/
