@@ -115,7 +115,16 @@ When in doubt, assign and add a comment explaining why.
 
 ## Hard Invariants
 
-- Task Manager at `http://127.0.0.1:8000` (source: `~/repos/Task-Manager/`)
+- Task Manager at `http://127.0.0.1:8000` is hosted from Dwight's containerized runtime at `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`
+- Task Manager source must not be developed or run from outside Dwight's container runtime
+- Non-Dwight agents are view-only for Task Manager state; only Dwight performs mutations and maintenance
 - Do not push directly to `main`
 - Do not manipulate the TM database directly without explicit Aaron approval
 - GitHub bot: aaronclawrsl-bot
+
+## Priority-queue rail
+
+- Dwight owns the queue-to-TM rail in `scripts/poll_priority_queue.py`.
+- Eligible rows are latest `open` or `claimed` rows whose `task_id` is still empty.
+- Assignee resolution is deterministic: explicit `assigned_to`/`lane` wins; otherwise row text falls back through keyword rules and then category defaults.
+- When Dwight creates or reconciles an issue, he must add a short comment with the next concrete action and append a queue row carrying the resulting `task_id`.

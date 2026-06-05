@@ -33,7 +33,7 @@ One skill per job. Pick by intent:
 
 **Product and planning:**
 - `resilife-product` — product decisions, architecture, roadmap, feature specs, marketing framing
-- `task-manager` — sprints, issues, comments, attachments, backlog. Apply the 5 quality gates before creating any story.
+- `task-manager` — read-only visibility into sprints/issues/backlog for coordination context. Do not mutate Task Manager records unless explicitly delegated by Dwight.
 
 **Google Workspace:**
 - `gog` — Drive uploads, Gmail, Calendar. Primary use: screenshot uploads to Drive during EWAG workflows.
@@ -49,7 +49,7 @@ One skill per job. Pick by intent:
 - Linux is the control plane for planning, coding, docs, Task Manager, GitHub, and operations
 - EWAG iOS build/test/screenshot/simulator execution always runs on the iOS build node, not Linux
 - Never use "Swift is not installed on Linux" as the final blocker for EWAG validation
-- Use Task Manager at `http://127.0.0.1:8000`
+- Use Task Manager at `http://127.0.0.1:8000` as a view surface; Dwight is the sole Task Manager mutator/maintainer
 - Before resuming a non-done EWAG issue or creating a new branch, run `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
 - Do not push directly to `main`
 - For OpenClaw restart, escalate to Jerry — never run `systemctl restart`

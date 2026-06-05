@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""
+Rewrite all enabled overseer-* cron job payloads with the phase-4
+"always drive the pipeline" prompt, so overseer can never gracefully
+do nothing on an empty/stale DB.
+
+Two prompt variants:
+  - intraday: weekday passes (pre-market, intraday, EOD wrap)
+  - weekly:   Sunday strategic pass
+
+Run as the host user; mutates /home/aaron/.openclaw/cron/jobs.json in place.
+The gateway hot-reloads cron on file change.
+"""
+from __future__ import annotations
+import json
+import os
+import shutil
+import sys
+import time
+from pathlib import Path
+
+JOBS_PATH = Path("/home/aaron/.openclaw/cron/jobs.json")
+
+INTRADAY_PROMPT = (
+    "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this "
+    "pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You "
+    "are NOT allowed to conclude 'no work needed' unless every check in step 4 "
+    "has fired and produced concrete output.\n\n"
+    "Step 1 (deterministic core, mandatory):\n"
+    "  exec `~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the "
+    "stdout JSON. This runs classify_regime -> score_hypotheses -> "
+    "gate_evaluator -> execute_intent -> reconcile -> snapshot -> "
+    "pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, "
+    "counts.orders, regime.current, pipeline_health.color from the snapshot.\n\n"
+    "Step 2 (inventory the canonical DB):\n"
+    "  Run `python3 ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` "
+    "to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, "
+    "last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, "
+    "orders_open, last_archivist_pass_age_min. If that script doesn't exist "
+    "yet, run an equivalent inline Python query against "
+    "`~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\n"
+    "Step 3 (MANDATORY work, in strict order — execute each that applies, "
+    "do NOT skip any):\n"
+    "  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: "
+    "spawn `researcher` with the prompt 'Source 5 fresh, distinct, "
+    "primary-source-grounded equity hypotheses (US large/mid-cap; mix of "
+    "catalysts: earnings, guidance revisions, macro print, sector rotation, "
+    "regulatory). For each, INSERT into hypotheses with state=raw, created_by="
+    "researcher, rationale_concise<=500 chars. Add at least one "
+    "hypothesis_evidence row with provenance for each. Return the inserted "
+    "hypothesis_ids in your final message.' Then `wait` for completion.\n"
+    "  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: "
+    "spawn `quant` with prompt 'Score every hypothesis in state=raw and "
+    "advance it to state=scored. Refresh the regime row if last classify is "
+    ">120min old. Return scored ids and quant_scores.' Then `wait`.\n"
+    "  3c. If any hypotheses in state=scored with quant_score>=60: spawn "
+    "`critic` with prompt 'Stress-test every scored hypothesis with "
+    "quant_score>=60. Record critic_reviews. Move passing ones to state=ready, "
+    "failing ones to state=challenged with rationale.' Then `wait`.\n"
+    "  3d. If any hypotheses in state=ready: spawn `trader` with prompt "
+    "'Author a trade_intent for each ready hypothesis. One intent per "
+    "hypothesis. Use Alpaca paper account; respect cash + position limits. "
+    "Return intent_ids and target tickers.' Then `wait`.\n"
+    "  3e. If any trade_intents exist with status=pending and gates green: "
+    "spawn `executor` with prompt 'Submit pending intents whose gates are "
+    "green to Alpaca paper. Reconcile fills. Return order_ids and fill "
+    "status.' Then `wait`.\n"
+    "  3f. If any hypotheses were closed/exited this pass OR last_archivist_"
+    "pass_age_min > 1440: spawn `archivist` with prompt 'Resolve any closed "
+    "hypotheses; write archivist_grade and lessons_learned. Update regime_"
+    "rules if a pattern is statistically meaningful.' Fire-and-forget (no "
+    "wait required).\n\n"
+    "Step 4 (re-run the deterministic core a second time) to capture any new "
+    "state, then re-read snapshot counts.\n\n"
+    "Step 5 (Telegram narration on account `druck`, target topic 641 in group "
+    "-1003237263898 OR DM 6043080629 — the cron delivery handles routing). "
+    "Send ONE message, no markdown tables, no fenced code, <=4 short "
+    "paragraphs in this exact contract:\n"
+    "  - Line 1: regime + freshness (e.g. 'Regime: NEUTRAL set 14m ago.').\n"
+    "  - Line 2: what moved this pass — name the agent and the concrete "
+    "artifact (e.g. 'Researcher sourced 5 hypotheses: NVDA, AMD, ASML, MU, "
+    "TSM. Quant scored 3, critic cleared 1 (NVDA, 78).').\n"
+    "  - Line 3: any new intents/orders/fills with ids and tickers, or "
+    "explicitly 'No new orders this pass.' if zero.\n"
+    "  - Line 4: ONE concrete next action with a time anchor (e.g. "
+    "'Next: 09:30 ET pass will gate NVDA intent on open print.').\n"
+    "  Forbidden phrases: 'no agents were needed', 'no work to do', 'system "
+    "is idle'. If the DB really was caught up, your line 2 must instead name "
+    "the agent that produced the most recent artifact and how long ago.\n\n"
+    "Step 6 (priority queue): if you observed any issue worth a follow-up "
+    "(missing skill, broker error, stale data feed, drift), append a row via "
+    "`python3 ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by "
+    "overseer --category <cat> --title <t> --details <d> --priority <1-5>`."
+)
+
+WEEKLY_PROMPT = (
+    "[OVERSEER-WEEKLY-V2] You are AutoTrade running the Sunday strategic "
+    "review. This pass is about resetting the system for the upcoming "
+    "trading week.\n\n"
+    "Step 1: exec `~/.openclaw/scripts/trader-pass-deterministic.sh` and "
+    "capture snapshot JSON.\n\n"
+    "Step 2: spawn `archivist` with prompt 'Run the weekly retrospective. "
+    "Resolve any stragglers. Compute hit-rate, average grade, and slippage "
+    "for the past 5 trading days. Update regime_rules if a stat-sig pattern "
+    "emerged. Return the retrospective as a 6-line summary.' Then `wait`.\n\n"
+    "Step 3: spawn `researcher` with prompt 'Source 10 fresh hypotheses for "
+    "the upcoming week. Cover at least 3 distinct catalyst types and at "
+    "least 6 tickers. INSERT into hypotheses with state=raw, "
+    "created_by=researcher. Each must cite a primary source in "
+    "hypothesis_evidence.' Then `wait`.\n\n"
+    "Step 4: spawn `quant` with prompt 'Score all raw hypotheses; refresh "
+    "regime; return scored ids.' Then `wait`.\n\n"
+    "Step 5: spawn `developer` with prompt 'Audit the deterministic layer: "
+    "any stale data feeds, missing skills, schema drift, or rule-engine "
+    "mismatches. Open priority-queue rows for each. Return a one-line "
+    "verdict per subsystem.' Then `wait`.\n\n"
+    "Step 6: re-run deterministic core; re-read snapshot.\n\n"
+    "Step 7: Telegram narration on `druck` (cron handles routing). One "
+    "message, 5-7 short lines, in this contract:\n"
+    "  - Headline: week-just-ended hit-rate + grade + S&P comparison.\n"
+    "  - Lessons learned (one line) from archivist.\n"
+    "  - New hypotheses sourced (count + top 3 tickers).\n"
+    "  - Regime call for the upcoming week (set by quant).\n"
+    "  - Developer's verdict on system health.\n"
+    "  - One concrete focus area for the week.\n"
+    "  Forbidden: 'no work needed', empty filler.\n\n"
+    "Step 8: append any new priority-queue rows via "
+    "`python3 ~/.openclaw/workspaces/overseer/scripts/pq_append.py`."
+)
+
+
+def main() -> int:
+    if not JOBS_PATH.exists():
+        print(f"ERROR: {JOBS_PATH} not found", file=sys.stderr)
+        return 2
+
+    # Backup with timestamp
+    ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    bk = JOBS_PATH.with_suffix(f".json.bak.{ts}")
+    shutil.copy2(JOBS_PATH, bk)
+    print(f"backup: {bk}")
+
+    data = json.loads(JOBS_PATH.read_text())
+    jobs = data.get("jobs", [])
+
+    changed = 0
+    for j in jobs:
+        if j.get("agentId") != "overseer":
+            continue
+        name = j.get("name", "")
+        is_weekly = "sunday" in name.lower() or "weekly" in name.lower() or (
+            j.get("schedule", {}).get("expr", "").endswith("* * 0")
+        )
+        prompt = WEEKLY_PROMPT if is_weekly else INTRADAY_PROMPT
+        payload = j.setdefault("payload", {})
+        payload["kind"] = "agentTurn"
+        payload["message"] = prompt
+        payload["timeoutSeconds"] = 1800  # 30 min cap for the multi-spawn passes
+        changed += 1
+        print(f"updated: {name} (weekly={is_weekly}, timeout=1800s)")
+
+    JOBS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"wrote {changed} overseer job(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

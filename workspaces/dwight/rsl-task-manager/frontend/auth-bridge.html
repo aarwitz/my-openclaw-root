@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Opening Task Manager…</title>
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#0f172a;color:#e5eefc;padding:24px}
+    .card{max-width:420px;background:#17233a;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:24px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Opening Task Manager…</h1>
+    <p id="status">Setting login and redirecting.</p>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const user = params.get('user');
+    const next = params.get('next') || '/static/factory.html';
+    if (user) localStorage.setItem('username', user);
+    document.getElementById('status').textContent = user ? `Logged in as ${user}. Redirecting…` : 'Redirecting…';
+    window.location.replace(next);
+  </script>
+</body>
+</html>

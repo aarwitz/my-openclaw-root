@@ -41,7 +41,7 @@ Tranche eligibility is computed by quant on signal or schedule and emitted as a 
 
 - `falsifier_signals` are written by researcher whenever a monitored condition's status changes.
 - If any falsifier transitions to `broken`, quant must transition the hypothesis to `dormant` within one checkpoint and emit an `exit` or `trim` intent per policy.
-- A `dormant` hypothesis cannot receive new adds; trader may still exit.
+- A `dormant` hypothesis cannot receive new adds; executor may still exit.
 
 ## 5. Critic review semantics
 
@@ -53,12 +53,12 @@ Tranche eligibility is computed by quant on signal or schedule and emitted as a 
 ## 6. Options-specific execution rules
 
 - LEAPS: stop derived from premium; close on either underlying stop or 50% premium loss, whichever fires first.
-- Shorter-dated options: orders must include an `event_date`; if the event passes without thesis confirmation, trader closes the position on the next checkpoint regardless of P&L.
-- Assignment risk: trader must detect early assignment from Alpaca order/position webhooks (or daily reconciliation) and emit a corrective `trade_intent` if it materially changes exposure.
+- Shorter-dated options: orders must include an `event_date`; if the event passes without thesis confirmation, executor closes the position on the next checkpoint regardless of P&L.
+- Assignment risk: executor must detect early assignment from Alpaca order/position webhooks (or daily reconciliation) and emit a corrective `trade_intent` if it materially changes exposure.
 
 ## 7. Reconciliation
 
-- Trader reconciles Alpaca account, orders, and positions against shared state every checkpoint and on every order event.
+- Executor reconciles Alpaca account, orders, and positions against shared state every checkpoint and on every order event.
 - A divergence (e.g., an `order` Alpaca says is filled but no `position` tranche recorded) creates a `reconciliation_run` record and pauses new opens for the affected hypothesis until resolved.
 - On broker-wide anomalies or unresolved reconciliation divergence, system auto-enters degraded mode via `system_pauses.scope = exits_trims_only` until cleared.
 - End-of-day reconciliation writes a daily account snapshot used by the archivist for attribution.
@@ -68,7 +68,7 @@ Tranche eligibility is computed by quant on signal or schedule and emitted as a 
 Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`, `shorts_only`, `exits_trims_only`, `full_system`.
 
 - Each pause record lives in `system_pauses` with scope, reason, start, optional end, and source actor.
-- Trader evaluates all active pauses against each candidate atomic action before submission.
+- Executor evaluates all active pauses against each candidate atomic action before submission.
 - Rotations decompose into `exit` then `open` and are blocked if either atomic component is blocked.
 - Drawdown circuit-breaker: at portfolio drawdown threshold events, system writes a mandatory pause record automatically (no manual step).
 
@@ -82,7 +82,7 @@ Pause scopes (from `01_OPERATING_AUTHORITY.md`): `new_entries_only`, `adds_only`
 
 A hypothesis resolves when one of:
 
-- All positions closed and Trader marks the thesis lifecycle complete.
+- All positions closed and executor marks the thesis lifecycle complete.
 - Time horizon expires with no open exposure.
 - Aaron explicitly resolves it via Telegram override (`/exit` with rationale).
 

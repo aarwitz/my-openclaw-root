@@ -43,7 +43,16 @@ Critic:
 
 Trader:
 
-- `09:00` pre-market decision pass.
+- `09:00` pre-market orchestration and operator update pass.
+- `09:30` market-open orchestration update pass.
+- `11:00` confirmation / invalidation operator update pass.
+- `13:30` replacement / rotation operator update pass.
+- `15:30` close-risk operator update pass.
+
+Executor:
+
+- `09:00` pre-market execution decision pass.
+- `09:30` market-open reaction pass.
 - `11:00` confirmation / invalidation pass.
 - `13:30` replacement / rotation pass.
 - `15:30` close-risk pass.
@@ -55,6 +64,35 @@ Archivist:
 - Weekly Sunday `09:00` for portfolio-level pattern extraction.
 
 These are baseline cadences. Each agent may run additional event-driven jobs.
+
+## 3.1 Executor execution timing policy
+
+Executor timing behavior must follow `reference/execution_timing_framework.md`.
+
+Operational defaults:
+- Prefer resting broker-native limit or protective orders for already-approved price-sensitive setups instead of waiting for another checkpoint.
+- Use scheduled passes to prepare, reassess, resize, or cancel execution plans rather than to justify reactive market chasing.
+- Use Alpaca order and position events as the primary notification path after an order is staged.
+- Cancel stale resting buy orders in the `15:30` ET close-risk pass unless the thesis explicitly supports overnight exposure at that level.
+
+## 3.2 Whole-pipeline invocation policy
+
+When operator intent is "run the whole pipeline" (or equivalent), trader must run the full sequence, in order:
+
+1. researcher refresh/create hypotheses from fresh source pulls,
+2. quant score + regime + expression updates,
+3. critic challenge/review updates,
+4. trader orchestration readiness and execution packet generation,
+5. executor order staging/submit decision.
+
+Fail-closed behavior:
+- Trader may not silently collapse whole-pipeline requests into trader-only synthesis.
+- Any blocked stage must be reported with stage id and concrete runtime/tool error.
+- If execution is blocked but research/scoring/review can continue, continue those stages and report `no-submit` posture with executor blocked reason.
+
+Execution-quality requirement:
+- Any setup labeled actionable must include quote timestamp (`UTC` and `US/Eastern`), session label (`premarket`, `regular`, or `after-hours`), `% vs prior close`, `% vs post-event reference`, and `hold/extend/fade` reaction state.
+- Missing quote-context fields force `watch_only` or `blocked_data` classification.
 
 ## 4. OpenClaw runtime surfaces
 
@@ -68,7 +106,7 @@ These are baseline cadences. Each agent may run additional event-driven jobs.
 - Every state transition writes an `audits` row.
 - Every Alpaca order writes an `orders` row and an `audits` row referencing it.
 - Long-form reasoning goes to per-agent journals under `~/.openclaw/state/journals/<agent>/YYYY-MM-DD.md` and is referenced by `audits.journal_ref`.
-- Weekly audit job (Sunday `08:00`) emits a portfolio summary into the trader's Telegram thread.
+- Weekly audit job (Sunday `08:00`) emits a portfolio summary into Druck's Telegram thread.
 
 ## 6. Build phases and gates
 
@@ -91,12 +129,12 @@ Phase 3 — Agents:
 9. Researcher background job populates and updates hypotheses.
 10. Quant scoring, deterministic regime classification, expression candidates, and sizing recommendations.
 11. Critic challenges and reviews; calibrate on anonymized + post-cutoff validation cases.
-12. Trader executes only after critic reviews, data-freshness gates, explainability thresholds, and reconciliation checks pass.
+12. Executor executes only after critic reviews, data-freshness gates, explainability thresholds, and reconciliation checks pass.
 13. Archivist runs daily resolution sweep and weekly pattern extraction with external mechanism checks.
 
 Phase 4 — Calibration:
 
-14. Two-week dry run: trader emits intents but does not submit to Alpaca.
+14. Two-week dry run: executor emits intents but does not submit to Alpaca.
 15. Grade intents against actual market movement and calibration quality (confidence vs realized outcomes).
 
 Phase 5 — Live paper (90-day operational validation):
@@ -144,8 +182,9 @@ Regime rules ingestion protocol:
 ## 8. Pre-flight checklist for live paper
 
 - Telegram routing: account `druck` → agent `trader` (persona displayed to Aaron: Druck). No other Telegram bindings for trading agents.
+- Executor (`executor`) is the only broker execution lane; trader never submits/cancels orders directly.
 - Legacy `druck` agent-id collision resolved (legacy id removed or renamed) to prevent routing/operator ambiguity.
-- `tools.agentToAgent.allow` includes `researcher`, `quant`, `critic`, `archivist`, `trader`.
+- `tools.agentToAgent.allow` includes `researcher`, `quant`, `critic`, `archivist`, `trader`, `executor`.
 - Cron jobs enabled for the schedules in section 3.
 - Daily SQLite backup configured.
 - `system_pauses` table empty (no leftover pauses from testing).

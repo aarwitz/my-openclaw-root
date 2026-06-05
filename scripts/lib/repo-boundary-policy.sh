@@ -6,7 +6,7 @@ set -euo pipefail
 
 readonly DEFAULT_EWAG_ALLOWED_REPOS="/home/aaron/repos/lidi-task-manager,/home/aaron/repos/EWAG-dev-iosApp"
 readonly DEFAULT_EWAG_OWNER_AGENTS=""
-readonly DEFAULT_RSL_OWNER_AGENTS="main,jerry,dwight,druck,resi"
+readonly DEFAULT_RSL_OWNER_AGENTS="main,jerry,dwight,druck,resi,researcher,quant,critic,trader,executor,archivist,developer,overseer"
 readonly DEFAULT_EWAG_CONTAINER_REPO_MAP="/home/aaron/repos/lidi-task-manager=/work/lidi-task-manager,/home/aaron/repos/EWAG-dev-iosApp=/work/ewagios-dev"
 
 split_csv_to_lines() {

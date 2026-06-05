@@ -106,7 +106,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 | `id` | TEXT PK | |
 | `hypothesis_id` | TEXT FK | required |
 | `expression_candidate_id` | TEXT FK | required |
-| `created_by` | TEXT | `quant` or `trader` (for human-initiated rotations) |
+| `created_by` | TEXT | `quant`, `trader` (human-facing orchestration), or `executor` (execution lane) |
 | `created_at` | TEXT | |
 | `action` | TEXT | `open` / `add` / `trim` / `exit` / `rotate` |
 | `tranche_type` | TEXT | nullable for non-add actions |

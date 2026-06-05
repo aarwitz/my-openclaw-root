@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Crew Quest Mini App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/miniapp.css?v=4" />
+</head>
+<body>
+  <div class="game-screen">
+    <header class="hud">
+      <div class="hud-left">
+        <div class="tiny">WORLD 1 · DAILY OPS</div>
+        <h1>CREW QUEST MAP</h1>
+      </div>
+      <div class="hud-right" id="hudRight">Jerry dispatches today's quests</div>
+    </header>
+
+    <main class="world">
+      <div id="detailOverlay" class="overlay hidden">
+        <div class="overlay-backdrop" data-close="true"></div>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+          <button class="close-button" id="closeModal" aria-label="Close">✕</button>
+          <div class="modal-icon" id="modalIcon">📌</div>
+          <div class="modal-body">
+            <div class="tiny modal-tiny" id="modalEyebrow">DETAIL</div>
+            <h2 id="modalTitle">Node</h2>
+            <p id="modalSummary" class="modal-summary">Summary</p>
+            <p id="modalDescription" class="modal-description">Description</p>
+            <div class="modal-meta" id="modalMeta"></div>
+            <div class="modal-actions">
+              <a id="modalPrimaryLink" class="task-link" href="#" target="_blank" rel="noreferrer">Open task ↗</a>
+              <a id="modalSecondaryLink" class="task-link secondary hidden" href="#" target="_blank" rel="noreferrer">Open manager ↗</a>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="cloud c1"></div>
+      <div class="cloud c2"></div>
+      <div class="cloud c3"></div>
+      <div class="mountain m1"></div>
+      <div class="mountain m2"></div>
+      <div class="forest f1"></div>
+      <div class="forest f2"></div>
+      <div class="pond"></div>
+      <div class="spark s1"></div>
+      <div class="spark s2"></div>
+
+      <svg class="roads" viewBox="0 0 1000 1400" preserveAspectRatio="none">
+        <path class="road" d="M500 900 C 500 720, 500 480, 500 250"/>
+        <path class="road" d="M500 900 C 430 760, 370 620, 240 470"/>
+        <path class="road" d="M500 900 C 560 760, 640 620, 770 470"/>
+      </svg>
+
+      <svg class="flows" viewBox="0 0 1000 1400" preserveAspectRatio="none">
+        <path class="flow blue" d="M500 900 C 430 760, 370 620, 240 470"/>
+        <path class="flow pink" d="M500 900 C 560 760, 640 620, 770 470"/>
+        <path class="flow gold" d="M500 900 C 500 720, 500 480, 500 250"/>
+      </svg>
+
+      <div class="packet blue p1"></div>
+      <div class="packet blue p2"></div>
+      <div class="packet pink p3"></div>
+      <div class="packet pink p4"></div>
+      <div class="packet gold p5"></div>
+      <div class="packet gold p6"></div>
+
+      <section class="location tappable meetings" data-node="meetings" style="top:120px; left:355px;">
+        <div class="tile island yellow">
+          <div class="tower">📅</div>
+          <div class="mini-flag"></div>
+        </div>
+        <div class="map-label top" id="meetingsLabel">Meetings · loading…</div>
+      </section>
+
+      <section class="location tappable Aaron" data-node="Aaron" style="top:360px; left:70px;">
+        <div class="tile island blue">
+          <div class="house"></div>
+          <div class="avatar-head">🧢</div>
+        </div>
+        <div class="map-label left" id="AaronLabel">Aaron · loading…</div>
+      </section>
+
+      <section class="location tappable Taylor" data-node="Taylor" style="top:360px; left:660px;">
+        <div class="tile island pink">
+          <div class="castle"></div>
+          <div class="avatar-head">💁‍♀️</div>
+        </div>
+        <div class="map-label right" id="TaylorLabel">Taylor · loading…</div>
+      </section>
+
+      <section class="location tappable Jerry" data-node="Jerry" style="top:770px; left:310px;">
+        <div class="tile island green hub">
+          <div class="factory"></div>
+          <div class="avatar-head bot">🤖</div>
+          <div class="radar"></div>
+        </div>
+        <div class="map-label bottom big" id="JerryLabel">Jerry HQ · loading…</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/static/miniapp.js?v=4"></script>
+</body>
+</html>

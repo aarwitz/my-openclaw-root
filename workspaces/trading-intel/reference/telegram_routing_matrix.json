@@ -32,7 +32,7 @@
       "persona": "Druck",
       "botHandle": "@druck_rsl_bot",
       "surface": "dm",
-      "description": "Trader persona direct execution"
+      "description": "Druck chat front door and orchestration"
     }
   ],
   "groupRoutes": [

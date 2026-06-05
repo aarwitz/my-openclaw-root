@@ -19,6 +19,8 @@ from mcp.server.fastmcp import FastMCP
 TM_BASE_URL = os.environ.get("TM_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 TM_TIMEOUT_SECONDS = float(os.environ.get("TM_TIMEOUT_SECONDS", "15"))
 TM_DEFAULT_ACTOR = os.environ.get("TM_DEFAULT_ACTOR", "Dwight")
+TM_READ_ONLY = os.environ.get("TM_READ_ONLY", "false").lower() in {"1", "true", "yes", "on"}
+TM_WRITE_ACTOR = os.environ.get("TM_WRITE_ACTOR", "Dwight")
 
 mcp = FastMCP("task-manager-mcp")
 
@@ -67,6 +69,15 @@ def _as_issue_id(task_id: str | int) -> int:
     if isinstance(task_id, str) and task_id.startswith("issue-"):
         return int(task_id.split("-", 1)[1])
     return int(task_id)
+
+
+def _require_write_access(tool_name: str) -> None:
+    if not TM_READ_ONLY:
+        return
+    raise RuntimeError(
+        f"Task Manager MCP is read-only for actor={TM_DEFAULT_ACTOR}; write denied for tool={tool_name}. "
+        f"Use actor={TM_WRITE_ACTOR} profile for mutations."
+    )
 
 
 @mcp.tool()
@@ -134,6 +145,7 @@ def issue_create(
     sprint_id: int | None = None,
 ) -> dict[str, Any]:
     """Create an issue."""
+    _require_write_access("issue_create")
     payload = _compact_payload(
         {
             "title": title,
@@ -157,6 +169,7 @@ def issue_update(
     branch: str | None = None,
 ) -> dict[str, Any]:
     """Patch mutable issue fields."""
+    _require_write_access("issue_update")
     payload = _compact_payload(
         {
             "title": title,
@@ -174,6 +187,7 @@ def issue_update(
 @mcp.tool()
 def issue_assign_to_sprint(issue_id: int, sprint_id: int) -> dict[str, Any]:
     """Assign issue to sprint."""
+    _require_write_access("issue_assign_to_sprint")
     return _request_json(
         f"/api/issues/{issue_id}/assign-to-sprint",
         method="POST",
@@ -184,6 +198,7 @@ def issue_assign_to_sprint(issue_id: int, sprint_id: int) -> dict[str, Any]:
 @mcp.tool()
 def issue_add_comment(issue_id: int, content: str, username: str = TM_DEFAULT_ACTOR) -> dict[str, Any]:
     """Add a comment to an issue."""
+    _require_write_access("issue_add_comment")
     return _request_json(
         f"/api/issues/{issue_id}/comments",
         method="POST",
@@ -215,6 +230,7 @@ def task_assign(
 
     Returns both issue_id and task_id (issue-<id>) for orchestration flows.
     """
+    _require_write_access("task_assign")
     context_lines = "\n".join(f"- {item}" for item in (context or []))
     description = (
         "Agent handoff request.\n\n"
@@ -249,6 +265,7 @@ def task_complete(
     completed_by: str = TM_DEFAULT_ACTOR,
 ) -> dict[str, Any]:
     """Mark a task issue done and add completion evidence."""
+    _require_write_access("task_complete")
     issue_id = _as_issue_id(task_id)
     updated = issue_update(issue_id=issue_id, status="done")
 
@@ -271,6 +288,7 @@ def task_complete(
 @mcp.tool()
 def task_heartbeat(task_id: str, note: str | None = None, username: str = TM_DEFAULT_ACTOR) -> dict[str, Any]:
     """Post a lightweight heartbeat comment for long-running tasks."""
+    _require_write_access("task_heartbeat")
     issue_id = _as_issue_id(task_id)
     now = datetime.now(timezone.utc).isoformat()
     message = f"Heartbeat at {now}"

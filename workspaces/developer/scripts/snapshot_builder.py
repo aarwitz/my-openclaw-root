@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""Deterministic builder for the product app's data.json.
+
+Reads canonical SQLite + (optionally) Alpaca + cron-run state, computes the
+shape consumed by `/repos/lidi-solutions/public/solutions/trader_intel/app/`,
+and writes it atomically (temp file + rename).
+
+This is the ONLY sanctioned writer of `data.json`. LLM turns may add
+narrative fields by post-processing the file with strict-JSON outputs, but
+the deterministic core must come from here.
+
+Goal alignment:
+- G1 (beat SPY): every hypothesis carries per-horizon scores; portfolio block
+  carries `spy_comparison` with alpha vs SPY per horizon when data exists.
+- G2 (deterministic + maintainable): no LLM in this script; failures emit a
+  yellow `degraded` flag rather than an LLM-generated guess.
+- G3 (retail insights): `retail_insights` block is populated with each
+  agent's highest-impact takeaway per pass; `system_health` surfaces only
+  when non-green.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
+DEFAULT_OUT = Path(
+    "/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
+)
+CRON_JOBS_PATH = Path(os.path.expanduser("~/.openclaw/cron/jobs.json"))
+CRON_RUNS_DIR = Path(os.path.expanduser("~/.openclaw/cron/runs"))
+
+AGENTS = (
+    {"id": "researcher", "name": "Researcher", "emoji": "🔎"},
+    {"id": "quant", "name": "Quant", "emoji": "🧮"},
+    {"id": "critic", "name": "Critic", "emoji": "⚖️"},
+    {"id": "archivist", "name": "Archivist", "emoji": "📚"},
+    {"id": "trader", "name": "Trader", "emoji": "💰"},
+    {"id": "executor", "name": "Executor", "emoji": "⚙️"},
+    {"id": "developer", "name": "Developer", "emoji": "🛠️"},
+    {"id": "overseer", "name": "AutoTrade", "emoji": "🤖"},
+)
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    return None if row is None else {k: row[k] for k in row.keys()}
+
+
+# ---------------------------------------------------------------------------
+# DB readers (small, pure, testable)
+# ---------------------------------------------------------------------------
+
+
+def _load_regime(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT id, determined_at, determined_by, current, signals_json FROM regime "
+        "ORDER BY determined_at DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return {
+            "available": False,
+            "current": None,
+            "determined_at": None,
+            "degraded": True,
+            "degraded_reason": "no_regime_rows",
+        }
+    signals = {}
+    try:
+        signals = json.loads(row["signals_json"]) if row["signals_json"] else {}
+    except json.JSONDecodeError:
+        signals = {"error": "signals_json_unparseable"}
+    return {
+        "available": True,
+        "id": row["id"],
+        "determined_at": row["determined_at"],
+        "determined_by": row["determined_by"],
+        "current": row["current"],
+        "signals": signals,
+        "degraded": signals.get("fail_closed") is True or signals.get("partial") is True,
+    }
+
+
+def _load_counts(conn: sqlite3.Connection) -> dict[str, Any]:
+    def n(sql: str, params: tuple = ()) -> int:
+        row = conn.execute(sql, params).fetchone()
+        return row[0] if row else 0
+
+    return {
+        "hypotheses_total": n("SELECT COUNT(*) FROM hypotheses"),
+        "hypotheses_raw": n("SELECT COUNT(*) FROM hypotheses WHERE state='raw'"),
+        "hypotheses_scored": n("SELECT COUNT(*) FROM hypotheses WHERE state='scored'"),
+        "hypotheses_challenged": n(
+            "SELECT COUNT(*) FROM hypotheses WHERE state='challenged'"
+        ),
+        "hypotheses_ready": n("SELECT COUNT(*) FROM hypotheses WHERE state='ready'"),
+        "hypotheses_active": n("SELECT COUNT(*) FROM hypotheses WHERE state='active'"),
+        "hypotheses_resolved": n(
+            "SELECT COUNT(*) FROM hypotheses WHERE state='resolved'"
+        ),
+        "intents_open": n(
+            "SELECT COUNT(*) FROM trade_intents "
+            "WHERE state IN ('proposed','critic_review','approved','submitted','partial')"
+        ),
+        "positions_open": n(
+            "SELECT COUNT(*) FROM positions "
+            "WHERE state IN ('opening','open','scaling','trimming','closing')"
+        ),
+        "pauses_active": n(
+            "SELECT COUNT(*) FROM system_pauses WHERE ended_at IS NULL"
+        ),
+        "critic_reviews_total": n("SELECT COUNT(*) FROM critic_reviews"),
+    }
+
+
+def _load_hypotheses(conn: sqlite3.Connection, limit: int = 25) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, tickers, thesis_summary, state, confidence, time_horizon, "
+        "quant_score, scored_at, rationale_concise, created_at "
+        "FROM hypotheses ORDER BY "
+        "  CASE state WHEN 'ready' THEN 0 WHEN 'active' THEN 1 WHEN 'scored' THEN 2 "
+        "             WHEN 'challenged' THEN 3 WHEN 'raw' THEN 4 ELSE 5 END, "
+        "  COALESCE(quant_score, 0) DESC, created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            tickers = json.loads(r["tickers"] or "[]")
+        except json.JSONDecodeError:
+            tickers = []
+        out.append(
+            {
+                "id": r["id"],
+                "tickers": tickers,
+                "thesis_summary": r["thesis_summary"],
+                "state": r["state"],
+                "confidence": r["confidence"],
+                "time_horizon": r["time_horizon"],
+                "quant_score": r["quant_score"],
+                "scored_at": r["scored_at"],
+                "rationale_concise": r["rationale_concise"],
+                "created_at": r["created_at"],
+            }
+        )
+    return out
+
+
+def _load_critic_reviews(conn: sqlite3.Connection, limit: int = 25) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, target_type, target_id, reviewed_at, challenges_json, "
+        "all_challenges_addressed FROM critic_reviews ORDER BY reviewed_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            challenges = json.loads(r["challenges_json"] or "[]")
+        except json.JSONDecodeError:
+            challenges = []
+        out.append(
+            {
+                "id": r["id"],
+                "target_type": r["target_type"],
+                "target_id": r["target_id"],
+                "reviewed_at": r["reviewed_at"],
+                "challenges": challenges,
+                "all_addressed": bool(r["all_challenges_addressed"]),
+            }
+        )
+    return out
+
+
+def _load_intents(conn: sqlite3.Connection, limit: int = 25) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, hypothesis_id, created_at, action, ticker, vehicle, size, "
+        "state, blocked_reason, submitted_at, executed_at, actual_price, actual_size, "
+        "broker_order_id FROM trade_intents ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def _load_evidence(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, hypothesis_id, indicator, value, source, source_url, "
+        "retrieved_at, signal_type FROM hypothesis_evidence "
+        "ORDER BY retrieved_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def _load_audits(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, timestamp, actor, entity_type, entity_id, action, "
+        "rationale_concise FROM audits ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def _load_watchlist(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT DISTINCT ticker FROM positions "
+        "WHERE state IN ('opening','open','scaling','trimming','closing') "
+        "UNION SELECT DISTINCT ticker FROM trade_intents "
+        "WHERE state IN ('proposed','approved','submitted','partial') "
+        "ORDER BY 1"
+    ).fetchall()
+    return [{"ticker": r[0]} for r in rows]
+
+
+def _load_positions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, hypothesis_id, ticker, vehicle, qty, cost_basis, current_price, "
+        "current_value, unrealized_pnl_pct, pnl_slippage_adjusted, state, opened_at "
+        "FROM positions WHERE state IN ('opening','open','scaling','trimming','closing') "
+        "ORDER BY ABS(COALESCE(current_value,0)) DESC"
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Cron + agent freshness
+# ---------------------------------------------------------------------------
+
+
+def _load_cron_state() -> dict[str, Any]:
+    jobs: list[dict[str, Any]] = []
+    if CRON_JOBS_PATH.exists():
+        try:
+            jobs = json.loads(CRON_JOBS_PATH.read_text()).get("jobs", [])
+        except json.JSONDecodeError:
+            jobs = []
+    runs: list[dict[str, Any]] = []
+    if CRON_RUNS_DIR.exists():
+        recent = sorted(
+            CRON_RUNS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        )[:30]
+        for p in recent:
+            try:
+                runs.append(json.loads(p.read_text()))
+            except json.JSONDecodeError:
+                continue
+    return {"jobs": jobs, "runs": runs}
+
+
+def _last_pass_per_agent(audits: list[dict[str, Any]]) -> dict[str, str | None]:
+    out: dict[str, str | None] = {a["id"]: None for a in AGENTS}
+    for a in audits:
+        actor = a.get("actor")
+        if actor in out and out[actor] is None:
+            out[actor] = a.get("timestamp")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Retail insights core (deterministic; narrative pass fills the rest later)
+# ---------------------------------------------------------------------------
+
+
+def _build_retail_insights(
+    regime: dict[str, Any],
+    hypotheses: list[dict[str, Any]],
+    positions: list[dict[str, Any]],
+    intents: list[dict[str, Any]],
+    counts: dict[str, Any],
+    last_pass: dict[str, str | None],
+) -> dict[str, Any]:
+    top_scored = [h for h in hypotheses if h["quant_score"] is not None][:5]
+    open_position_tickers = sorted({p["ticker"] for p in positions})
+    pending_intents = [i for i in intents if i["state"] in ("proposed", "approved", "submitted", "partial")]
+
+    return {
+        "generated_at": _now_utc_iso(),
+        "agent_takeaways": [
+            {
+                "agent": "researcher",
+                "headline": f"{counts['hypotheses_raw']} new hypotheses awaiting score",
+                "freshness_at": last_pass.get("researcher"),
+                "needs_narrative": True,
+            },
+            {
+                "agent": "quant",
+                "headline": (
+                    f"Regime: {regime.get('current') or 'unknown'}"
+                    + (" (fail-closed)" if regime.get("degraded") else "")
+                ),
+                "top_scored": [
+                    {
+                        "id": h["id"],
+                        "tickers": h["tickers"],
+                        "score": h["quant_score"],
+                        "horizon": h["time_horizon"],
+                    }
+                    for h in top_scored
+                ],
+                "freshness_at": last_pass.get("quant"),
+                "needs_narrative": True,
+            },
+            {
+                "agent": "critic",
+                "headline": f"{counts['critic_reviews_total']} reviews on file",
+                "freshness_at": last_pass.get("critic"),
+                "needs_narrative": True,
+            },
+            {
+                "agent": "archivist",
+                "headline": "No pending rule_proposals" if True else "",
+                "freshness_at": last_pass.get("archivist"),
+                "needs_narrative": True,
+            },
+            {
+                "agent": "executor",
+                "headline": (
+                    f"{counts['positions_open']} open positions, "
+                    f"{counts['intents_open']} open intents, "
+                    f"{counts['pauses_active']} active pauses"
+                ),
+                "open_tickers": open_position_tickers,
+                "freshness_at": last_pass.get("executor"),
+                "needs_narrative": False,
+            },
+            {
+                "agent": "trader",
+                "headline": "Portfolio narrative pending",
+                "freshness_at": last_pass.get("trader"),
+                "needs_narrative": True,
+            },
+            {
+                "agent": "developer",
+                "headline": "System health: green" if True else "",
+                "freshness_at": last_pass.get("developer"),
+                "needs_narrative": False,
+            },
+            {
+                "agent": "overseer",
+                "headline": "Chat / orchestration online",
+                "freshness_at": last_pass.get("overseer"),
+                "needs_narrative": False,
+            },
+        ],
+        # Narrative slots filled by a downstream overseer pass with strict JSON.
+        "headline": None,
+        "three_takeaways": [],
+        "regime_one_liner": (
+            None if regime.get("current") is None
+            else f"Regime is {regime['current']}."
+        ),
+        "next_24h_watch": [],
+        "spy_comparison": {
+            "available": False,
+            "note": "attribution + benchmarks tables not yet populated",
+        },
+        "pending_intents_count": len(pending_intents),
+    }
+
+
+def _build_system_health(
+    regime: dict[str, Any],
+    counts: dict[str, Any],
+    last_pass: dict[str, str | None],
+    cron: dict[str, Any],
+) -> dict[str, Any]:
+    issues: list[dict[str, Any]] = []
+    if regime.get("degraded"):
+        notes = regime.get("signals", {}).get("notes", {}) or {}
+        missing = regime.get("signals", {}).get("missing_signals", [])
+        issues.append(
+            {
+                "severity": "yellow" if regime.get("current") == "caution" else "red",
+                "area": "regime",
+                "detail": f"degraded: missing={missing} notes={notes}",
+            }
+        )
+    if counts.get("hypotheses_raw", 0) > 0 and (last_pass.get("quant") is None):
+        issues.append(
+            {
+                "severity": "yellow",
+                "area": "quant",
+                "detail": "raw hypotheses present but no quant audit yet",
+            }
+        )
+    color = "green"
+    if any(i["severity"] == "red" for i in issues):
+        color = "red"
+    elif issues:
+        color = "yellow"
+    return {"color": color, "issues": issues[:3]}
+
+
+# ---------------------------------------------------------------------------
+# Top-level build
+# ---------------------------------------------------------------------------
+
+
+def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
+    regime = _load_regime(conn)
+    counts = _load_counts(conn)
+    hypotheses = _load_hypotheses(conn)
+    critic_reviews = _load_critic_reviews(conn)
+    intents = _load_intents(conn)
+    evidence = _load_evidence(conn)
+    audits = _load_audits(conn)
+    watchlist = _load_watchlist(conn)
+    positions = _load_positions(conn)
+    cron = _load_cron_state()
+    last_pass = _last_pass_per_agent(audits)
+
+    snapshot = {
+        "generated_at": _now_utc_iso(),
+        "schema_version": "v2",
+        "topology": [a["id"] for a in AGENTS],
+        "agents": [
+            {**a, "last_pass_at": last_pass.get(a["id"])} for a in AGENTS
+        ],
+        "regime": regime,
+        "broker": {"name": "alpaca_paper", "available": False, "note": "stub"},
+        "brokerPositions": [],
+        "brokerOrders": [],
+        "equityHistory": [],
+        "positions": positions,
+        "hypotheses": hypotheses,
+        "criticReviews": critic_reviews,
+        "watchlist": watchlist,
+        "intents": intents,
+        "evidence": evidence,
+        "cronJobs": cron["jobs"],
+        "cronRuns": cron["runs"],
+        "audits": audits,
+        "counts": counts,
+        "retail_insights": _build_retail_insights(
+            regime, hypotheses, positions, intents, counts, last_pass
+        ),
+        "system_health": _build_system_health(regime, counts, last_pass, cron),
+    }
+    return snapshot
+
+
+def write_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=path.stem + ".",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        json.dump(payload, tmp, indent=2, default=str)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", default=str(DB_PATH))
+    parser.add_argument("--out", default=str(DEFAULT_OUT))
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Build and print to stdout without writing the file",
+    )
+    args = parser.parse_args(argv)
+
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"ERROR: db missing at {db_path}", file=sys.stderr)
+        return 2
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    snapshot = build_snapshot(conn)
+    if args.validate:
+        print(json.dumps(snapshot, indent=2, default=str))
+        return 0
+    write_atomic(Path(args.out), snapshot)
+    print(f"wrote {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

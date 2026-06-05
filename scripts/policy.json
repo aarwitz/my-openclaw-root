@@ -1,0 +1,51 @@
+{
+  "$comment": "Scripts policy registry. Read by scripts-policy-lint.sh, audit_script_inventory.py, and new-script.sh. Edit this file when adding/removing governed script directories.",
+  "version": 1,
+  "governedDirs": [
+    {
+      "path": "~/.openclaw/scripts",
+      "owner": "openclaw-ops",
+      "rationale": "Canonical operational scripts shared by every agent inside the openclaw-gateway container.",
+      "wrapperRequired": true,
+      "ignore": [
+        "run-with-trace.sh",
+        "lib/",
+        "__pycache__/"
+      ]
+    },
+    {
+      "path": "~/.openclaw/workspaces/trader/scripts",
+      "owner": "trader",
+      "rationale": "Trader workspace ops scripts; run by the trader agent inside the gateway container.",
+      "wrapperRequired": true,
+      "ignore": ["__pycache__/"]
+    }
+  ],
+  "exemptDirs": [
+    {
+      "path": "~/.openclaw/workspaces/dwight/rsl-task-manager/scripts",
+      "reason": "Runs inside the dwight-taskmanager container which does NOT mount ~/.openclaw. App control scripts, not OpenClaw ops."
+    }
+  ],
+  "exemptScripts": [
+    {
+      "path": "~/.openclaw/scripts/run-with-trace.sh",
+      "reason": "The wrapper itself cannot require itself."
+    }
+  ],
+  "retention": {
+    "staleDays": 45,
+    "auditLog": "~/.openclaw/logs/script-audit.jsonl"
+  },
+  "containerModel": {
+    "shared": {
+      "container": "openclaw-gateway",
+      "mount": "/home/aaron/.openclaw -> /home/aaron/.openclaw",
+      "consequence": "Every OpenClaw agent sees one shared scripts/ tree and one shared script-runs.jsonl."
+    },
+    "isolated": [
+      {"container": "dwight-taskmanager", "scope": "app runtime; out of scope"},
+      {"container": "lidi-task-manager-ewag-agent-*", "scope": "ewag iOS build runners; out of scope"}
+    ]
+  }
+}

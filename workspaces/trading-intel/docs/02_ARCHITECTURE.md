@@ -7,8 +7,9 @@ Status: active. Canonical description of the OpenClaw trading system topology, s
 The trading stack is thesis-first, paper-first, and single-store.
 
 - One canonical SQLite store holds hypotheses, evidence, regime, intents, orders, positions, pauses, postmortems, and validation cases.
-- Five agents share that store and do not maintain competing copies of trading authority.
+- Six agents share that store and do not maintain competing copies of trading authority.
 - `trader` is the only Telegram-facing lane. The displayed persona name is Druck.
+- `executor` is the only broker execution lane.
 - Telegram is the operator surface, not the execution engine.
 - Alpaca paper is the only broker surface in launch scope.
 - External APIs are ingested into evidence first; they do not directly place trades.
@@ -51,15 +52,22 @@ The trading stack is thesis-first, paper-first, and single-store.
                       ┌───────────────────────┐
                       │ trader (Druck)        │
                       │ Telegram front door   │
+                      │ orchestration + dev   │
+                      └──────────┬────────────┘
+                                 │ deterministic execution packets
+                                 v
+                      ┌───────────────────────┐
+                      │ executor              │
                       │ Alpaca paper submit   │
                       │ order/position sync   │
+                      │ reconciliation        │
                       └──────────┬────────────┘
                                  │ broker events + fills
                                  v
                       ┌───────────────────────┐
                       │ reconciliation        │
                       │ audit rows            │
-                      │ pauses / divergence    │
+                      │ pauses / divergence   │
                       └──────────┬────────────┘
                                  │ resolved cases
                                  v
@@ -84,10 +92,11 @@ The trading stack is thesis-first, paper-first, and single-store.
 | `researcher` | Ingests source deltas and builds new theses | `hypotheses`, `hypothesis_evidence`, `falsifier_signals` | Source -> evidence -> thesis |
 | `quant` | Scores, ranks, sizes, and classifies regime | `hypotheses`, `regime`, `trade_intents` | Evidence -> score -> candidate intent |
 | `critic` | Challenges hypothesis and intent quality before capital risk | `critic_reviews` | Intent gating loop |
-| `trader` | Telegram-facing Druck persona and only execution lane | `trade_intents`, `orders`, `positions`, `tranches` | Human command -> broker -> reconciliation |
+| `trader` | Telegram-facing Druck persona, orchestration, and trading-system development | `audits`, orchestrator state updates | Human command -> orchestration -> executor |
+| `executor` | Deterministic broker execution and reconciliation lane | `trade_intents` (execution fields), `orders`, `positions`, `tranches`, `reconciliation_runs`, `system_pauses`, `audits` | Canonical intent -> broker -> reconciliation |
 | `archivist` | Grades outcomes and extracts reusable patterns | `hypotheses`, `postmortems`, `patterns` | Resolution -> attribution -> calibration |
 
-All five agents can read all trading state. Write permissions are application-enforced, not implicit.
+All six agents can read all trading state. Write permissions are application-enforced, not implicit.
 
 ## 4. Canonical external sources
 
@@ -95,7 +104,7 @@ This is the approved source stack. Sources are read into evidence records; they 
 
 | Source | Official name / API surface | Main payloads used | Primary owner | Path |
 |---|---|---|---|---|
-| Broker + market data | Alpaca Trading API (paper) + Alpaca Market Data API | account, orders, positions, fills, bars, trades, quotes | trader | Hot path |
+| Broker + market data | Alpaca Trading API (paper) + Alpaca Market Data API | account, orders, positions, fills, bars, trades, quotes | executor | Hot path |
 | Corporate disclosures | SEC EDGAR | 8-K, 10-Q, 10-K, 13D/G, S-1, exhibits, XBRL | researcher | Hot + event-driven |
 | Macro series | FRED + ALFRED | level, vintage, revisions, release timestamps | researcher, quant | Hot + cold |
 | Energy | EIA API | inventories, production, storage, prices, weekly deltas | researcher | Hot + cold |
@@ -125,7 +134,8 @@ source delta
   -> quant score / regime / expression ranking
   -> critic challenge set
   -> trade intent
-  -> trader execution or block
+  -> trader orchestration decision
+  -> executor execution or block
   -> broker fill / position update
   -> reconciliation
   -> archivist postmortem
@@ -148,8 +158,9 @@ The system is not a chat bot with trading bolted on. It is a gated state machine
 1. Researcher observes source movement and writes evidence.
 2. Quant converts evidence into score, regime, and candidate expressions.
 3. Critic validates that the thesis is still coherent and that objections are addressed.
-4. Trader checks gates, sizing, pauses, and broker state before submission.
-5. Broker events are reconciled against local state.
+4. Trader checks operator intent and canonical readiness, then dispatches deterministic execution requests.
+5. Executor checks gates, sizing, pauses, and broker state before submission.
+6. Broker events are reconciled against local state.
 6. Archivist grades the outcome and updates the calibration corpus.
 
 No stage is allowed to skip ahead by implying a later stage already happened.
@@ -173,16 +184,16 @@ If any gate fails, the intent is blocked with a structured reason. There is no s
 
 ## 8. Execution and reconciliation loops
 
-Trader is the only lane that converts intent into broker activity.
+Executor is the only lane that converts intent into broker activity.
 
 ```text
 Telegram command or scheduled checkpoint
-  -> trader checks shared state
-  -> trader checks pauses, freshness, overlap, explainability, fill realism
-  -> trader submits Alpaca order if allowed
+  -> trader checks shared state and packages deterministic execution request
+  -> executor checks pauses, freshness, overlap, explainability, fill realism
+  -> executor submits Alpaca order if allowed
   -> Alpaca emits fill/order events
-  -> trader mirrors events to orders / positions / tranches
-  -> trader reconciles actual broker state vs shared state
+  -> executor mirrors events to orders / positions / tranches
+  -> executor reconciles actual broker state vs shared state
   -> divergence creates reconciliation_run
   -> affected hypothesis can be paused for new opens until resolved
 ```
@@ -202,7 +213,8 @@ The system has multiple loops running at different horizons.
 - Researcher: morning delta ingest, nightly refresh, event-driven ingress on filing/trial/macro shocks.
 - Quant: pre-market scoring, intraday rerank, after-close recalculation, on-demand rescoring when evidence changes.
 - Critic: high-priority review before intent release, plus postmortem calibration review.
-- Trader: pre-market decision pass, midday confirmation/invalidation, rotation pass, close-risk pass, event-driven reconciliation.
+- Trader: pre-market/post-open/midday/close-risk orchestration and operator reporting.
+- Executor: pre-market decision pass, market-open reaction, confirmation/invalidation, rotation pass, close-risk pass, event-driven reconciliation.
 - Archivist: daily resolution sweep and weekly pattern extraction.
 
 These loops are coupled through shared state, not through free-form chat.
@@ -244,7 +256,7 @@ Key storage relationships:
 
 The critical loops are:
 
-1. Source -> evidence -> quant -> critic -> trader -> broker -> reconciliation. This is the live execution loop.
+1. Source -> evidence -> quant -> critic -> trader -> executor -> broker -> reconciliation. This is the live execution loop.
 2. Broker fill -> position outcome -> archivist -> pattern -> quant/researcher. This is the calibration loop.
 3. Falsifier change -> dormant state -> exit/trim intent -> reconciliation. This is the protection loop.
 4. Regime update -> gate shift -> candidate reprioritization -> sizing change. This is the context loop.

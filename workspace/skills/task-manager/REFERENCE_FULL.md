@@ -1,6 +1,6 @@
 ---
 name: task-manager
-description: Manage the RSL Task Manager at http://127.0.0.1:8000 (same machine as Jerry) — create/update issues, manage sprints, upload screenshots, post comments, search issues, and assign work. Use when managing stories, sprints, progress updates, backlog grooming, or task tracking for any RSL project. Do not use for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (EWAG value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for EWAG business context.
+description: Manage the RSL Task Manager at http://127.0.0.1:8000 for story/sprint visibility and Dwight-routed execution. Task Manager runtime and source are owned by Dwight in /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager. Non-Dwight agents are view-only unless explicitly delegated by Dwight. Do not use for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (EWAG value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for EWAG business context.
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
@@ -15,7 +15,7 @@ Host mapping for Jerry runtime:
 
 Dwight is the official Task Manager orchestrator/developer. Jerry uses this skill for coordination support, cross-agent visibility, and evidence logging when needed.
 
-Source code: `~/repos/Task-Manager/` (FastAPI + SQLite + vanilla JS frontend).
+Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAPI + SQLite + vanilla JS frontend).
 
 ## ⚠️ Story Creation Rules — READ FIRST
 
@@ -344,8 +344,8 @@ Avoid comments that only restate prior status with no new output.
 
 For making code changes to the Task Manager itself (adding fields, changing endpoints, updating frontend modals), load the `task-manager-maintainer` skill. It covers backend/frontend sync, additive migrations, validation checklists, and the required workflow for safe end-to-end changes.
 
-Source code: `~/repos/Task-Manager/` (FastAPI + SQLAlchemy + SQLite + vanilla JS)
-Database: `~/repos/Task-Manager/backend/taskmanager.db`
+Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAPI + SQLAlchemy + SQLite + vanilla JS)
+Database: `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
 
 **To restart after code changes:**
 ```bash

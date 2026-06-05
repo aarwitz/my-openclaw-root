@@ -4,6 +4,10 @@ Your daily interface with Druck via Telegram (`@druck_rsl_bot` in the Trading De
 
 Companion doc: `HUMAN_USE_GUIDE.md` for efficient prompt patterns, notification strategy, and system-to-system interfacing.
 
+Role split:
+- Druck (`trader`) is the Telegram chat front door, orchestrator, and trading-infrastructure developer.
+- `executor` is the deterministic execution lane and the only agent allowed to submit/cancel Alpaca orders.
+
 ---
 
 ## System state right now
@@ -38,7 +42,7 @@ Druck follows the DRUCK_UPDATE format. Each candidate becomes a `hypothesis` row
 
 ### Step 3 — Approve or reject
 
-After critic review, Druck will present each hypothesis for your approval before submitting any trade intent.
+After critic review, Druck will present each hypothesis for your approval before sending execution requests to executor.
 
 ```
 @druck_rsl_bot /approve hypo_abc123
@@ -107,26 +111,51 @@ Or ask Druck to resolve and clear after you've confirmed the state is clean.
 
 ---
 
-## Autonomous behavior (what Druck does without prompting)
+## Autonomous behavior (what Druck/executor do without prompting)
 
 Per the schedule in `docs/05_IMPLEMENTATION_POLICY.md` section 3:
 
 | Time (US/Eastern) | What runs |
 |---|---|
 | 09:00 | Pre-market decision pass |
+| 09:30 | Market-open reaction pass |
 | 11:00 | Confirmation / invalidation pass |
 | 13:30 | Replacement / rotation pass |
 | 15:30 | Close-risk pass |
 | Event-driven | On Alpaca order/position events |
 | Sunday 09:00 | Weekly portfolio pattern extraction (Archivist) |
 
-Druck will post updates to Telegram at each pass if there is anything material to report.
+Druck will post updates to Telegram at each pass if there is anything material to report. Executor handles broker-side submission/state sync during those passes.
+
+Execution timing default:
+- Executor should prefer resting broker-native limit/bracket-style order staging for approved price-sensitive setups instead of relying on you to notice an intraday dip manually.
+- The execution reference is [reference/execution_timing_framework.md](/home/aaron/.openclaw/workspaces/trading-intel/reference/execution_timing_framework.md).
+
+Whole-pipeline contract:
+- If you request "run the whole pipeline", Druck must execute researcher -> quant -> critic -> trader -> executor in that order.
+- A trader-only synthesis is not sufficient for whole-pipeline requests.
+- If any stage blocks, Druck should report the blocked stage and concrete failure reason.
+
+Practical meaning:
+- `09:00` builds the execution watchlist and defines entry bands.
+- `09:30` reacts to opening dislocations against that plan.
+- `11:00` and `13:30` reassess or rotate resting orders.
+- `15:30` cleans up stale resting buys and tightens close-risk posture.
+
+Minimum actionable quote context:
+- quote timestamp in UTC and ET,
+- session label (premarket/regular/after-hours),
+- move vs prior close,
+- move vs post-event reference,
+- hold/extend/fade reaction state.
+
+If any of these fields are missing, the setup should remain watch/blocked-data.
 
 ---
 
-## Approval gates — what Druck checks before submitting any trade
+## Approval gates — what Druck/executor check before submitting any trade
 
-Every trade intent must clear all of these before Druck submits to Alpaca:
+Every trade intent must clear all of these before executor submits to Alpaca:
 
 1. Valid `hypothesis_id` in state `ready` or `active`
 2. Critic has reviewed and approved the hypothesis

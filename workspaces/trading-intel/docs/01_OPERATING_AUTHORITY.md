@@ -19,7 +19,7 @@ Beat the S&P 500 in an Alpaca paper account by exploiting slow market diffusion 
 5. Bet small on new ideas. Bet larger as independent evidence confirms. Stay liquid.
 6. Cash is a real competitor on every marginal trade.
 7. Critic challenges are first-class. Every challenge requires a written response in the audit log before execution.
-8. Archivist is how the system improves. Patterns it extracts feed the other four agents.
+8. Archivist is how the system improves. Patterns it extracts feed the other five agents.
 
 ## 3. Allowed expression vehicles (first-class from launch)
 
@@ -57,7 +57,7 @@ Maximum position sizes by conviction (percent of portfolio):
 
 Pre-authorized conviction scaling:
 
-- Trader may autonomously scale within approved conviction bands when all gates are satisfied (independent signals, intact falsifiers, regime allows, critic quality threshold met).
+- Executor may autonomously scale within approved conviction bands when all gates are satisfied (independent signals, intact falsifiers, regime allows, critic quality threshold met).
 - Manual Aaron approval is required only for overrides above policy max bands or for concentration exceptions.
 
 ## 5. Concentration limits
@@ -77,7 +77,7 @@ Pre-authorized conviction scaling:
 | `risk_off` | Paused | Paused | Monitor only | 40–60% |
 | `crisis` | Paused | Paused | Active defense only | 60–80% |
 
-Regime is owned by Quant. Trader cannot override regime gates without an Aaron-approved standing order.
+Regime is owned by Quant. Executor cannot override regime gates without an Aaron-approved standing order.
 
 ## 7. Stops and per-trade risk
 
@@ -93,15 +93,15 @@ Regime is owned by Quant. Trader cannot override regime gates without an Aaron-a
 - Recovery target after a 20% drawdown: 6 months.
 - Drawdown circuit breaker is automatic: threshold breach writes `system_pauses` records without manual intervention.
 
-## 9. Autonomous authority for Trader
+## 9. Autonomous authority for Executor
 
-Trader may autonomously, without per-action human approval, in Alpaca paper:
+Executor may autonomously, without per-action human approval, in Alpaca paper:
 
 - Open, add, trim, exit, rotate, cancel orders.
 - Hold cash.
 - Place options orders consistent with this doc.
 
-Trader may not autonomously:
+Executor may not autonomously:
 
 - Override regime gates.
 - Execute a trade without a valid `hypothesis_id` and a Critic review record.

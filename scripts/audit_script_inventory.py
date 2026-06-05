@@ -26,6 +26,40 @@ from typing import Dict, Optional
 ROOT = Path.home() / ".openclaw"
 SCRIPTS_DIR = ROOT / "scripts"
 RUN_LOG = ROOT / "logs" / "script-runs.jsonl"
+POLICY_FILE = SCRIPTS_DIR / "policy.json"
+
+
+def _expand(p: str) -> Path:
+    return Path(p.replace("~", str(Path.home()), 1)) if p.startswith("~") else Path(p)
+
+
+def load_governed_dirs() -> list[tuple[Path, list[str], list[str]]]:
+    """Return [(dir, ignore_patterns, exempt_script_basenames), ...] from policy.json.
+
+    Falls back to the single canonical scripts dir if policy is missing.
+    """
+    if not POLICY_FILE.exists():
+        return [(SCRIPTS_DIR, ["lib/", "__pycache__/", "run-with-trace.sh"], [])]
+    policy = json.loads(POLICY_FILE.read_text(encoding="utf-8"))
+    exempt = {str(_expand(e["path"])) for e in policy.get("exemptScripts", [])}
+    out: list[tuple[Path, list[str], list[str]]] = []
+    for d in policy.get("governedDirs", []):
+        dpath = _expand(d["path"])
+        if not dpath.is_dir():
+            continue
+        ignore = list(d.get("ignore", []))
+        out.append((dpath, ignore, sorted(exempt)))
+    return out
+
+
+def _ignored(rel: str, patterns: list[str]) -> bool:
+    for pat in patterns:
+        if pat.endswith("/"):
+            if rel == pat.rstrip("/") or rel.startswith(pat):
+                return True
+        elif rel == pat:
+            return True
+    return False
 
 
 @dataclass
@@ -113,25 +147,33 @@ def reference_count(path: Path) -> int:
 def collect() -> list[ScriptInfo]:
     last_runs = load_last_runs()
     out: list[ScriptInfo] = []
-    for p in sorted(SCRIPTS_DIR.iterdir()):
-        if not p.is_file():
-            continue
-        if p.name.startswith("."):
-            continue
-        if p.suffix not in (".sh", ".py"):
-            continue
-        mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-        last_run = last_runs.get(str(p))
-        out.append(
-            ScriptInfo(
-                path=p,
-                ext=p.suffix.lstrip("."),
-                mtime=mtime,
-                last_run=last_run,
-                git_last_commit=git_last_commit_date(p),
-                ref_count=reference_count(p),
+    seen: set[Path] = set()
+    for dpath, ignore, exempt in load_governed_dirs():
+        for p in sorted(dpath.rglob("*")):
+            if not p.is_file():
+                continue
+            if p.suffix not in (".sh", ".py"):
+                continue
+            if str(p) in exempt:
+                continue
+            rel = str(p.relative_to(dpath))
+            if _ignored(rel, ignore):
+                continue
+            if p in seen:
+                continue
+            seen.add(p)
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            last_run = last_runs.get(str(p))
+            out.append(
+                ScriptInfo(
+                    path=p,
+                    ext=p.suffix.lstrip("."),
+                    mtime=mtime,
+                    last_run=last_run,
+                    git_last_commit=git_last_commit_date(p),
+                    ref_count=reference_count(p),
+                )
             )
-        )
     return out
 
 

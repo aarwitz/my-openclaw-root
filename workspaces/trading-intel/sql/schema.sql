@@ -19,7 +19,7 @@ INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
 CREATE TABLE IF NOT EXISTS hypotheses (
   id                        TEXT PRIMARY KEY,
   created_at                TEXT NOT NULL,
-  created_by                TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','trader','archivist','human')),
+  created_by                TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','trader','executor','archivist','developer','overseer','bessent','human')),
   tickers                   TEXT NOT NULL,                    -- JSON array
   thesis_summary            TEXT NOT NULL,
   state                     TEXT NOT NULL CHECK (state IN ('raw','scored','challenged','ready','active','dormant','resolved','retired')),
@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS regime_rules (
 CREATE TABLE IF NOT EXISTS audits (
   id                  TEXT PRIMARY KEY,
   timestamp           TEXT NOT NULL,
-  actor               TEXT NOT NULL CHECK (actor IN ('researcher','quant','critic','trader','archivist','human','system')),
+  actor               TEXT NOT NULL CHECK (actor IN ('researcher','quant','critic','trader','executor','archivist','developer','overseer','bessent','human','system')),
   entity_type         TEXT NOT NULL,
   entity_id           TEXT NOT NULL,
   action              TEXT NOT NULL,
@@ -307,6 +307,79 @@ CREATE TABLE IF NOT EXISTS audits (
   experiment_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audits_entity ON audits(entity_type, entity_id, timestamp);
+
+-- ----------------------------------------------------------------------------
+-- Rule proposals (closed-loop self-improvement)
+--   Archivist (or any agent) proposes; Aaron approves via Druck; Bessent applies.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS rule_proposals (
+  id                 TEXT PRIMARY KEY,
+  created_at         TEXT NOT NULL,
+  proposer           TEXT NOT NULL CHECK (proposer IN ('researcher','quant','critic','archivist','trader','executor','developer','overseer','bessent','human','system')),
+  target_artifact    TEXT NOT NULL,
+  current_value      TEXT,
+  proposed_value     TEXT NOT NULL,
+  rationale          TEXT NOT NULL,
+  evidence_refs_json TEXT,
+  status             TEXT NOT NULL CHECK (status IN ('proposed','approved','rejected','applied','superseded')),
+  decided_by         TEXT,
+  decided_at         TEXT,
+  applied_at         TEXT,
+  experiment_id      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rule_proposals_status ON rule_proposals(status, created_at);
+
+-- ----------------------------------------------------------------------------
+-- Experiments (A/B tracking for rule changes and pipeline tweaks)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS experiments (
+  id            TEXT PRIMARY KEY,
+  started_at    TEXT NOT NULL,
+  ended_at      TEXT,
+  scope         TEXT NOT NULL,
+  hypothesis    TEXT NOT NULL,
+  outcome_json  TEXT,
+  decided_by    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_experiments_scope_started ON experiments(scope, started_at);
+
+-- ----------------------------------------------------------------------------
+-- Attribution (per-trade realized edge vs SPY, per horizon)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attribution (
+  id                          TEXT PRIMARY KEY,
+  hypothesis_id               TEXT REFERENCES hypotheses(id),
+  position_id                 TEXT REFERENCES positions(id),
+  horizon                     TEXT NOT NULL CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus')),
+  opened_at                   TEXT NOT NULL,
+  closed_at                   TEXT,
+  portfolio_return_pct        REAL,
+  spy_return_pct              REAL,
+  realized_edge_vs_spy_bps    REAL,
+  attribution_json            TEXT,
+  computed_at                 TEXT NOT NULL,
+  experiment_id               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_attribution_horizon_closed ON attribution(horizon, closed_at);
+CREATE INDEX IF NOT EXISTS idx_attribution_hypothesis     ON attribution(hypothesis_id);
+
+-- ----------------------------------------------------------------------------
+-- Benchmarks (rolling portfolio vs SPY per horizon bucket)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS benchmarks (
+  id                     TEXT PRIMARY KEY,
+  captured_at            TEXT NOT NULL,
+  horizon                TEXT NOT NULL CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus','all')),
+  period_start           TEXT NOT NULL,
+  period_end             TEXT NOT NULL,
+  portfolio_return_pct   REAL,
+  spy_return_pct         REAL,
+  alpha_pct              REAL,
+  sharpe_estimate        REAL,
+  turnover_pct           REAL,
+  source_run_id          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_benchmarks_horizon_captured ON benchmarks(horizon, captured_at);
 
 -- ----------------------------------------------------------------------------
 -- Regime current view convention
