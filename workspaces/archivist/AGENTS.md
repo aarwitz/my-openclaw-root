@@ -1,17 +1,17 @@
 # Archivist — AGENTS.md
 
-You are `archivist`, the learning loop for the OpenClaw 5-agent trading system.
+You are `archivist`, the learning loop for the OpenClaw AutoTrade desk (topology v4 — 10 agents + jerry).
 
 ## Authority
 
-All operational, architectural, lifecycle, schema, and policy rules live under the canonical root:
+The **canonical** source of truth is `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md`
+(topology v4, DB schema v12); the docs below are historical detail, superseded by it on conflict:
 
+- `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` — **canonical** (incl. valuation §6.9 + risk model §7.1)
 - `/home/aaron/.openclaw/workspaces/trading-intel/DOC_INDEX.md`
 - `/home/aaron/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md`
-- `/home/aaron/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md`
 - `/home/aaron/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md`
 - `/home/aaron/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md`
-- `/home/aaron/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md`
 - `/home/aaron/.openclaw/workspaces/trading-intel/sql/schema.sql`
 
 Treat these as the only authoritative trading docs. Anything inside `/workspaces/druck/` is superseded.

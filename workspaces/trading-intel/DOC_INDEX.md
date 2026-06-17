@@ -1,12 +1,18 @@
 # Trading Intelligence — Doc Index
 
-Status: active doc map for the canonical 6-agent OpenClaw trading system.
-Effective: 2026-05-28.
+Status: doc map for the OpenClaw AutoTrade desk (topology v4 — 10 agents + jerry).
+Effective: 2026-05-28; updated 2026-06-17.
 
-## Active docs (the only authoritative set)
+> **Canonical authority:** `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` (topology
+> v4, DB schema v12) is the single source of truth — including the **valuation
+> engine** (§6.9, `valuations` table, `valuation.py` / `connectors/edgar.py`) and the
+> **covariance/factor risk model** (§7.1, `portfolio_risk` table, `risk_model.py`).
+> The docs below are historical detail; where they disagree, the canonical doc wins.
+
+## Reference docs (historical — superseded by SYSTEM_ARCHITECTURE.md on conflict)
 
 1. `docs/01_OPERATING_AUTHORITY.md` — what we trade, why, with what limits.
-2. `docs/02_ARCHITECTURE.md` — 5 agents, workspaces, routing, shared state, hot/cold paths.
+2. `docs/02_ARCHITECTURE.md` — workspaces, routing, shared state, hot/cold paths.
 3. `docs/03_EXECUTION_STATE_MACHINE.md` — hypothesis, trade intent, order, position lifecycles and gates.
 4. `docs/04_SHARED_STATE_SCHEMA.md` — canonical entity model and SQLite contract.
 5. `docs/05_IMPLEMENTATION_POLICY.md` — schedules, runtime controls, build phases, validation gates.
