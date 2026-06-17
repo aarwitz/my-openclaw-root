@@ -64,7 +64,7 @@ Two design commitments shape everything below:
 
 ---
 
-## 3. The desk — 10 agents + Jerry
+## 3. The desk — 9 agents + Jerry
 
 The AutoTrade desk is a canonical hedge-fund org, deliberately split so the
 analytical responsibilities (idea quality / risk constraints / allocation
@@ -81,11 +81,16 @@ decision) are separate and individually visible.
 | 7 | `archivist` | 📚 | **Learning officer.** Daily market debrief; resolves predictions (Brier); updates the world model; drafts gated rule proposals. |
 | 8 | `overseer` (CIO) | 🤖 | Cron pipeline orchestrator + app/Telegram chat front door + heartbeat. Orchestrates only — never writes execution state, never edits scripts. |
 | 9 | `developer` | 🔧 | Implements software improvements in git worktrees; opens PRs (human-gated). |
-| 10 | `dwight` | 📋 | **One-way** Task Manager (sprint 5) visibility mirror. A board, *not* a dispatcher. |
 |  – | `jerry` | – | Host/container repair (host cron, sudo). Not an in-gateway agent. |
 
-> `main` and `resi` also exist in `openclaw.json` but are **not** part of the
-> AutoTrade desk (`main` = default assistant; `resi`/EWAG untouched).
+> **Decoupled 2026-06-17:** `dwight` (general dev/PM + code-task dispatcher for broader
+> work, e.g. RSL) is **no longer a desk agent**. It still runs in the gateway but is not
+> counted, snapshotted, run-controlled, or metered as part of the trading desk. The
+> desk's software-improvement backlog is mirrored deterministically (overseer priority
+> queue → `poll_priority_queue.py`); the `developer` agent does the desk's code work.
+>
+> `main` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
+> desk (`main` = default assistant; `resi`/EWAG untouched).
 
 ---
 
@@ -371,11 +376,13 @@ cron→SQLite migration in this build). The overseer drives the desk:
   `group:messaging` capability in its tool allowlist/profile. A routed Telegram
   account with `group:messaging` missing can warn or fail on replies,
   attachments, and thread actions.
-- **Dwight / Task Manager (sprint 5):** `poll_priority_queue.py` is a **one-way**
-  mirror — it reads the overseer's append-only priority queue
+- **Backlog visibility (Task Manager):** `poll_priority_queue.py` is a **one-way,
+  deterministic** mirror — it reads the overseer's append-only priority queue
   (`state/priority-queue.jsonl`) and creates/updates Task Manager issues for
-  visibility. It is the *only* Task Manager mutation path and it **does not
-  launch agents**.
+  visibility. It is the *only* desk-side Task Manager mutation path and it **does not
+  launch agents**. (The `dwight` LLM agent — a general dev/PM + dispatcher for broader
+  work — was decoupled from the desk 2026-06-17, §3; the desk relies on this
+  deterministic mirror, not on dwight.)
 
 ---
 
@@ -390,12 +397,12 @@ cron→SQLite migration in this build). The overseer drives the desk:
             rule_proposals ──→ HUMAN approves ──→ Developer applies ──→ DECISION_LOG
                               ▲                                            │
             ┌──────────────── SOFTWARE (slow, human-gated) ───────────────┘
- overseer → priority queue → Dwight TM mirror (visibility) ; Developer worktrees → PRs
+ overseer → priority queue → TM mirror (poll_priority_queue.py, visibility) ; Developer worktrees → PRs
 ```
 
 - **Knowledge** improves continuously and autonomously (mechanism beliefs).
-- **Software** improves through human-gated Developer changes; Dwight provides
-  the visible backlog. Self-improvement uses **OpenClaw-native delegation**
+- **Software** improves through human-gated Developer changes; the deterministic TM
+  mirror provides the visible backlog. Self-improvement uses **OpenClaw-native delegation**
   (overseer/developer), **not** an auto-dispatch rail. The legacy
   `dwight-lane-bridge` auto-dispatch is **retired** (cron disabled); the
   scripts remain on disk but are not scheduled.

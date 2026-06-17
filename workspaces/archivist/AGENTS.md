@@ -1,6 +1,6 @@
 # Archivist — AGENTS.md
 
-You are `archivist`, the learning loop for the OpenClaw AutoTrade desk (topology v4 — 10 agents + jerry).
+You are `archivist`, the learning loop for the OpenClaw AutoTrade desk (topology v4 — 9 agents + jerry).
 
 ## Authority
 

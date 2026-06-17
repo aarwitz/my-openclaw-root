@@ -1,6 +1,6 @@
 # Trading Intelligence — Doc Index
 
-Status: doc map for the OpenClaw AutoTrade desk (topology v4 — 10 agents + jerry).
+Status: doc map for the OpenClaw AutoTrade desk (topology v4 — 9 agents + jerry).
 Effective: 2026-05-28; updated 2026-06-17.
 
 > **Canonical authority:** `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` (topology
