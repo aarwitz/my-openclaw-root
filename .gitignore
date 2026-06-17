@@ -8,6 +8,7 @@
 
 # Root docs and core non-secret config snapshots.
 !ARCHITECTURE.md
+!SYSTEM_ARCHITECTURE.md
 !TELEGRAM_EXECUTION_GUIDE.md
 !cli_guide.md
 !telegram_documentation.html.txt

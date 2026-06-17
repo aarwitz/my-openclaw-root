@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 # trader-pass-deterministic.sh
 #
 # Deterministic prefix for every trader cron pass. Runs:
 #   1. classify_regime (writes new regime row)
+#   1b. value_universe (DCF/comps fair value + margin of safety + realized vol -> valuations)
 #   2. score_hypotheses (writes quant_score on raw hypotheses)
-#   3. gate_evaluator on every proposed/critic_review intent
-#   4. execute_intent for every approved intent (LIVE — paper account only)
-#   5. reconcile (alpaca vs DB)
-#   6. snapshot writer (refreshes lidisolutions.ai data.json)
-#   7. audit_pipeline_health + audit_app_snapshot (Bessent watchdogs)
+#   3. critic_baseline (deterministic critic challenges; raises bar on rich names)
+#   4. predict (world-model probabilistic call: p_correct + name-aware return band)
+#   5. author_intents (fractional-Kelly sizing from the prediction)
+#   6. gate_evaluator on every proposed/critic_review intent -> risk_review
+#   7. risk_gate (Risk agent caps size; risk_review -> approved|blocked)
+#   8. execute_intent for every approved intent (LIVE — paper account only)
+#   9. reconcile (alpaca vs DB)
+#  10. benchmark_scoreboard (portfolio vs SPY per horizon -> benchmarks rows)
+#  11. snapshot writer (refreshes lidisolutions.ai data.json)
+#  12. audit_pipeline_health + audit_app_snapshot (Bessent watchdogs)
 #
 # Outputs ONE consolidated JSON to stdout summarizing each step. The agent
 # turn that calls this script should parse this JSON and compose the
@@ -55,16 +62,25 @@ run_step() {
 printf '{\n  "started_at": "%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
+run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
 run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses.py
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
+run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
 run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
 run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
+run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
 if [[ "$SKIP_EXECUTE" -eq 0 ]]; then
   run_step "execute_intent" 60 python3 workspaces/executor/scripts/execute_intent.py
 else
   printf ',\n  "execute_intent": {"rc": 0, "skipped": true}'
 fi
 run_step "reconcile" 30 python3 workspaces/executor/scripts/reconcile.py
+run_step "portfolio_risk" 120 python3 workspaces/trading-intel/scripts/risk_model.py snapshot
+run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scoreboard.py --backfill
+# Macro layer: keep the forward calendar populated and detect realized surprises
+# (both idempotent + cheap; pull-actuals writes a market_event on a big surprise).
+run_step "macro_seed" 30 python3 workspaces/trading-intel/scripts/macro_calendar.py seed --months 3
+run_step "macro_actuals" 45 python3 workspaces/trading-intel/scripts/macro_calendar.py pull-actuals
 if [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
   if [[ ! -d "$LIDI_REPO/public/solutions/trader_intel/app" ]]; then
     printf ',\n  "snapshot": {"rc": 2, "out": "FATAL: lidi-solutions repo not mounted at %s. Add bind mount in docker-compose.openclaw.yml and safe-restart."}' "$LIDI_REPO"

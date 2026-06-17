@@ -42,6 +42,13 @@ MIN_SCORE = 65.0
 MIN_EVIDENCE = 1
 MAX_EVIDENCE_AGE_H = 72.0
 MIN_RATIONALE_LEN = 40
+# Valuation discipline: a richly-valued name (negative margin of safety, with
+# decent valuation confidence) must clear a HIGHER conviction bar to be promoted —
+# "don't overpay unless the edge is strong." Advisory only; the risk gate is the
+# hard, non-bypassable stop.
+VAL_RICH_PENALTY = 8.0
+VAL_MIN_CONF = 0.5
+VAL_RICH_MOS = -0.10
 
 
 def _now_iso() -> str:
@@ -101,6 +108,18 @@ def _has_open_exposure(conn, ticker: str) -> bool:
     return bool(intent)
 
 
+def _valuation(conn, ticker: str) -> dict | None:
+    try:
+        row = conn.execute(
+            "SELECT margin_of_safety, confidence, zone, implied_growth, growth_assumed "
+            "FROM valuations WHERE ticker=? AND applicable=1 ORDER BY as_of DESC LIMIT 1",
+            (ticker.upper(),),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    return dict(row) if row else None
+
+
 def evaluate(conn, hyp_row) -> dict:
     hid = hyp_row["id"]
     reasons: list[str] = []
@@ -147,6 +166,22 @@ def evaluate(conn, hyp_row) -> dict:
         return {"id": hid, "skip": True,
                 "reason": f"open exposure already on {primary}"}
 
+    # Valuation discipline: rich names need stronger conviction to promote.
+    val = _valuation(conn, primary)
+    val_note = None
+    if val and val.get("margin_of_safety") is not None and val.get("confidence") is not None:
+        mos, vconf = float(val["margin_of_safety"]), float(val["confidence"])
+        if mos <= VAL_RICH_MOS and vconf >= VAL_MIN_CONF:
+            bar = MIN_SCORE + VAL_RICH_PENALTY
+            ig, ga = val.get("implied_growth"), val.get("growth_assumed")
+            val_note = (f"valuation: {val.get('zone')} (MoS {mos*100:+.0f}%, conf {vconf:.2f}"
+                        + (f", market implies {ig*100:.0f}% growth vs {ga*100:.0f}% history" if (ig is not None and ga is not None) else "")
+                        + f"); rich → conviction bar raised to {bar:.0f}")
+            if float(score) < bar:
+                return {"id": hid, "skip": True,
+                        "reason": f"{primary} richly valued (MoS {mos*100:+.0f}%, conf {vconf:.2f}); "
+                                  f"quant_score={score} < raised bar {bar:.0f}"}
+
     return {
         "id": hid,
         "promote": True,
@@ -155,6 +190,7 @@ def evaluate(conn, hyp_row) -> dict:
         "evidence_count": len(evid),
         "latest_evidence_age_h": round(age, 1),
         "regime": regime,
+        "valuation_note": val_note,
         "reasons": reasons,
     }
 
@@ -162,7 +198,7 @@ def evaluate(conn, hyp_row) -> dict:
 def promote(conn, ev: dict, hyp_row) -> dict:
     hid = ev["id"]
     rid = "critrev-baseline-" + uuid.uuid4().hex[:24]
-    addressed_json = json.dumps([
+    challenges = [
         {
             "challenge": "baseline_promotion",
             "response": (
@@ -173,7 +209,11 @@ def promote(conn, ev: dict, hyp_row) -> dict:
             ),
             "resolved": True,
         }
-    ])
+    ]
+    if ev.get("valuation_note"):
+        challenges.append({"challenge": "valuation_discipline",
+                           "response": ev["valuation_note"], "resolved": True})
+    addressed_json = json.dumps(challenges)
     conn.execute(
         "INSERT INTO critic_reviews (id, target_type, target_id, reviewed_at, "
         "reviewed_by, challenges_json, all_challenges_addressed) "
