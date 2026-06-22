@@ -508,6 +508,14 @@ body {
     min-width: 180px;
 }
 
+.issue-inline-search {
+    cursor: text;
+}
+
+.issue-inline-search::placeholder {
+    color: var(--text-secondary);
+}
+
 .inline-save-status {
     min-width: 52px;
     font-size: 0.85rem;

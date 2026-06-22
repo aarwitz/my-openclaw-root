@@ -5,10 +5,11 @@
 #
 # Exit codes:
 #   0 = clean
-#   1 = violations found (missing wrapper, unregistered governed dir contents)
+#   1 = violations found (missing wrapper, policy/guidance drift)
 #   2 = usage / dependency error
 #
-# Safe to run without the wrapper (lint must be runnable by humans, CI, and pre-commit).
+# Safe to run without the wrapper (lint must be runnable by humans, CI, and
+# pre-commit).
 
 set -euo pipefail
 
@@ -109,7 +110,8 @@ To fix:
   2. For existing scripts, prepend one of:
        sh:  source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
        py:  import sys; sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib"); from require_wrapper import require_wrapper; require_wrapper()
-  3. If a script is legitimately exempt, add it to exemptScripts[] in $POLICY_FILE with a reason.
+  3. Update prompt/docs/examples so governed scripts are shown behind ~/.openclaw/scripts/run-with-trace.sh, not direct python/bash/raw-path invocation.
+  4. If a script is legitimately exempt, add it to exemptScripts[] in $POLICY_FILE with a reason.
 EOF
   exit 1
 fi

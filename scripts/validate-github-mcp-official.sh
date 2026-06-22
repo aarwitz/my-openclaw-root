@@ -30,9 +30,15 @@ check() {
 
 failures=0
 
-check "docker available" command -v docker || failures=$((failures + 1))
-check "github mcp image available" docker image inspect ghcr.io/github/github-mcp-server:latest || failures=$((failures + 1))
-check "github mcp list-scopes" docker run --rm ghcr.io/github/github-mcp-server:latest list-scopes --toolsets=default || failures=$((failures + 1))
+runtime="${GITHUB_MCP_RUNTIME:-direct}"
+if [[ "$runtime" == "docker" ]]; then
+  check "docker available" command -v docker || failures=$((failures + 1))
+  check "github mcp image available" docker image inspect ghcr.io/github/github-mcp-server:latest || failures=$((failures + 1))
+  check "github mcp list-scopes" docker run --rm ghcr.io/github/github-mcp-server:latest list-scopes --toolsets=default || failures=$((failures + 1))
+else
+  check "npx available" command -v npx || failures=$((failures + 1))
+  check "github mcp direct package" npx -y @modelcontextprotocol/server-github --help || failures=$((failures + 1))
+fi
 
 if [[ $quick -eq 0 ]]; then
   validate_login() {

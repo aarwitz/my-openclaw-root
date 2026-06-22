@@ -26,13 +26,19 @@ Usage:
     dwight-lane-bridge.py [--dry-run] [--issue-id N] [--max-launches N]
 """
 from __future__ import annotations
+
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 import argparse
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,7 +75,11 @@ AGENT_LANES = {
     "Executor": "executor",
     "Archivist": "archivist",
 }
-# Control-plane lanes the bridge leaves alone (they self-drive).
+# Control-plane lanes the bridge leaves alone.
+#   Overseer/Dwight self-drive; Aaron is human-only.
+#   Jerry is the HOST maintainer: host-ops issues assigned to Jerry are dispatched
+#   by the separate host-resident `jerry-host-poll.py` service (it runs on the
+#   host, outside this containerized bridge), so the bridge intentionally skips it.
 CONTROL_LANES = {"Overseer", "Dwight", "Aaron", "Jerry"}
 
 
@@ -334,6 +344,20 @@ def dispatch_agent_lane(issue: dict, lane_label: str, agent_id: str, dry_run: bo
             if isinstance(value, str) and value.strip():
                 reply_text = value.strip()
                 break
+        # The `openclaw agent --json` envelope nests the assistant prose under
+        # result.payloads[].text; prefer that over dumping the raw JSON so the
+        # captured evidence comment is human-readable.
+        if not reply_text and isinstance(parsed, dict):
+            result = parsed.get("result")
+            payloads = result.get("payloads") if isinstance(result, dict) else None
+            if isinstance(payloads, list):
+                texts = [
+                    str(p.get("text")).strip()
+                    for p in payloads
+                    if isinstance(p, dict) and isinstance(p.get("text"), str) and p.get("text").strip()
+                ]
+                if texts:
+                    reply_text = "\n\n".join(texts)
         if not reply_text and isinstance(parsed, dict):
             reply_text = json.dumps(parsed, indent=2)[:6000]
     except json.JSONDecodeError:

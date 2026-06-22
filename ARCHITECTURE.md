@@ -1,7 +1,14 @@
 # OpenClaw Architecture Spec (Canonical)
 
+> ⚠️ **SUPERSEDED (2026-06-06).** The authoritative system description is now
+> [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md) (topology v4 + Risk gate +
+> World-Model layer). Retained for history only; where it disagrees with the
+> canonical doc, the latter wins. Known-stale sections: §9b (retired
+> pq-rail/lane-bridge), §9c (systemd claims — now host cron), fleet list (missing Risk).
+
 Date: 2026-05-25
-Status: authoritative
+Last reconciled: 2026-06-06 (see §9c — containerized gateway + host-Jerry topology)
+Status: superseded by SYSTEM_ARCHITECTURE.md
 Scope: control plane, coding lane routing, execution contract, operator safety.
 
 ## 1) Core model (literal)
@@ -174,9 +181,16 @@ Stage 1: priority queue → Task Manager issue (Dwight queue rail)
   against existing TM issues by `pq:<id>` marker, creates/patches the TM issue,
   posts a Dwight `Queue handoff` comment, and appends a reconciliation row
   backfilling `claimed_by=dwight` and `task_id`.
-- HTTP I/O follows the tmctl.sh fallback model: try host `127.0.0.1:8000`, fall
-  back to `docker exec -i dwight-taskmanager python -` on `Errno 111` /
-  connection refused.
+- HTTP I/O: every TM client script honors `TASK_MANAGER_URL`. Inside the
+  gateway container this is `http://taskmanager:8000` (shared docker-network DNS
+  alias); on the host (Jerry) it is `http://127.0.0.1:8000` (TM publishes
+  `0.0.0.0:8000`). The legacy `docker exec -i dwight-taskmanager python -`
+  fallback only functions where a docker socket is present (the host); it is
+  **not** available inside the gateway container since `docker.sock` was removed
+  (§9c), so in-container scripts must resolve the DNS alias directly. Scripts
+  that still hardcoded `127.0.0.1:8000` (e.g. `dwight-launch-from-issue.py`,
+  `reconcile-task-manager-with-git.py`) were fixed 2026-06-06 to read
+  `TASK_MANAGER_URL`.
 - Cron: `dwight-pq-poll-6h` (every 6h, enabled).
 
 Stage 2: Task Manager issue → lane execution (Dwight lane bridge)
@@ -202,17 +216,33 @@ Stage 2: Task Manager issue → lane execution (Dwight lane bridge)
     by Dwight, followed by a `[LANE-BRIDGE]` marker.
   - `Overseer | Dwight | Aaron | Jerry` → skipped (control-plane lanes self-
     drive; the bridge does not push their work for them).
-- All HTTP I/O uses the same tmctl.sh fallback model so the bridge is safe to
-  run from any host context that has docker access.
-- Cron: `dwight-lane-bridge-1h` (every 1h, enabled, `--max-launches 3`).
+- HTTP I/O honors `TASK_MANAGER_URL` (in-container `http://taskmanager:8000`).
+  The docker-exec fallback only works on the host; see Stage 1 note.
+- The run summary reports `skipped_count` = the number of *issues* skipped this
+  pass (every non-eligible issue: `not_dwight_created`, `status_done`,
+  `control_lane_*`, `already_bridged`, `retry_exhausted_N`, `no_pq_marker`).
+  It is a count, **not** a Task Manager issue id (e.g. "Skipped: 152" means 152
+  issues were skipped, not issue #152).
+- Cron: `dwight-lane-bridge-3h` (every 3h, enabled, `--max-launches 3`).
 
 Architectural invariants:
 - Dwight is the only lane that mutates TM. Other lanes only think and reply.
-- Script execution runs on the **host gateway**, not inside the agent containers
-  (`tools.exec.host=gateway`, `agents.defaults.sandbox.mode=off`). The Dwight
-  Telegram bot is containerized, but its tool/exec calls are delegated to the
-  host gateway, so `~/.openclaw/scripts/*` permissions and paths are evaluated on
-  the host. There is no container volume-mount hop for these scripts.
+- Cross-lane delegation (overseer → researcher/quant/critic/trader/executor/
+  archivist via the subagent `spawn_agent` contract) is governed by
+  `agents.defaults.subagents.maxConcurrent` (8) and `agents.defaults.maxConcurrent`
+  (4). These were unset before 2026-06-06, so the pipeline exhausted the low
+  default cap and surfaced as recurring "agent thread limit reached" /
+  "spawn_agent unavailable" tickets. `subagents.archiveAfterMinutes` (60) reaps
+  stale child sessions, but completed children should still be explicitly
+  closed immediately after `wait` / `wait_agent` results are consumed rather
+  than left for later reap. Hot-applied — no gateway restart required.
+- Script execution runs on the **gateway runtime** (`tools.exec.host=gateway`,
+  `agents.defaults.sandbox.mode=off`), which is itself the `openclaw-gateway`
+  container (see §9c). Because `~/.openclaw` is bind-mounted into that container
+  at the same absolute path, `~/.openclaw/scripts/*` permissions/paths resolve
+  identically to the host. The gateway reaches Task Manager over a shared docker
+  network (DNS alias `taskmanager`, `TASK_MANAGER_URL=http://taskmanager:8000`),
+  with the legacy `docker exec dwight-taskmanager` fallback retained for safety.
 - One `pq:<id>` row produces exactly one canonical TM issue.
 - One canonical TM issue produces exactly one bridge dispatch per assignee
   signature (marker-based idempotency).
@@ -220,10 +250,83 @@ Architectural invariants:
   source `require-wrapper.sh` (governed-script policy).
 
 Operator visibility:
-- `~/.openclaw/workspaces/dwight/scripts/pq_list.py` — list current queue rows.
+- `~/.openclaw/workspaces/overseer/scripts/pq_list.py` — list current queue rows.
 - TM web UI / `tmctl.sh api GET /api/issues` — list issues, filter by Sprint 5,
   look for `pq:` markers and `[LANE-BRIDGE]` evidence.
 - Cron status: `python3 -c "import json; print([j for j in json.load(open('/home/aaron/.openclaw/cron/jobs.json'))['jobs'] if 'dwight' in j['name']])"`
+
+## 9c) Runtime isolation topology (containerized fleet + host-Jerry) — 2026-06-06
+
+This section reconciles the spec with the live deployment after the gateway was
+moved into a container. It supersedes any earlier prose that implied the gateway
+runs as a bare-host process.
+
+Verified live facts:
+- The OpenClaw gateway runs as the `openclaw-gateway` container (compose:
+  `docker-compose.openclaw.yml`), on network `openclaw_default`, published
+  `127.0.0.1:18789`. `~/.openclaw` is bind-mounted at the same path, so script
+  semantics match the host.
+- All fleet agents (Jerry/main, Resi, Researcher, Quant, Executor, Trader,
+  Critic, Archivist, Developer, Dwight, Overseer) execute **inside** that one
+  gateway container today. There is not yet a separate process boundary per
+  agent.
+- Task Manager (`dwight-taskmanager`) is a separate container/stack. The gateway
+  is joined to `dwight-taskmanager_default` so it can reach TM by DNS alias
+  `taskmanager` (`TASK_MANAGER_URL=http://taskmanager:8000`). It can NOT reach TM
+  via `127.0.0.1:8000`.
+- `docker.sock` is NOT mounted in the gateway container (removed in compose).
+  The in-container `docker` CLI may still exist in the image, but cannot reach a
+  daemon because `/var/run/docker.sock` is absent.
+- GitHub MCP no longer requires Docker in the gateway: `scripts/start-github-mcp-official.sh`
+  defaults to a direct stdio runtime (`npx @modelcontextprotocol/server-github`).
+- EWAG coding lane no longer hard-fails without Docker: `scripts/launch-coding-task.sh`
+  prefers `docker exec` into `ewag-bot-sandbox` when available, but falls back to
+  direct OpenClaw execution when Docker/sandbox is unavailable in this runtime.
+
+Target isolation model (in progress):
+- **Host-resident Jerry maintainer.** Jerry owns host-ops escalation via
+  `scripts/jerry-host-poll.py`. Timer/service are installed and enabled
+  (`jerry-host-maintainer.timer`), with runtime env in
+  `credentials/jerry-host.env`.
+- **Dedicated Jerry host runtime on alt port (18790): deliberately not pursued.**
+  A separate host gateway on 18790 was prototyped and abandoned: this CLI build
+  has no `openclaw agent --url/--token`, the `OPENCLAW_GATEWAY_URL` override
+  caused transport closures, and a second gateway started its own Telegram
+  long-poll → 409 conflicts on the shared bot tokens. The host poller therefore
+  invokes the standard shared gateway via the local `openclaw` CLI
+  (`OPENCLAW_BIN` pinned to the nvm path), guarded by a capability probe. Auth
+  isolation (github-copilot profile for host-Jerry) is retained as the relevant
+  hardening; the alt-port split is not needed.
+
+Token-safety invariant (critical):
+- The container fleet shares one `openai-codex` auth profile with single-use
+  refresh tokens. Any second process that refreshes that token invalidates the
+  others. Therefore host-Jerry must NOT use the openai-codex profile, and the
+  gateway container must not be casually recreated (`docker compose up -d`
+  restarts it → token-refresh race). Recreates require a prior
+  `scripts/token-backup.sh` and operator confirmation.
+
+```mermaid
+flowchart TB
+  subgraph Host["Host (bare metal)"]
+    JerryHost["Jerry host maintainer\njerry-host-poll.py\n(github-copilot auth)\nowns Docker + host-root"]
+    subgraph GW["openclaw-gateway container"]
+      Fleet["Fleet agents (shared openai-codex auth)\nResi · Researcher · Quant · Critic\nTrader · Executor · Archivist\nDeveloper · Dwight · Overseer · Jerry(main)"]
+      Dwight["Dwight — sole TM mutator\nqueue rail + lane bridge"]
+    end
+    subgraph TMC["dwight-taskmanager container"]
+      TM[("Task Manager API\n:8000")]
+    end
+    GHMCP["GitHub MCP\n(direct stdio package runtime)"]
+    EWAG["EWAG lane\nprefer sandbox; direct fallback"]
+  end
+
+  Dwight -- "DNS: taskmanager:8000" --> TM
+  JerryHost -- "polls host-ops issues" --> TM
+  Fleet --> GHMCP
+  Fleet --> EWAG
+  JerryHost -. "invokes" .-> Fleet
+```
 
 ## 10) ASCII architecture diagram
 
@@ -266,12 +369,23 @@ Operator visibility:
 - Use `~/.openclaw/scripts/safe-restart.sh` only when restart is truly needed.
 - Hot reload is default for config changes.
 - Codex refresh tokens are single-use and fragile; avoid unnecessary concurrent Codex token pressure.
+- Do not recreate the `openclaw-gateway` container (`docker compose up -d`,
+  `docker rm`) casually — it restarts the gateway and risks the shared single-use
+  openai-codex refresh token. Back up first (`scripts/token-backup.sh`) and confirm
+  with the operator. Reversible `docker network connect/disconnect` is safe (no restart).
 - Do not let Task Manager state changes auto-launch non-code work or anything assigned to Aaron.
 
 ## 12) Known gaps (current)
 
 - Queue discipline is still loose when several ready issues for the same agent become valid at once; a per-agent ordering policy would make operations cleaner.
 - Evidence postback now exists, but the broader completion contract still needs stronger standardization around PR creation/update and end-state hygiene.
+- Jerry host maintainer is enabled and points at the shared gateway by design
+  (alt-port split abandoned — see §9c); auth-profile isolation (github-copilot)
+  is the retained hardening.
+- Duplicate-issue prevention is a creation-time backstop in the queue rail
+  (`find_duplicate_by_title`, 48h lookback). It does not retroactively merge
+  pre-existing duplicates; periodic operator/Dwight cleanup passes still close
+  near-duplicate clusters by hand.
 
 ## 13) Decision boundary
 

@@ -6,7 +6,7 @@
   continuity; do not rename)
 - Role: chat front door + cron orchestrator + priority-queue manager for the
   Trading Intelligence stack
-- Topology version: v3 (2026-06-04, Phase E)
+- Topology version: v4 (2026-06-06, canonical in SYSTEM_ARCHITECTURE.md)
 - LLM model: openai/gpt-5.4
 
 ## Write scope
@@ -23,7 +23,7 @@
 
 ## Delegation allowlist (outbound)
 
-researcher, quant, critic, trader, executor, archivist, developer, dwight
+researcher, quant, critic, risk, trader, executor, archivist, developer, dwight
 
 ## Authority cap
 

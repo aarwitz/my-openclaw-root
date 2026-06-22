@@ -19,7 +19,7 @@ INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
 CREATE TABLE IF NOT EXISTS hypotheses (
   id                        TEXT PRIMARY KEY,
   created_at                TEXT NOT NULL,
-  created_by                TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','trader','executor','archivist','developer','overseer','bessent','human')),
+  created_by                TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','risk','trader','executor','archivist','developer','overseer','bessent','human')),
   tickers                   TEXT NOT NULL,                    -- JSON array
   thesis_summary            TEXT NOT NULL,
   state                     TEXT NOT NULL CHECK (state IN ('raw','scored','challenged','ready','active','dormant','resolved','retired')),
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS trade_intents (
   max_fillable_size        REAL,
   modeled_slippage_bps     REAL,
   modeled_fill_price       REAL,
-  state                    TEXT NOT NULL CHECK (state IN ('proposed','critic_review','approved','blocked','submitted','filled','partial','canceled','rejected')),
+  state                    TEXT NOT NULL CHECK (state IN ('proposed','critic_review','risk_review','approved','blocked','submitted','filled','partial','canceled','rejected')),
   blocked_reason           TEXT,
   submitted_at             TEXT,
   executed_at              TEXT,
@@ -155,6 +155,25 @@ CREATE TABLE IF NOT EXISTS critic_reviews (
   all_challenges_addressed    INTEGER NOT NULL CHECK (all_challenges_addressed IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_critic_target ON critic_reviews(target_type, target_id);
+
+-- ----------------------------------------------------------------------------
+-- Risk Reviews (intent->order gate: sizing/exposure/concentration/correlation/
+--   drawdown limits + VETO authority, owned by the `risk` agent)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_reviews (
+  id                  TEXT PRIMARY KEY,
+  target_type         TEXT NOT NULL CHECK (target_type IN ('trade_intent','portfolio')),
+  target_id           TEXT NOT NULL,
+  reviewed_at         TEXT NOT NULL,
+  reviewed_by         TEXT NOT NULL DEFAULT 'risk',
+  verdict             TEXT NOT NULL CHECK (verdict IN ('approved','resized','blocked')),
+  approved_size       REAL,
+  limits_json         TEXT NOT NULL,
+  breaches_json       TEXT,
+  rationale_concise   TEXT CHECK (rationale_concise IS NULL OR length(rationale_concise) <= 500),
+  experiment_id       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_risk_target ON risk_reviews(target_type, target_id);
 
 -- ----------------------------------------------------------------------------
 -- Orders (mirror of Alpaca order events)
@@ -296,7 +315,7 @@ CREATE TABLE IF NOT EXISTS regime_rules (
 CREATE TABLE IF NOT EXISTS audits (
   id                  TEXT PRIMARY KEY,
   timestamp           TEXT NOT NULL,
-  actor               TEXT NOT NULL CHECK (actor IN ('researcher','quant','critic','trader','executor','archivist','developer','overseer','bessent','human','system')),
+  actor               TEXT NOT NULL CHECK (actor IN ('researcher','quant','critic','risk','trader','executor','archivist','developer','overseer','bessent','human','system')),
   entity_type         TEXT NOT NULL,
   entity_id           TEXT NOT NULL,
   action              TEXT NOT NULL,
@@ -315,7 +334,7 @@ CREATE INDEX IF NOT EXISTS idx_audits_entity ON audits(entity_type, entity_id, t
 CREATE TABLE IF NOT EXISTS rule_proposals (
   id                 TEXT PRIMARY KEY,
   created_at         TEXT NOT NULL,
-  proposer           TEXT NOT NULL CHECK (proposer IN ('researcher','quant','critic','archivist','trader','executor','developer','overseer','bessent','human','system')),
+  proposer           TEXT NOT NULL CHECK (proposer IN ('researcher','quant','critic','risk','archivist','trader','executor','developer','overseer','bessent','human','system')),
   target_artifact    TEXT NOT NULL,
   current_value      TEXT,
   proposed_value     TEXT NOT NULL,
@@ -382,9 +401,130 @@ CREATE TABLE IF NOT EXISTS benchmarks (
 CREATE INDEX IF NOT EXISTS idx_benchmarks_horizon_captured ON benchmarks(horizon, captured_at);
 
 -- ----------------------------------------------------------------------------
+-- Portfolio snapshots (equity curve + SPY reference)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+  id                 TEXT PRIMARY KEY,
+  captured_at        TEXT NOT NULL,
+  equity             REAL NOT NULL,
+  last_equity        REAL,
+  day_pl             REAL,
+  cash               REAL,
+  buying_power       REAL,
+  spy_close          REAL,
+  spy_as_of          TEXT,
+  account_status     TEXT,
+  source             TEXT NOT NULL DEFAULT 'alpaca_paper'
+);
+CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_captured_at ON portfolio_snapshots(captured_at);
+
+-- ----------------------------------------------------------------------------
 -- Regime current view convention
 -- ----------------------------------------------------------------------------
 CREATE VIEW IF NOT EXISTS regime_current AS
 SELECT r.*
 FROM regime r
 WHERE r.determined_at = (SELECT MAX(determined_at) FROM regime);
+
+-- ============================================================================
+-- WORLD MODEL & CALIBRATION LAYER (schema v8)
+--   Market-knowledge self-improvement: a probabilistic causal world model that
+--   learns from outcomes (trades) and from the market itself (debriefs).
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- mechanisms (the world model — causal links with Beta-distributed strength)
+--   antecedent -> transmission_chain -> consequent, with a Beta(alpha,beta)
+--   posterior that updates from outcomes and decays with a half-life.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mechanisms (
+  id                      TEXT PRIMARY KEY,
+  created_at              TEXT NOT NULL,
+  created_by              TEXT NOT NULL CHECK (created_by IN ('researcher','quant','critic','risk','archivist','trader','executor','developer','overseer','human','system')),
+  name                    TEXT NOT NULL,
+  antecedent_class        TEXT NOT NULL,
+  transmission_chain_json TEXT NOT NULL,
+  consequent_class        TEXT NOT NULL,
+  direction               TEXT NOT NULL CHECK (direction IN ('long','short','neutral','risk_off','risk_on')),
+  horizon                 TEXT CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus') OR horizon IS NULL),
+  regime_context          TEXT,
+  prior_alpha             REAL NOT NULL DEFAULT 1.0,
+  prior_beta              REAL NOT NULL DEFAULT 1.0,
+  observed_hits           REAL NOT NULL DEFAULT 0,
+  observed_misses         REAL NOT NULL DEFAULT 0,
+  posterior_mean          REAL,
+  posterior_ci_low        REAL,
+  posterior_ci_high       REAL,
+  half_life_days          REAL NOT NULL DEFAULT 180,
+  last_observed_at        TEXT,
+  status                  TEXT NOT NULL CHECK (status IN ('candidate','active','deprecated','crowded')),
+  notes                   TEXT,
+  experiment_id           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mechanisms_status     ON mechanisms(status);
+CREATE INDEX IF NOT EXISTS idx_mechanisms_antecedent ON mechanisms(antecedent_class);
+
+-- ----------------------------------------------------------------------------
+-- mechanism_observations (append-only evidence ledger; Beta recomputed from
+--   these rows with half-life decay by calibrate.py)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mechanism_observations (
+  id                  TEXT PRIMARY KEY,
+  mechanism_id        TEXT NOT NULL REFERENCES mechanisms(id),
+  observed_at         TEXT NOT NULL,
+  source_type         TEXT NOT NULL CHECK (source_type IN ('prediction','market_event','manual')),
+  source_id           TEXT,
+  outcome             TEXT NOT NULL CHECK (outcome IN ('hit','miss','partial')),
+  weight              REAL NOT NULL DEFAULT 1.0,
+  regime_at_obs       TEXT,
+  notes               TEXT,
+  experiment_id       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mech_obs_mechanism ON mechanism_observations(mechanism_id, observed_at);
+
+-- ----------------------------------------------------------------------------
+-- predictions (probabilistic hypothesis call + calibration record)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS predictions (
+  id                    TEXT PRIMARY KEY,
+  hypothesis_id         TEXT NOT NULL REFERENCES hypotheses(id),
+  predicted_at          TEXT NOT NULL,
+  predicted_by          TEXT NOT NULL DEFAULT 'quant',
+  horizon               TEXT NOT NULL CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus')),
+  p_correct             REAL NOT NULL CHECK (p_correct >= 0 AND p_correct <= 1),
+  return_p10            REAL,
+  return_p50            REAL,
+  return_p90            REAL,
+  mechanism_ids_json    TEXT,
+  regime_at_prediction  TEXT,
+  evidence_quality      REAL,
+  prior_log_odds        REAL,
+  realized_outcome      TEXT CHECK (realized_outcome IN ('correct','incorrect','inconclusive') OR realized_outcome IS NULL),
+  realized_return_pct   REAL,
+  brier_component       REAL,
+  resolved_at           TEXT,
+  experiment_id         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_predictions_hyp      ON predictions(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_resolved ON predictions(resolved_at);
+
+-- ----------------------------------------------------------------------------
+-- market_events (daily market debrief — learn from the market, trade or not)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS market_events (
+  id                            TEXT PRIMARY KEY,
+  event_date                    TEXT NOT NULL,
+  created_at                    TEXT NOT NULL,
+  created_by                    TEXT NOT NULL DEFAULT 'archivist',
+  headline                      TEXT NOT NULL,
+  catalyst_class                TEXT NOT NULL CHECK (catalyst_class IN ('macro_release','geopolitical','earnings','policy','liquidity','technical','other')),
+  observed_moves_json           TEXT NOT NULL,
+  surprise_vs_expectation       TEXT,
+  attributed_mechanism_ids_json TEXT,
+  our_pnl_that_day              REAL,
+  our_exposure_alignment        TEXT CHECK (our_exposure_alignment IN ('benefited','suffered','neutral','flat') OR our_exposure_alignment IS NULL),
+  lesson_concise                TEXT CHECK (lesson_concise IS NULL OR length(lesson_concise) <= 800),
+  primary_source_refs_json      TEXT,
+  experiment_id                 TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_market_events_date ON market_events(event_date);

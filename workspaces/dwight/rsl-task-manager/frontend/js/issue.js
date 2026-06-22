@@ -4,9 +4,11 @@ if (!username) {
 }
 
 document.getElementById('currentUser').textContent = username;
-const { escapeHtml, formatStatus, fetchJson, buildSprintSelectOptions, fetchSprints } = window.TM_SHARED;
+const { escapeHtml, formatStatus, fetchJson, buildSprintSelectOptions, fetchSprints, fetchAssignableUsers } = window.TM_SHARED;
 let currentIssue = null;
 let issueSprints = [];
+let assignableUsers = [];
+let createIssueSubmitInFlight = false;
 const DEFAULT_GITHUB_REPO = 'aarwitz/Task-Manager';
 const urlParams = new URLSearchParams(window.location.search);
 const issueId = urlParams.get('id');
@@ -43,7 +45,9 @@ const newIssueImagesLabel = document.getElementById('newIssueImagesLabel');
 const newIssueSprintSelect = document.getElementById('newIssueSprintId');
 const issueStatusSelect = document.getElementById('issueStatusSelect');
 const issueSprintSelect = document.getElementById('issueSprintSelect');
-const issueAssignedToSelect = document.getElementById('issueAssignedToSelect');
+const issueAssignedToInput = document.getElementById('issueAssignedToInput');
+const newIssueAssignedToInput = document.getElementById('newIssueAssignedToInput');
+const assignableUsersList = document.getElementById('assignableUsersList');
 const issueStatusSaving = document.getElementById('issueStatusSaving');
 const issueSprintSaving = document.getElementById('issueSprintSaving');
 const issueAssignedToSaving = document.getElementById('issueAssignedToSaving');
@@ -52,6 +56,7 @@ const commentFileNameLabel = document.getElementById('commentFileName');
 
 createIssueBtn.addEventListener('click', async () => {
     await populateIssueSprintOptions();
+    await ensureAssignableUsersLoaded();
     createIssueModal.classList.add('show');
 });
 closeModal.addEventListener('click', () => createIssueModal.classList.remove('show'));
@@ -80,6 +85,27 @@ function setInlineSavingStatus(element, message = '', isError = false) {
 
 function renderTextWithLineBreaks(text) {
     return escapeHtml(text || '').replace(/\n/g, '<br>');
+}
+
+function renderAssignableUserOptions(usernames) {
+    if (!assignableUsersList) return;
+    assignableUsersList.innerHTML = (usernames || []).map((candidate) => (
+        `<option value="${escapeHtml(candidate)}"></option>`
+    )).join('');
+}
+
+function resolveAssignableUser(value, { allowBlank = true } = {}) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return allowBlank ? '' : null;
+    if (trimmed.toLowerCase() === 'unassigned') return '';
+    return assignableUsers.find((candidate) => candidate.toLowerCase() === trimmed.toLowerCase()) || null;
+}
+
+async function ensureAssignableUsersLoaded() {
+    if (assignableUsers.length) return assignableUsers;
+    assignableUsers = await fetchAssignableUsers();
+    renderAssignableUserOptions(assignableUsers);
+    return assignableUsers;
 }
 
 function formatUploadMeta(image) {
@@ -219,11 +245,13 @@ async function uploadIssueImages(issueId, files, sourceType, commentId = null) {
 
 document.getElementById('createIssueForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (createIssueSubmitInFlight) return;
+    const assignedTo = resolveAssignableUser(newIssueAssignedToInput?.value, { allowBlank: true });
     const payload = {
         title: document.getElementById('newIssueTitle').value,
         description: document.getElementById('newIssueDescription').value,
         created_by: username,
-        assigned_to: document.getElementById('newIssueAssignedTo').value || null,
+        assigned_to: assignedTo || null,
         sprint_id: newIssueSprintSelect.value ? Number(newIssueSprintSelect.value) : null,
         branch: document.getElementById('newIssueBranch').value.trim() || null,
         repo_slug: document.getElementById('newIssueRepoSlug')?.value.trim() || null,
@@ -232,7 +260,17 @@ document.getElementById('createIssueForm').addEventListener('submit', async (e) 
         story_points: document.getElementById('newIssueStoryPoints').value ? Number(document.getElementById('newIssueStoryPoints').value) : null,
         blocked_reason: document.getElementById('newIssueBlockedReason').value.trim() || null
     };
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const originalLabel = submitButton?.textContent || '';
     try {
+        createIssueSubmitInFlight = true;
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.textContent = 'Creating...';
+        }
+        if (newIssueAssignedToInput?.value && assignedTo === null) {
+            throw new Error(`Unknown assignee. Choose one of: ${assignableUsers.join(', ')}`);
+        }
         const createdIssue = await fetchJson('/api/issues', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -242,15 +280,23 @@ document.getElementById('createIssueForm').addEventListener('submit', async (e) 
         createIssueModal.classList.remove('show');
         document.getElementById('createIssueForm').reset();
         newIssueImagesLabel.textContent = 'No files selected';
+        if (newIssueAssignedToInput) newIssueAssignedToInput.value = '';
         window.location.href = `/static/issue.html?id=${createdIssue.id}`;
     } catch (error) {
         console.error('Error:', error);
         alert(error.message || 'An error occurred');
+    } finally {
+        createIssueSubmitInFlight = false;
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = originalLabel;
+        }
     }
 });
 
 async function loadIssue() {
     try {
+        await ensureAssignableUsersLoaded();
         const issue = await fetchJson(`/api/issues/${issueId}`);
         currentIssue = issue;
         document.getElementById('issueId').textContent = `#${issue.id}`;
@@ -259,8 +305,8 @@ async function loadIssue() {
         document.getElementById('issueDescription').innerHTML = `<div class="issue-text">${renderTextWithLineBreaks(issue.description)}</div>${renderInlineImages(descriptionImages)}`;
         document.getElementById('issueCreated').textContent = new Date(issue.created_at).toLocaleString();
         document.getElementById('issueCreatedBy').textContent = issue.created_by;
-        issueAssignedToSelect.value = issue.assigned_to || '';
-        issueAssignedToSelect.disabled = false;
+        issueAssignedToInput.value = issue.assigned_to || '';
+        issueAssignedToInput.disabled = false;
         document.getElementById('issueBranch').innerHTML = renderBranchDisplay(issue);
         const statusBadge = document.getElementById('issueStatus');
         statusBadge.textContent = formatStatus(issue.status);
@@ -528,23 +574,28 @@ issueSprintSelect.addEventListener('change', async (event) => {
         issueSprintSelect.disabled = false;
     }
 });
-issueAssignedToSelect.addEventListener('change', async (event) => {
+issueAssignedToInput.addEventListener('change', async (event) => {
     const previousValue = currentIssue?.assigned_to || '';
-    const nextValue = event.target.value;
+    const nextValue = resolveAssignableUser(event.target.value, { allowBlank: true });
+    if (event.target.value && nextValue === null) {
+        issueAssignedToInput.value = previousValue;
+        setInlineSavingStatus(issueAssignedToSaving, `Unknown assignee. Choose one of: ${assignableUsers.join(', ')}`, true);
+        return;
+    }
     if (!currentIssue || nextValue === previousValue) return;
-    issueAssignedToSelect.disabled = true;
+    issueAssignedToInput.disabled = true;
     setInlineSavingStatus(issueAssignedToSaving, 'Saving...');
     try {
         currentIssue = await patchIssue({ assigned_to: nextValue === '' ? null : nextValue });
-        issueAssignedToSelect.value = currentIssue.assigned_to || '';
+        issueAssignedToInput.value = currentIssue.assigned_to || '';
         renderActivity(currentIssue.activity_events || []);
         setInlineSavingStatus(issueAssignedToSaving, 'Saved');
         setTimeout(() => setInlineSavingStatus(issueAssignedToSaving, ''), 1200);
     } catch (error) {
-        issueAssignedToSelect.value = previousValue;
+        issueAssignedToInput.value = previousValue;
         setInlineSavingStatus(issueAssignedToSaving, error.message || 'Failed to save', true);
     } finally {
-        issueAssignedToSelect.disabled = false;
+        issueAssignedToInput.disabled = false;
     }
 });
 

@@ -2,6 +2,8 @@
 
 A lightweight issue, sprint, and execution queue for the RSL workflow. It tracks planning data, branch/repo context, comments, evidence, and autonomous launcher readiness in one place.
 
+Runtime note: the canonical SQLite database for this workspace lives at `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`. Any repo-local `rsl-task-manager/taskmanager.db` file is non-canonical and should not be treated as the live runtime state.
+
 ## Features
 
 - **Trusted-user login** - Canonical Task Manager identities for internal users
@@ -63,7 +65,8 @@ Key notes:
 - `tmctl` manages the Dwight-owned docker compose runtime
 - Task Manager must only be run and developed from this containerized workspace path
 - Non-Dwight agents are read-only observers; only Dwight mutates Task Manager state
-- `tmctl verify` enforces baseline integrity checks (issues, sprints, comments, Sprint 5 title, IDs 120-125)
+- Canonical runtime DB: `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
+- `tmctl verify` checks service reachability, API/list integrity, DB readability, and the continuity of issue IDs 120-125
 - Set `TM_BASE_URL` if the service is not on `http://127.0.0.1:8000`
 - LAN exposure is controlled by `TM_PUBLISH_HOST` (default `0.0.0.0`); set to `127.0.0.1` for localhost-only
 
@@ -172,7 +175,7 @@ Task-Manager/
 │   └── js/               # Shared frontend behavior
 ├── requirements.txt      # Python dependencies
 ├── start.sh              # Local launcher helper
-└── taskmanager.db        # SQLite database (created on first run)
+└── scripts/              # Operator tooling; canonical DB lives one level above repo root
 ```
 
 ## Network Access
@@ -184,7 +187,7 @@ The container binds Task Manager to `127.0.0.1:8000` on the host.
 
 ## Notes
 
-- All data is stored locally in `taskmanager.db`
+- All runtime data is stored in the workspace-level SQLite file at `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
 - Issue IDs are monotonically increasing and never reused
 - The current auth model is intentionally lightweight and should be treated as internal-only
 - Story points are the only sizing measure used in the product

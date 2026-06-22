@@ -34,24 +34,50 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def http_get(
-    url: str,
-    headers: dict[str, str] | None = None,
-    timeout: float = 10.0,
-    retries: int = 1,
-) -> bytes:
-    """GET with simple backoff. Raises ConnectorError on persistent failure."""
+RATE_LIMIT_CODES = {429, 502, 503, 504}   # rate-limit / transient-server -> back off LONGER and retry
+
+
+def _request(req: "urllib.request.Request", timeout: float, retries: int) -> bytes:
+    """Issue a request with rate-limit-aware backoff. On 429/5xx, honor the `Retry-After` header if
+    present, else exponential backoff capped at 30s (so a burst self-heals instead of failing). Other
+    transient errors get a short backoff. Raises ConnectorError after exhausting retries."""
     last_err: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            req = urllib.request.Request(url, headers=headers or {})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if attempt >= retries:
+                break
+            if exc.code in RATE_LIMIT_CODES:
+                ra = exc.headers.get("Retry-After") if exc.headers else None
+                try:
+                    wait = float(ra) if ra else None
+                except (TypeError, ValueError):
+                    wait = None
+                time.sleep(min(30.0, wait if wait is not None else 2.0 * (2 ** attempt)))  # 2,4,8,16,30
+            else:
+                time.sleep(0.6 * (2 ** attempt))
+        except (urllib.error.URLError, TimeoutError) as exc:
             last_err = exc
             if attempt < retries:
                 time.sleep(0.6 * (2 ** attempt))
-    raise ConnectorError(f"http_get failed for {url}: {last_err}")
+    raise ConnectorError(f"http request failed for {getattr(req, 'full_url', '?')}: {last_err}")
+
+
+def http_get(url: str, headers: dict[str, str] | None = None, timeout: float = 10.0,
+             retries: int = 3) -> bytes:
+    """GET with 429/Retry-After-aware backoff. Raises ConnectorError on persistent failure."""
+    return _request(urllib.request.Request(url, headers=headers or {}), timeout, retries)
+
+
+def http_post(url: str, payload: Any, headers: dict[str, str] | None = None, timeout: float = 25.0,
+              retries: int = 3) -> bytes:
+    """POST JSON with the same 429/Retry-After-aware backoff."""
+    body = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload).encode()
+    h = {"content-type": "application/json", **(headers or {})}
+    return _request(urllib.request.Request(url, data=body, headers=h, method="POST"), timeout, retries)
 
 
 def cache_write(key: str, payload: dict[str, Any]) -> None:

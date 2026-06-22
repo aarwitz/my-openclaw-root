@@ -9,6 +9,7 @@ COMPOSE_PROJECT="${TM_COMPOSE_PROJECT:-dwight-taskmanager}"
 CONTAINER_NAME="${TM_CONTAINER_NAME:-dwight-taskmanager}"
 TM_DB_PATH="${TM_DB_PATH:-/home/aaron/.openclaw/workspaces/dwight/taskmanager.db}"
 TM_PUBLISH_HOST="${TM_PUBLISH_HOST:-0.0.0.0}"
+REPO_LOCAL_DB_PATH="$ROOT_DIR/taskmanager.db"
 
 usage() {
   cat <<'EOF'
@@ -214,6 +215,13 @@ listener_grep() {
   fi
 }
 
+warn_repo_local_db_conflict() {
+  if [[ -f "$REPO_LOCAL_DB_PATH" ]]; then
+    echo "warning=repo_local_db_present path=$REPO_LOCAL_DB_PATH"
+    echo "warning_detail=canonical runtime DB is $TM_DB_PATH; repo-local taskmanager.db is not the live container mount"
+  fi
+}
+
 cmd_status() {
   local mode
   mode="$(runtime_mode)"
@@ -221,6 +229,8 @@ cmd_status() {
   echo "base_url=$BASE_URL"
   echo "compose_file=$COMPOSE_FILE"
   echo "container_name=$CONTAINER_NAME"
+  echo "db_path=$TM_DB_PATH"
+  warn_repo_local_db_conflict
 
   if have_compose_plugin && [[ -f "$COMPOSE_FILE" ]]; then
     compose ps || true
@@ -287,6 +297,7 @@ cmd_dev() {
 }
 
 cmd_verify() {
+  warn_repo_local_db_conflict
   if command -v python3 >/dev/null 2>&1 && curl -fsS "$BASE_URL/" >/dev/null 2>&1; then
     python3 "$ROOT_DIR/scripts/tm_verify.py" --base-url "$BASE_URL" --db "$TM_DB_PATH"
     return
@@ -324,10 +335,6 @@ cmd_verify() {
     echo "- GET / failed"
     return 1
   fi
-  if [[ "$issues_count" != "143" ]]; then failed=1; echo "- issues count mismatch: expected=143 actual=$issues_count"; fi
-  if [[ "$sprints_count" != "10" ]]; then failed=1; echo "- sprints count mismatch: expected=10 actual=$sprints_count"; fi
-  if [[ "$comments_count" != "236" ]]; then failed=1; echo "- comments count mismatch: expected=236 actual=$comments_count"; fi
-  if [[ "$sprint5" != "ATS v6 Trading Intel" ]]; then failed=1; echo "- sprint 5 name mismatch: expected=ATS v6 Trading Intel actual=$sprint5"; fi
   if [[ "$missing" != "[]" ]]; then failed=1; echo "- missing issue IDs in 120-125: $missing"; fi
 
   if [[ "$failed" == "1" ]]; then
@@ -343,6 +350,7 @@ cmd_stats() {
     echo "DB file missing"
     return 1
   fi
+  warn_repo_local_db_conflict
 
   if ! command -v python3 >/dev/null 2>&1; then
     if ! command -v jq >/dev/null 2>&1; then

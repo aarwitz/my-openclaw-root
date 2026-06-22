@@ -1,0 +1,18 @@
+[Unit]
+Description=Jerry host maintainer — Task Manager host-ops poller
+Documentation=file:///home/aaron/.openclaw/reference/host-fix-playbook.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Jerry runs with an ISOLATED auth profile so it never refreshes the fleet's
+# single-use openai-codex token. Set the profile/runtime via this env file.
+EnvironmentFile=-/home/aaron/.openclaw/credentials/jerry-host.env
+Environment=OPENCLAW_RUN_WITH_TRACE=1
+# Real runs dispatch at most one issue per pass; raise via JERRY_HOST_MAX_LAUNCHES.
+ExecStart=/home/aaron/.openclaw/scripts/run-with-trace.sh --tag systemd /home/aaron/.openclaw/scripts/jerry-host-poll.py
+Nice=5
+
+[Install]
+WantedBy=default.target

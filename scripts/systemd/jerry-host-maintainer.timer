@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic trigger for Jerry host maintainer (host-ops poller)
+Documentation=file:///home/aaron/.openclaw/reference/host-fix-playbook.md
+
+[Timer]
+# First run shortly after login, then every 10 minutes.
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=jerry-host-maintainer.service
+
+[Install]
+WantedBy=timers.target

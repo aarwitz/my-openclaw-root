@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 DEFAULT_REPO = "/home/aaron/repos/EWAG-dev-iosApp"
-DEFAULT_TM_BASE = "http://127.0.0.1:8000"
+DEFAULT_TM_BASE = os.environ.get("TASK_MANAGER_URL", "http://127.0.0.1:8000")
 
 
 def run_cmd(args: List[str], cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess[str]:

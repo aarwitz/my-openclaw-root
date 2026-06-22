@@ -13,6 +13,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 QUEUE = Path(os.path.expanduser("~/.openclaw/state/priority-queue.jsonl"))
 
 

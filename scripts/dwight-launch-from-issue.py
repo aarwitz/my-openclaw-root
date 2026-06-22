@@ -20,7 +20,11 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 
-DEFAULT_TM_BASE = "http://127.0.0.1:8000"
+# Honor TASK_MANAGER_URL so in-container runs resolve the TM via its docker
+# network DNS alias (http://taskmanager:8000) instead of relying on the
+# docker-exec fallback, which no longer works after docker.sock was removed
+# from the gateway container. On the host this still defaults to localhost.
+DEFAULT_TM_BASE = os.environ.get("TASK_MANAGER_URL", "http://127.0.0.1:8000")
 DEFAULT_LAUNCHER = os.path.expanduser("~/.openclaw/scripts/dwight-assign-coding-task.sh")
 TM_CONTAINER = os.environ.get("TM_CONTAINER_NAME", "dwight-taskmanager")
 TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))

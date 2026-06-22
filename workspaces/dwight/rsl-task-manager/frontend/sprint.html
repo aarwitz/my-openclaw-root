@@ -116,15 +116,7 @@
                 <div class="form-row form-row-3">
                     <div class="form-group">
                         <label for="issueAssignedTo">Assign to</label>
-                        <select id="issueAssignedTo" name="assigned_to">
-                            <option value="">Unassigned</option>
-                            <option value="Dwight">Dwight</option>
-                            <option value="Jerry">Jerry</option>
-                            <option value="Resi">Resi</option>
-                            <option value="Druck">Druck</option>
-                            <option value="Aaron">Aaron</option>
-                            <option value="Taylor">Taylor</option>
-                        </select>
+                        <input type="text" id="issueAssignedTo" name="assigned_to" class="select issue-inline-search" list="assignableUsersList" placeholder="Search agents and humans" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="issueStoryPoints">Story Points</label>
@@ -164,6 +156,8 @@
             </form>
         </div>
     </div>
+
+    <datalist id="assignableUsersList"></datalist>
 
     <script src="/static/js/tm_shared.js"></script>
     <script src="/static/js/tm_issue_form.js"></script>

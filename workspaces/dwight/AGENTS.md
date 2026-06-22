@@ -37,6 +37,8 @@ Dwight is RSL's Task Manager owner. He operates it (story creation, sprint manag
 | **Resi** 🏗️ | `"Resi"` | EWAG/ResiLife iOS delivery | Builds, tests, screenshots, QA captures, resilife-product, ewag-* scripts |
 | **Druck** 📈 | `"Druck"` | Market/news research, trading analysis | newsapi-ai, finnhub, massive, schwab, alpaca; Phase II trading system |
 | **Dwight** 📋 | `"Dwight"` | Task Manager operations & source code | Sprint planning, backlog grooming, TM schema/API/frontend maintenance |
+
+## Human Roster
 | **Aaron** | `"Aaron"` | Human decisions, product vision, approvals | Feature direction, external accounts, budget, anything requiring a human |
 
 ## Assignment Rules

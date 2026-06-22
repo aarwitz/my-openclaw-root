@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Upl
 from pydantic import ValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi import Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text as sql_text
@@ -1487,8 +1488,49 @@ def cancel_lidi_action(action_id: int, request: Request, actor: Optional[str] = 
         db.refresh(action)
     return lidi_action_response(action)
 
+ISSUE_CREATE_DEDUP_WINDOW_SECONDS = int(os.getenv("ISSUE_CREATE_DEDUP_WINDOW_SECONDS", "120"))
+
+
+def find_recent_duplicate_issue(
+    db: Session,
+    *,
+    title: str,
+    description: str,
+    created_by: str,
+    assigned_to: Optional[str],
+    sprint_id: Optional[int],
+    acceptance_criteria: Optional[str],
+    branch: Optional[str],
+    repo_slug: Optional[str],
+    story_points: Optional[int],
+    blocked_reason: Optional[str],
+) -> Optional[models.Issue]:
+    """Return a recent issue that matches the create payload exactly.
+
+    This is a narrow idempotency guard for accidental duplicate submissions
+    caused by double-clicks or request retries. It intentionally uses an exact
+    normalized payload match plus a short time window to avoid swallowing
+    legitimately distinct work items with similar titles.
+    """
+    cutoff = datetime.now() - timedelta(seconds=ISSUE_CREATE_DEDUP_WINDOW_SECONDS)
+    query = db.query(models.Issue).filter(
+        models.Issue.created_at >= cutoff,
+        models.Issue.title == title,
+        models.Issue.description == description,
+        models.Issue.created_by == created_by,
+        models.Issue.assigned_to.is_(None) if assigned_to is None else models.Issue.assigned_to == assigned_to,
+        models.Issue.sprint_id.is_(None) if sprint_id is None else models.Issue.sprint_id == sprint_id,
+        models.Issue.acceptance_criteria.is_(None) if acceptance_criteria is None else models.Issue.acceptance_criteria == acceptance_criteria,
+        models.Issue.branch.is_(None) if branch is None else models.Issue.branch == branch,
+        models.Issue.repo_slug.is_(None) if repo_slug is None else models.Issue.repo_slug == repo_slug,
+        models.Issue.story_points.is_(None) if story_points is None else models.Issue.story_points == story_points,
+        models.Issue.blocked_reason.is_(None) if blocked_reason is None else models.Issue.blocked_reason == blocked_reason,
+    )
+    return query.order_by(models.Issue.created_at.desc()).first()
+
+
 @app.post("/api/issues", response_model=schemas.IssueResponse, status_code=status.HTTP_201_CREATED)
-async def create_issue(request: Request, db: Session = Depends(get_db)):
+async def create_issue(request: Request, response: Response, db: Session = Depends(get_db)):
     """Create a new issue"""
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
@@ -1511,18 +1553,42 @@ async def create_issue(request: Request, db: Session = Depends(get_db)):
     created_by = validate_actor_identity(db, issue.created_by, field_name="created_by")
     assigned_to = validate_assignee_identity(db, issue.assigned_to, field_name="assigned_to", allow_blank=True)
 
-    db_issue = models.Issue(
+    acceptance_criteria = normalize_optional_text(issue.acceptance_criteria)
+    branch = normalize_optional_text(issue.branch)
+    repo_slug = normalize_optional_text(issue.repo_slug)
+    story_points = validate_story_points(issue.story_points)
+    blocked_reason = normalize_optional_text(issue.blocked_reason)
+    issue_status = "blocked" if blocked_reason else "to_do"
+
+    duplicate = find_recent_duplicate_issue(
+        db,
         title=issue.title,
         description=issue.description,
-        acceptance_criteria=normalize_optional_text(issue.acceptance_criteria),
         created_by=created_by,
         assigned_to=assigned_to,
         sprint_id=target_sprint_id,
-        branch=normalize_optional_text(issue.branch),
-        repo_slug=normalize_optional_text(issue.repo_slug),
-        story_points=validate_story_points(issue.story_points),
-        blocked_reason=normalize_optional_text(issue.blocked_reason),
-        status="blocked" if normalize_optional_text(issue.blocked_reason) else "to_do",
+        acceptance_criteria=acceptance_criteria,
+        branch=branch,
+        repo_slug=repo_slug,
+        story_points=story_points,
+        blocked_reason=blocked_reason,
+    )
+    if duplicate:
+        response.status_code = status.HTTP_200_OK
+        return duplicate
+
+    db_issue = models.Issue(
+        title=issue.title,
+        description=issue.description,
+        acceptance_criteria=acceptance_criteria,
+        created_by=created_by,
+        assigned_to=assigned_to,
+        sprint_id=target_sprint_id,
+        branch=branch,
+        repo_slug=repo_slug,
+        story_points=story_points,
+        blocked_reason=blocked_reason,
+        status=issue_status,
         updated_at=datetime.now(),
     )
     db.add(db_issue)

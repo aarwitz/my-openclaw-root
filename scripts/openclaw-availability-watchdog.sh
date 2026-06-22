@@ -54,14 +54,14 @@ if [[ "$is_docker_runtime" == true ]]; then
     gateway_ok=true
   fi
 
-  LOG_TAIL="$(docker logs --tail=2000 "$DOCKER_CONTAINER" 2>&1 || true)"
-  lane_count=0
-  for lane in druck dwight jerry resi; do
-    if printf '%s\n' "$LOG_TAIL" | rg -q "\[telegram\] \[${lane}\] starting provider|ingress-spool-${lane}"; then
-      lane_count=$((lane_count + 1))
-    fi
-  done
-  if [[ "$lane_count" -ge 4 ]]; then
+  # Telegram liveness: probe live channel status inside the container instead of
+  # grepping startup log lines. The old log-grep aged out of the --tail window
+  # after long uptime and produced false-positive "telegram down" verdicts that
+  # triggered needless (token-fragile) gateway restarts. This probe is best-effort
+  # and, per the decision logic below, NEVER forces a restart on its own.
+  CH_OUT="$(docker exec "$DOCKER_CONTAINER" openclaw channels status --probe 2>&1 || true)"
+  WORKS_COUNT="$(printf '%s\n' "$CH_OUT" | rg -c "works" || true)"
+  if [[ "${WORKS_COUNT:-0}" -ge 1 ]]; then
     telegram_ok=true
   fi
 else
@@ -77,8 +77,16 @@ else
   fi
 fi
 
-if [[ "$gateway_ok" == true && "$telegram_ok" == true ]]; then
-  log "healthy: gateway and telegram probes are OK"
+# Restart trigger policy: the ONLY condition that justifies a gateway restart is
+# the gateway itself being down (gateway_ok=false). The gateway uses single-use
+# OAuth refresh tokens, so an unnecessary restart risks token corruption; a
+# degraded telegram probe is therefore logged as a warning but never restarts.
+if [[ "$gateway_ok" == true ]]; then
+  if [[ "$telegram_ok" == true ]]; then
+    log "healthy: gateway and telegram probes are OK"
+  else
+    log "WARN: gateway OK but telegram probe degraded (telegram_ok=false); NOT restarting (gateway-down is the only restart trigger). Investigate telegram lanes."
+  fi
   exit 0
 fi
 
@@ -104,12 +112,22 @@ else
   exit 1
 fi
 
-POST_OUT="$($OPENCLAW_BIN gateway status 2>&1 || true)"
-if printf '%s\n' "$POST_OUT" | rg -q "Runtime: running"; then
-  log "post-restart gateway runtime is running"
+if [[ "$is_docker_runtime" == true ]]; then
+  post_status="$(docker inspect --format '{{.State.Status}}' "$DOCKER_CONTAINER" 2>/dev/null || true)"
+  if [[ "$post_status" == "running" ]]; then
+    log "post-restart gateway container is running"
+  else
+    log "post-restart gateway container still unhealthy (status=$post_status)"
+    exit 1
+  fi
 else
-  log "post-restart gateway runtime still unhealthy"
-  exit 1
+  POST_OUT="$($OPENCLAW_BIN gateway status 2>&1 || true)"
+  if printf '%s\n' "$POST_OUT" | rg -q "Runtime: running"; then
+    log "post-restart gateway runtime is running"
+  else
+    log "post-restart gateway runtime still unhealthy"
+    exit 1
+  fi
 fi
 
 exit 0

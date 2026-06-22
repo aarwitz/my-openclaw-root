@@ -92,6 +92,47 @@ def test_create_issue_via_multipart_defaults_to_active_sprint():
     assert body['story_points'] == 5
 
 
+def test_create_issue_reuses_recent_duplicate_json_payload():
+    payload = {
+        'title': 'Duplicate guard',
+        'description': 'Same request twice should not duplicate',
+        'created_by': 'Jerry',
+        'assigned_to': 'Aaron',
+        'acceptance_criteria': 'One row only',
+        'story_points': 3,
+    }
+    first = client.post('/api/issues', json=payload)
+    assert first.status_code == 201, first.text
+
+    second = client.post('/api/issues', json=payload)
+    assert second.status_code == 200, second.text
+    assert second.json()['id'] == first.json()['id']
+
+    issues = client.get('/api/issues')
+    assert issues.status_code == 200, issues.text
+    assert len(issues.json()) == 1
+
+
+def test_create_issue_reuses_recent_duplicate_multipart_payload():
+    form = {
+        'title': 'Multipart duplicate guard',
+        'description': 'Same form twice should not duplicate',
+        'created_by': 'Jerry',
+        'assigned_to': 'Aaron',
+        'story_points': '5',
+    }
+    first = client.post('/api/issues', data=form)
+    assert first.status_code == 201, first.text
+
+    second = client.post('/api/issues', data=form)
+    assert second.status_code == 200, second.text
+    assert second.json()['id'] == first.json()['id']
+
+    issues = client.get('/api/issues')
+    assert issues.status_code == 200, issues.text
+    assert len(issues.json()) == 1
+
+
 def test_blocked_reason_sets_blocked_status_and_clearing_resets_to_todo():
     issue = create_issue(blocked_reason='Waiting on dependency')
     assert issue['status'] == 'blocked'

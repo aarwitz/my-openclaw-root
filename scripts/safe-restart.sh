@@ -7,7 +7,10 @@ set -euo pipefail
 #
 # What it does:
 #   1. Backs up auth-profiles.json (preserves current refresh tokens)
-#   2. Disables cron jobs (prevents concurrent token consumption during restart)
+#   2. Records enabled job-IDs to a manifest, then disables cron jobs (prevents
+#      concurrent token consumption during restart). Restore re-applies the
+#      manifest onto the current job definitions — robust to job-set drift and
+#      never trusts a stale full-file snapshot.
 #   3. Stops gateway gracefully (openclaw gateway stop — emits shutdown event, waits for drain)
 #   4. Waits for process to fully exit
 #   5. Starts gateway
@@ -22,6 +25,12 @@ set -euo pipefail
 
 SCRIPTS_DIR="${HOME}/.openclaw/scripts"
 CRON_JOBS="${HOME}/.openclaw/cron/jobs.json"
+# Restore is driven by a manifest of enabled job-IDs (re-applied onto the CURRENT
+# job definitions), not by swapping whole jobs.json files. This survives job-set
+# drift and never trusts a stale full-file snapshot. The full snapshot is kept
+# only as a debug/safety artifact.
+CRON_ENABLED_MANIFEST="${CRON_JOBS}.pre-restart-enabled-ids"
+CRON_SAFETY_BAK="${CRON_JOBS}.pre-restart-bak"
 SAFE_RESTART_LOG="${HOME}/.openclaw/logs/safe-restart.log"
 OPENCLAW_BIN="${OPENCLAW_BIN:-}"
 MAX_WAIT=30  # seconds to wait for gateway to stop
@@ -69,6 +78,11 @@ is_docker_runtime() {
   [[ -f "${COMPOSE_FILE}" ]] && docker ps -a --format '{{.Names}}' | grep -Fxq "${DOCKER_CONTAINER}"
 }
 
+# Count enabled jobs in a jobs.json file (0 on missing/parse error).
+cron_enabled_count() {
+  jq '[.jobs[]? | select(.enabled == true)] | length' "$1" 2>/dev/null || echo 0
+}
+
 gateway_healthy() {
   if [[ "${runtime_mode}" == "docker" ]]; then
     local status
@@ -101,7 +115,9 @@ restart_gateway() {
       sleep 2
     fi
 
-    "${OPENCLAW_BIN}" gateway start 2>&1
+    # Non-fatal: under `set -e` a failed start would abort the script mid-flight,
+    # skipping token validation and the cron-jobs restore (incident 2026-06-11/12).
+    "${OPENCLAW_BIN}" gateway start 2>&1 || warn "gateway start returned non-zero; continuing to validation/restore steps."
   fi
 }
 
@@ -169,16 +185,57 @@ log "Step 1/6: Backing up auth tokens..."
 bash "$SCRIPTS_DIR/token-backup.sh" --label "pre-restart"
 
 # --- Step 2: Disable cron jobs (prevent concurrent token use) ---
-if [[ "$skip_cron" == "false" && -f "$CRON_JOBS" ]]; then
-  log "Step 2/6: Saving and disabling cron jobs..."
-  cp "$CRON_JOBS" "$CRON_JOBS.pre-restart-bak"
-  # Disable all enabled jobs by flipping enabled: true -> enabled: false
-  if jq -e '.jobs | map(select(.enabled == true)) | length > 0' "$CRON_JOBS" &>/dev/null; then
-    jq '.jobs = [.jobs[] | .enabled = false]' "$CRON_JOBS" > "$CRON_JOBS.tmp"
+# Restore re-applies the manifest's enabled job-IDs onto the CURRENT job
+# definitions. Idempotent: after a successful restore the manifest is removed,
+# so the EXIT trap's later call is a no-op. If a previous run died mid-restart,
+# this still does the right thing without trusting a stale full-file snapshot.
+restore_cron_jobs() {
+  [[ "$skip_cron" == "true" ]] && return 0
+  [[ -f "$CRON_ENABLED_MANIFEST" && -f "$CRON_JOBS" ]] || return 0
+  local ids_json
+  ids_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo '[]')"
+  if jq --argjson ids "$ids_json" \
+        '.jobs |= map(.id as $i | .enabled = (($ids | index($i)) != null))' \
+        "$CRON_JOBS" > "$CRON_JOBS.tmp" 2>/dev/null && [[ -s "$CRON_JOBS.tmp" ]]; then
     mv "$CRON_JOBS.tmp" "$CRON_JOBS"
-    log "  Cron jobs disabled."
+    log "  Cron jobs restored ($(cron_enabled_count "$CRON_JOBS") enabled, re-applied from manifest)."
+    rm -f "$CRON_ENABLED_MANIFEST" "$CRON_SAFETY_BAK"
   else
-    log "  No active cron jobs to disable."
+    rm -f "$CRON_JOBS.tmp"
+    warn "Cron restore FAILED; kept manifest ($CRON_ENABLED_MANIFEST) and snapshot ($CRON_SAFETY_BAK) for manual recovery."
+  fi
+}
+if [[ "$skip_cron" == "false" && -f "$CRON_JOBS" ]]; then
+  log "Step 2/6: Capturing cron enabled-state and disabling jobs..."
+  cur_enabled="$(cron_enabled_count "$CRON_JOBS")"
+  refresh_manifest=true
+  # A leftover manifest means a previous run died before restoring. Decide which
+  # enabled-set is authoritative by CONTENT, not mere existence: if the current
+  # file still has >= as many enabled jobs, it is the live truth — refresh from
+  # it. Only keep the prior manifest when current has fewer enabled (i.e. the
+  # interrupted run already disabled the live file). Incident 2026-06-11/12 (and
+  # 2026-06-20): trusting a stale snapshot left the desk disabled for days.
+  if [[ -f "$CRON_ENABLED_MANIFEST" ]]; then
+    prior_enabled="$(grep -c . "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo 0)"
+    if (( cur_enabled < prior_enabled )); then
+      refresh_manifest=false
+      warn "Prior-run manifest found ($prior_enabled ids); current jobs.json has fewer enabled ($cur_enabled) — keeping prior manifest (current was likely left disabled by the interrupted run)."
+    else
+      warn "Prior-run manifest found ($prior_enabled ids); current jobs.json enabled=${cur_enabled} >= prior — refreshing manifest from current live state."
+    fi
+  fi
+  if [[ "$refresh_manifest" == "true" ]]; then
+    jq -r '.jobs[]? | select(.enabled == true) | .id' "$CRON_JOBS" > "$CRON_ENABLED_MANIFEST"
+    cp "$CRON_JOBS" "$CRON_SAFETY_BAK"
+  fi
+  # Restore even if a later step fails — keeps a crashed restart from leaving
+  # every job disabled.
+  trap restore_cron_jobs EXIT
+  if (( cur_enabled > 0 )); then
+    jq '.jobs |= map(.enabled = false)' "$CRON_JOBS" > "$CRON_JOBS.tmp" && mv "$CRON_JOBS.tmp" "$CRON_JOBS"
+    log "  Disabled ${cur_enabled} cron job(s); will restore $(grep -c . "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo 0) on completion."
+  else
+    log "  No active cron jobs to disable; will restore $(grep -c . "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo 0) on completion."
   fi
 else
   log "Step 2/6: Skipping cron management."
@@ -221,10 +278,9 @@ else
 fi
 
 # --- Step 6: Restore cron jobs ---
-if [[ "$skip_cron" == "false" && -f "$CRON_JOBS.pre-restart-bak" ]]; then
+if [[ "$skip_cron" == "false" ]]; then
   log "Step 6/6: Restoring cron jobs..."
-  mv "$CRON_JOBS.pre-restart-bak" "$CRON_JOBS"
-  log "  Cron jobs restored."
+  restore_cron_jobs
 else
   log "Step 6/6: Skipping cron restore."
 fi

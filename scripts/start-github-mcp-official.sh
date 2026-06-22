@@ -58,4 +58,21 @@ if [[ -z "$token" ]]; then
   exit 1
 fi
 
-exec docker run --rm -i -e GITHUB_PERSONAL_ACCESS_TOKEN="$token" ghcr.io/github/github-mcp-server:latest stdio --toolsets=default
+runtime="${GITHUB_MCP_RUNTIME:-direct}"
+case "$runtime" in
+  direct)
+    if ! command -v npx >/dev/null 2>&1; then
+      echo "[start-github-mcp-official] npx is required for direct runtime" >&2
+      exit 1
+    fi
+    # Direct stdio runtime (no docker.sock needed).
+    exec env GITHUB_PERSONAL_ACCESS_TOKEN="$token" npx -y @modelcontextprotocol/server-github
+    ;;
+  docker)
+    exec docker run --rm -i -e GITHUB_PERSONAL_ACCESS_TOKEN="$token" ghcr.io/github/github-mcp-server:latest stdio --toolsets=default
+    ;;
+  *)
+    echo "[start-github-mcp-official] unsupported GITHUB_MCP_RUNTIME '$runtime' (use direct|docker)" >&2
+    exit 2
+    ;;
+esac

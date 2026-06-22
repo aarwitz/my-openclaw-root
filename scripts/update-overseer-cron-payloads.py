@@ -19,7 +19,19 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 JOBS_PATH = Path("/home/aaron/.openclaw/cron/jobs.json")
+RUN_WITH_TRACE = "~/.openclaw/scripts/run-with-trace.sh"
+OVERSEER_SCRIPTS = "~/.openclaw/workspaces/overseer/scripts"
+PIPELINE_STATUS_CMD = f"{RUN_WITH_TRACE} {OVERSEER_SCRIPTS}/pipeline_status.py"
+PQ_APPEND_CMD = (
+    f"{RUN_WITH_TRACE} {OVERSEER_SCRIPTS}/pq_append.py --by overseer "
+    "--category <cat> --title <t> --details <d> --priority <1-5>"
+)
 
 INTRADAY_PROMPT = (
     "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this "
@@ -27,13 +39,13 @@ INTRADAY_PROMPT = (
     "are NOT allowed to conclude 'no work needed' unless every check in step 4 "
     "has fired and produced concrete output.\n\n"
     "Step 1 (deterministic core, mandatory):\n"
-    "  exec `~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the "
+    "  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the "
     "stdout JSON. This runs classify_regime -> score_hypotheses -> "
     "gate_evaluator -> execute_intent -> reconcile -> snapshot -> "
     "pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, "
     "counts.orders, regime.current, pipeline_health.color from the snapshot.\n\n"
     "Step 2 (inventory the canonical DB):\n"
-    "  Run `python3 ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` "
+    f"  Run `{PIPELINE_STATUS_CMD}` "
     "to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, "
     "last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, "
     "orders_open, last_archivist_pass_age_min. If that script doesn't exist "
@@ -42,11 +54,17 @@ INTRADAY_PROMPT = (
     "Step 3 (MANDATORY work, in strict order — execute each that applies, "
     "do NOT skip any):\n"
     "  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: "
-    "spawn `researcher` with the prompt 'Source 5 fresh, distinct, "
-    "primary-source-grounded equity hypotheses (US large/mid-cap; mix of "
-    "catalysts: earnings, guidance revisions, macro print, sector rotation, "
-    "regulatory). For each, INSERT into hypotheses with state=raw, created_by="
-    "researcher, rationale_concise<=500 chars. Add at least one "
+    "spawn `researcher` with the prompt 'FIRST check what is coming and what we "
+    "have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/"
+    "macro_calendar.py upcoming --days 10` to see scheduled high-impact macro "
+    "releases (pre-position around them), and for each theme you pursue run "
+    "`python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py "
+    "--query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous "
+    "PAST episodes (note their correct_action and naive_trap). THEN source 5 "
+    "fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; "
+    "mix of catalysts: earnings, guidance revisions, macro print, sector "
+    "rotation, regulatory). For each, INSERT into hypotheses with state=raw, "
+    "created_by=researcher, rationale_concise<=500 chars. Add at least one "
     "hypothesis_evidence row with provenance for each. Return the inserted "
     "hypothesis_ids in your final message.' Then `wait` for completion.\n"
     "  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: "
@@ -58,9 +76,13 @@ INTRADAY_PROMPT = (
     "quant_score>=60. Record critic_reviews. Move passing ones to state=ready, "
     "failing ones to state=challenged with rationale.' Then `wait`.\n"
     "  3d. If any hypotheses in state=ready: spawn `trader` with prompt "
-    "'Author a trade_intent for each ready hypothesis. One intent per "
-    "hypothesis. Use Alpaca paper account; respect cash + position limits. "
-    "Return intent_ids and target tickers.' Then `wait`.\n"
+    "'For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/"
+    "trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query "
+    "\"<thesis>\"` and let the most relevant episode's correct_action / "
+    "naive_trap inform your conviction and sizing (especially: do not take the "
+    "naive_trap side). THEN author a trade_intent for each ready hypothesis. "
+    "One intent per hypothesis. Use Alpaca paper account; respect cash + "
+    "position limits. Return intent_ids and target tickers.' Then `wait`.\n"
     "  3e. If any trade_intents exist with status=pending and gates green: "
     "spawn `executor` with prompt 'Submit pending intents whose gates are "
     "green to Alpaca paper. Reconcile fills. Return order_ids and fill "
@@ -89,15 +111,14 @@ INTRADAY_PROMPT = (
     "the agent that produced the most recent artifact and how long ago.\n\n"
     "Step 6 (priority queue): if you observed any issue worth a follow-up "
     "(missing skill, broker error, stale data feed, drift), append a row via "
-    "`python3 ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by "
-    "overseer --category <cat> --title <t> --details <d> --priority <1-5>`."
+    f"`{PQ_APPEND_CMD}`."
 )
 
 WEEKLY_PROMPT = (
     "[OVERSEER-WEEKLY-V2] You are AutoTrade running the Sunday strategic "
     "review. This pass is about resetting the system for the upcoming "
     "trading week.\n\n"
-    "Step 1: exec `~/.openclaw/scripts/trader-pass-deterministic.sh` and "
+    "Step 1: execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and "
     "capture snapshot JSON.\n\n"
     "Step 2: spawn `archivist` with prompt 'Run the weekly retrospective. "
     "Resolve any stragglers. Compute hit-rate, average grade, and slippage "
@@ -125,7 +146,7 @@ WEEKLY_PROMPT = (
     "  - One concrete focus area for the week.\n"
     "  Forbidden: 'no work needed', empty filler.\n\n"
     "Step 8: append any new priority-queue rows via "
-    "`python3 ~/.openclaw/workspaces/overseer/scripts/pq_append.py`."
+    f"`{PQ_APPEND_CMD}`."
 )
 
 
@@ -148,6 +169,14 @@ def main() -> int:
         if j.get("agentId") != "overseer":
             continue
         name = j.get("name", "")
+        # The daily LEARNING pass has its own OVERSEER-LEARNING-V1 prompt that is
+        # NOT one of the two variants below. Never overwrite it from here (doing
+        # so silently replaced the world-model learning loop with the generic
+        # pipeline-drive prompt — incident 2026-06-13). Edit LEARNING_PROMPT in
+        # jobs.json directly if it needs changing.
+        if "learning" in name.lower():
+            print(f"skipped (learning pass, preserved): {name}")
+            continue
         is_weekly = "sunday" in name.lower() or "weekly" in name.lower() or (
             j.get("schedule", {}).get("expr", "").endswith("* * 0")
         )

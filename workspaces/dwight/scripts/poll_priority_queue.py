@@ -164,6 +164,55 @@ def find_existing_issue(issues: list[dict], row_id: str) -> dict | None:
     return None
 
 
+DUP_LOOKBACK_HOURS = float(os.environ.get("PQ_DEDUP_LOOKBACK_HOURS", "48"))
+DUP_TERMINAL_STATUSES = {"done", "resolved", "closed", "cancelled", "canceled"}
+
+
+def normalize_title(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return re.sub(r"\s+", " ", text)
+
+
+def _issue_timestamp(issue: dict) -> datetime | None:
+    for key in ("created_at", "createdAt", "updated_at", "updatedAt"):
+        raw = issue.get(key)
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return None
+
+
+def find_duplicate_by_title(issues: list[dict], row: dict) -> dict | None:
+    """Backstop dedup: an open, recent issue with the same normalized title.
+
+    The marker-based ``find_existing_issue`` is the primary dedup path. This
+    guards against duplicate promotions when the queue marker is absent (e.g.
+    the same idea re-queued under a new row id). Skips terminal-status issues
+    and anything older than ``PQ_DEDUP_LOOKBACK_HOURS`` so stale matches do not
+    silently swallow genuinely new work. Returns the matching issue or None.
+    """
+    target = normalize_title(row.get("title"))
+    if not target:
+        return None
+    now = datetime.now(timezone.utc)
+    for issue in issues:
+        if normalize_title(issue.get("title")) != target:
+            continue
+        if str(issue.get("status") or "").strip().lower() in DUP_TERMINAL_STATUSES:
+            continue
+        created = _issue_timestamp(issue)
+        if created is not None and (now - created).total_seconds() > DUP_LOOKBACK_HOURS * 3600:
+            continue
+        return issue
+    return None
+
+
 def next_action_text(row: dict) -> str:
     title = str(row.get("title") or "").strip()
     if title:
@@ -348,16 +397,25 @@ def main() -> int:
 
     created: list[dict] = []
     reconciled: list[dict] = []
+    deduped: list[dict] = []
     failed: list[dict] = []
     for row in pending:
         row_id = str(row.get("id") or "")
         assignee = resolve_assignee(row)
         body = build_issue_payload(row, assignee, a.sprint)
         existing = find_existing_issue(issues, row_id) if issues else None
+        dedup_link = find_duplicate_by_title(issues, row) if (issues and not existing) else None
         if a.dry_run:
-            created.append({"id": row_id, "assignee": assignee, "existing_issue": bool(existing), "would_post": body})
+            created.append({
+                "id": row_id,
+                "assignee": assignee,
+                "existing_issue": bool(existing),
+                "dedup_title_match": (dedup_link.get("id") if dedup_link else None),
+                "would_post": body,
+            })
             continue
         try:
+            skip_handoff_comment = False
             if existing:
                 issue_id = existing.get("id") or existing.get("issue_id")
                 if issue_id is None:
@@ -374,6 +432,26 @@ def main() -> int:
                     },
                 )
                 reconciled.append({"id": row_id, "issue_id": issue_id, "assignee": assignee})
+            elif dedup_link:
+                issue_id = dedup_link.get("id") or dedup_link.get("issue_id")
+                if issue_id is None:
+                    raise RuntimeError(f"dedup-matched issue missing id: {dedup_link}")
+                # Link the queue row to the pre-existing open issue and attach the
+                # marker so future marker-based lookups match. Do NOT clobber the
+                # existing issue body/assignee — this is only a duplicate guard.
+                post_json(
+                    f"/api/issues/{issue_id}/comments",
+                    {
+                        "content": (
+                            f"Deduplicated: priority-queue row {row_id} "
+                            f"({queue_marker(row_id)}) matches this open issue by title; "
+                            f"not creating a duplicate. Resolved lane: {assignee}."
+                        ),
+                        "username": DEFAULT_OWNER,
+                    },
+                )
+                skip_handoff_comment = True
+                deduped.append({"id": row_id, "issue_id": issue_id, "assignee": assignee})
             else:
                 issue = post_json(f"/api/issues", body)
                 issue_id = issue.get("id") or issue.get("issue_id")
@@ -381,7 +459,8 @@ def main() -> int:
                     raise RuntimeError(f"issue POST returned no id: {issue}")
                 created.append({"id": row_id, "issue_id": issue_id, "assignee": assignee})
 
-            ensure_comment(int(issue_id), row, assignee, dry_run=False)
+            if not skip_handoff_comment:
+                ensure_comment(int(issue_id), row, assignee, dry_run=False)
             update = append_reconciliation(row, int(issue_id), assignee)
             with QUEUE.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(update, ensure_ascii=False) + "\n")
@@ -393,11 +472,13 @@ def main() -> int:
 
     out = {
         "polled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "claimed": len(created) + len(reconciled),
+        "claimed": len(created) + len(reconciled) + len(deduped),
         "reconciled": len(reconciled),
+        "deduped": len(deduped),
         "failed": len(failed),
         "promoted": created,
         "reconciled_rows": reconciled,
+        "deduped_rows": deduped,
         "errors": failed,
     }
     print(json.dumps(out, indent=2))

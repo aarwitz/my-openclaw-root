@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 # publish-trader-intel.sh
 #
 # Pushes the freshly written trader-intel data.json to Cloudflare via wrangler.

@@ -9,6 +9,7 @@ venv/
 env/
 
 # Local runtime database and backups
+taskmanager.db
 backend/taskmanager.db
 backend/taskmanager.db.bak_*
 *.db-shm

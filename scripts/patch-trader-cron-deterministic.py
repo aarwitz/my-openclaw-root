@@ -8,6 +8,12 @@ Usage: python3 patch-trader-cron-deterministic.py [--dry-run]
 """
 
 from __future__ import annotations
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 import argparse
 import json
 import shutil
@@ -19,7 +25,7 @@ MARKER = "[DETERMINISTIC-PASS-V1]"
 PREFIX = """\
 {marker} Run the deterministic prefix FIRST, then narrate.
 
-Step 1: exec `~/.openclaw/scripts/trader-pass-deterministic.sh` and capture stdout JSON.
+Step 1: execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture stdout JSON.
 Step 2: Parse the JSON. Note `pipeline_health.color` and `regime.current` from the snapshot.
 Step 3: Read the freshly written snapshot at `snapshot_path` if present, otherwise use the path reported by `app_snapshot.data_json_path`.
 Step 4: Compose a short Telegram update consistent with the deterministic JSON.

@@ -23,7 +23,8 @@ Outputs JSON with per-gate result. Updates trade_intents:
   - provenance_completeness_pct
   - counterargument_quality_score
   - explainability_status
-  - state: 'approved' if all gates pass; otherwise 'blocked' with blocked_reason
+  - state: 'risk_review' if all gates pass (the Risk agent's gate_risk_intents.py
+    then sizes/approves|blocks); otherwise 'blocked' with blocked_reason
 
 Usage:
   python3 gate_evaluator.py --intent-id ID
@@ -249,7 +250,9 @@ def evaluate(conn, intent_id: str) -> dict:
             "factor_overlap_status": "pass" if fo_ok else "fail",
             "explainability_status": "pass" if ex_ok else "fail",
         },
-        "next_state": "approved" if all_pass else "blocked",
+        # Passing the critic gate stack hands off to the Risk agent's
+        # deterministic gate (gate_risk_intents.py), which sizes + approves.
+        "next_state": "risk_review" if all_pass else "blocked",
     }
 
 

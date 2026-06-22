@@ -83,11 +83,13 @@
       <form id="createIssueForm" class="issue-form">
         <label>Title<input type="text" id="issueTitle" required></label>
         <label>Description<textarea id="issueDescription" rows="5" required></textarea></label>
-        <label>Assign to<select id="issueAssignedTo"></select></label>
+        <label>Assign to<input type="text" id="issueAssignedTo" class="issue-inline-search" list="assignableUsersList" placeholder="Search agents and humans" autocomplete="off"></label>
         <div class="modal-actions"><button type="button" id="cancelModalBtn" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Launch</button></div>
       </form>
     </div>
   </div>
+
+  <datalist id="assignableUsersList"></datalist>
 
   <div id="toast" class="toast hidden"></div>
   <script src="/static/factory.js"></script>

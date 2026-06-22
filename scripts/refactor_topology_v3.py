@@ -33,6 +33,12 @@ Changes:
 Idempotent: rerun is a no-op aside from a fresh backup.
 """
 from __future__ import annotations
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 import json
 import shutil
 import time
@@ -40,6 +46,10 @@ from pathlib import Path
 
 CFG = Path("/home/aaron/.openclaw/openclaw.json")
 BACKUP = CFG.with_suffix(f".json.pre-phase-e.{int(time.time())}.bak")
+RUN_WITH_TRACE = "~/.openclaw/scripts/run-with-trace.sh"
+OVERSEER_SCRIPTS = "/home/aaron/.openclaw/workspaces/overseer/scripts"
+PQ_LIST_CMD = f"{RUN_WITH_TRACE} {OVERSEER_SCRIPTS}/pq_list.py"
+PQ_PROMOTE_CMD = f"{RUN_WITH_TRACE} {OVERSEER_SCRIPTS}/pq_promote.py <id>"
 
 DEVELOPER_AGENT = {
     "id": "developer",
@@ -82,13 +92,13 @@ OVERSEER_SYSTEM_PROMPT = (
     "\n"
     "Chat commands (natural language, no slash required):\n"
     "- queue -> read /home/aaron/.openclaw/state/priority-queue.jsonl and show\n"
-    "  open rows by priority. Use python3 /home/aaron/.openclaw/workspaces/overseer/scripts/pq_list.py\n"
-    "- run <pass> -> trigger /home/aaron/.openclaw/scripts/trader-pass-deterministic.sh\n"
+    f"  open rows by priority. Use {PQ_LIST_CMD}\n"
+    "- run <pass> -> trigger /home/aaron/.openclaw/scripts/run-with-trace.sh --tag chat /home/aaron/.openclaw/scripts/trader-pass-deterministic.sh\n"
     "  Append --publish only on Aaron's explicit request.\n"
     "- status -> read the latest data.json snapshot at /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n"
     "  and summarize regime, hypothesis counts, and any pipeline_health issues.\n"
     "- promote <id> -> move a priority-queue row to dwight (rsl-task-manager).\n"
-    "  Use python3 /home/aaron/.openclaw/workspaces/overseer/scripts/pq_promote.py <id>\n"
+    f"  Use {PQ_PROMOTE_CMD}\n"
     "\n"
     "Protocol:\n"
     "- @druck_rsl_bot or @autotrade -> reply expected unless prefixed FYI/cc.\n"

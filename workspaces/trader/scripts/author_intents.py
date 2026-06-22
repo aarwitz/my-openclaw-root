@@ -28,10 +28,16 @@ import json
 import math
 import os
 import sqlite3
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
@@ -41,14 +47,20 @@ from connectors.alpaca import (  # noqa: E402
     ConnectorError,
     daily_bars,
     get_account,
+    latest_trade,
 )
+import worldmodel as wm  # noqa: E402
 
-SIZE_PCT_OF_EQUITY = 0.01      # 1% per intent
+SIZE_PCT_OF_EQUITY = 0.01      # 1% per intent (baseline fallback when no prediction)
 NOTIONAL_FLOOR = 200.0
 NOTIONAL_CEILING = 2000.0
 MAX_OPEN_INTENTS = 5
 STOP_RULE = "-8% from entry"
 MODELED_SLIPPAGE_BPS = 8.0
+# Fractional-Kelly sizing (SUGGESTION ONLY — the Risk agent enforces the cap).
+KELLY_SCALE = 0.25             # quarter-Kelly
+KELLY_CAP = 0.10               # never suggest > 10% of equity pre-risk-gate
+RETRIEVE_EPISODES = "/home/aaron/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py"
 
 
 def _now_iso() -> str:
@@ -82,6 +94,43 @@ def _regime_current(conn) -> str:
     return row["current"] if row else "unknown"
 
 
+def _latest_prediction(conn, hyp_id: str):
+    """Most recent unresolved world-model prediction for this hypothesis."""
+    return conn.execute(
+        "SELECT id, p_correct, return_p10, return_p50, return_p90, horizon "
+        "FROM predictions WHERE hypothesis_id = ? AND resolved_at IS NULL "
+        "ORDER BY predicted_at DESC LIMIT 1",
+        (hyp_id,),
+    ).fetchone()
+
+
+def _kelly_sizing(pred, equity: float) -> dict:
+    """Translate a prediction into a fractional-Kelly notional suggestion.
+
+    Returns a dict with sizing_basis, kelly_fraction, notional_raw, and (when a
+    prediction exists but carries no positive edge) skip=True so the trader does
+    not author an intent with no probabilistic edge.
+    """
+    if pred is None:
+        return {"sizing_basis": "baseline_1pct", "kelly_fraction": None,
+                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+                "p_correct": None}
+    p = float(pred["p_correct"])
+    up = float(pred["return_p90"]) if pred["return_p90"] is not None else 0.0
+    down = abs(float(pred["return_p10"])) if pred["return_p10"] is not None else 0.0
+    if up <= 0 or down <= 0:
+        return {"sizing_basis": "baseline_1pct", "kelly_fraction": None,
+                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+                "p_correct": p, "prediction_id": pred["id"]}
+    frac = wm.kelly_fraction(p, up, down, kelly_scale=KELLY_SCALE, cap=KELLY_CAP)
+    if frac <= 0:
+        return {"sizing_basis": "kelly", "kelly_fraction": 0.0, "notional_raw": 0.0,
+                "skip": True, "p_correct": p, "prediction_id": pred["id"]}
+    return {"sizing_basis": "kelly", "kelly_fraction": round(frac, 4),
+            "notional_raw": frac * equity, "skip": False, "p_correct": p,
+            "prediction_id": pred["id"]}
+
+
 def _count_open_intents(conn) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM trade_intents "
@@ -112,7 +161,19 @@ def _equity_usd() -> float:
     return float(acc.get("equity") or acc.get("portfolio_value") or 0.0)
 
 
+def _account_snapshot() -> tuple[float, float]:
+    acc = get_account()
+    equity = float(acc.get("equity") or acc.get("portfolio_value") or 0.0)
+    cash = float(acc.get("cash") or 0.0)
+    return equity, cash
+
+
 def _last_close(ticker: str) -> float:
+    """Reference price for sizing + entry_price_target. Prefer the LIVE last trade so the entry ref is
+    fresh (and the executor's freshness gate rarely needs to reject); fall back to the latest daily bar."""
+    lt = latest_trade(ticker)
+    if lt and lt.get("price"):
+        return float(lt["price"])
     bars = daily_bars(ticker, days=10)
     if not bars:
         raise ConnectorError(f"no bars for {ticker}")
@@ -133,7 +194,57 @@ def _infer_direction(thesis: str | None) -> str:
     return "long"  # default-long for ambiguous; safer than mis-shorting
 
 
-def author(conn, hyp_row, *, equity: float, dry_run: bool) -> dict:
+def _retrieve_episode_context(ticker: str, thesis: str | None) -> dict:
+    cmd = [
+        "python3",
+        RETRIEVE_EPISODES,
+        "--tickers",
+        ticker,
+        "--query",
+        (thesis or "").strip(),
+        "-k",
+        "1",
+        "--json",
+    ]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    payload = json.loads(out.stdout)
+    episodes = payload.get("episodes") or []
+    top = episodes[0] if episodes else None
+    return {
+        "command": " ".join(cmd),
+        "as_of": payload.get("as_of"),
+        "episode": top,
+    }
+
+
+def _episode_sizing_multiplier(direction: str, episode: dict | None) -> tuple[float, str]:
+    if not episode:
+        return 1.0, "no_episode"
+
+    action = (episode.get("correct_action") or "").lower()
+    trap = (episode.get("naive_trap") or "").lower()
+
+    bullish = ("buy", "own", "accumulate", "stay long", "durable", "cash-flow", "backlog", "multi-quarter")
+    bearish = ("short", "fade", "sell", "avoid", "do not chase", "don't chase", "underweight")
+    caution = ("wait", "do not trade", "don't trade", "one-day beat", "headline")
+
+    if direction == "long":
+        if any(tok in action for tok in bearish):
+            return 0.0, "episode_opposes_long"
+        if any(tok in action for tok in caution) or any(tok in trap for tok in ("chase", "headline", "one-day")):
+            return 0.75, "episode_caution"
+        if any(tok in action for tok in bullish):
+            return 1.15, "episode_supportive"
+        return 1.0, "episode_neutral"
+
+    if any(tok in action for tok in bullish) and not any(tok in action for tok in bearish):
+        return 0.0, "episode_opposes_short"
+    if any(tok in trap for tok in ("buy the dip", "bottom-fish", "call the turn", "look through")):
+        return 1.1, "episode_supportive_short"
+    return 1.0, "episode_neutral_short"
+
+
+def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool) -> dict:
     hid = hyp_row["id"]
     try:
         tickers = json.loads(hyp_row["tickers"] or "[]")
@@ -144,9 +255,19 @@ def author(conn, hyp_row, *, equity: float, dry_run: bool) -> dict:
     ticker = str(tickers[0]).upper()
 
     direction = _infer_direction(hyp_row["thesis_summary"])
+    try:
+        episode_ctx = _retrieve_episode_context(ticker, hyp_row["thesis_summary"])
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        return {"id": hid, "ticker": ticker, "skip": True,
+                "reason": f"episode_lookup_failed: {exc}"}
+    episode = episode_ctx["episode"]
+    episode_mult, episode_flag = _episode_sizing_multiplier(direction, episode)
+    if episode_mult <= 0:
+        return {"id": hid, "ticker": ticker, "skip": True,
+                "reason": episode_flag}
     if direction != "long":
         return {"id": hid, "ticker": ticker, "skip": True,
-                "reason": f"direction={direction} not yet supported by baseline trader"}
+                "reason": f"direction={direction} unsupported_after_episode_check"}
 
     if _has_open_exposure(conn, ticker):
         return {"id": hid, "ticker": ticker, "skip": True,
@@ -158,8 +279,24 @@ def author(conn, hyp_row, *, equity: float, dry_run: bool) -> dict:
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": f"price_lookup_failed: {exc}"}
 
-    notional_raw = SIZE_PCT_OF_EQUITY * equity
-    notional = max(NOTIONAL_FLOOR, min(NOTIONAL_CEILING, notional_raw))
+    pred = _latest_prediction(conn, hid)
+    sizing = _kelly_sizing(pred, equity)
+    if sizing.get("skip"):
+        return {"id": hid, "ticker": ticker, "skip": True,
+                "reason": f"no_probabilistic_edge (p={sizing.get('p_correct')}, kelly=0)"}
+
+    # Conviction-scaled ceiling: let high-conviction predictions (p_correct from the combined
+    # calibrated-mechanism posteriors) size up toward the Kelly cap, instead of the flat $2k cap
+    # throttling everything. Low conviction stays at the legacy ceiling. Risk gate caps downstream.
+    p_conv = sizing.get("p_correct") or 0.5
+    conv = max(0.0, min(1.0, (float(p_conv) - 0.5) / 0.5))
+    dyn_ceiling = max(NOTIONAL_CEILING, min(KELLY_CAP * equity,
+                                            NOTIONAL_CEILING + conv * (KELLY_CAP * equity - NOTIONAL_CEILING)))
+    notional = max(NOTIONAL_FLOOR, min(dyn_ceiling, sizing["notional_raw"] * episode_mult))
+    notional = min(notional, cash_remaining)
+    if notional < min(NOTIONAL_FLOOR, cash_remaining):
+        return {"id": hid, "ticker": ticker, "skip": True,
+                "reason": f"insufficient_cash_remaining={cash_remaining:.2f}"}
     qty = int(math.floor(notional / last))
     if qty < 1:
         return {"id": hid, "ticker": ticker, "skip": True,
@@ -170,23 +307,40 @@ def author(conn, hyp_row, *, equity: float, dry_run: bool) -> dict:
         "quant_score": float(hyp_row["quant_score"] or 0),
         "evidence_floor_met": True,
         "regime_at_author": _regime_current(conn),
+        "sizing_basis": sizing["sizing_basis"],
+        "kelly_fraction": sizing.get("kelly_fraction"),
+        "p_correct": sizing.get("p_correct"),
+        "prediction_id": sizing.get("prediction_id"),
+        "episode_context": episode_ctx,
+        "episode_sizing_multiplier": episode_mult,
+        "episode_signal": episode_flag,
+        "return_band_pct": (
+            None if pred is None else
+            [pred["return_p10"], pred["return_p50"], pred["return_p90"]]
+        ),
+        "risk_suggested_notional": round(notional, 2),
     }
 
     intent_id = "ti-" + uuid.uuid4().hex[:24]
     ec_id = "ec-" + uuid.uuid4().hex[:24]
+    conviction = sizing.get("kelly_fraction") or SIZE_PCT_OF_EQUITY
     if dry_run:
         return {
             "id": hid, "ticker": ticker, "would_author": True,
             "intent_id": intent_id, "qty": qty, "price": last,
-            "notional": realized_notional,
+            "notional": realized_notional, "sizing_basis": sizing["sizing_basis"],
+            "kelly_fraction": sizing.get("kelly_fraction"),
+            "p_correct": sizing.get("p_correct"),
+            "episode_signal": episode_flag,
         }
 
     conn.execute(
         "INSERT INTO expression_candidates (id, hypothesis_id, vehicle, ticker, "
         "conviction_weight, quant_rationale, recommended, score_json, created_at) "
         "VALUES (?, ?, 'direct_equity', ?, ?, ?, 1, ?, ?)",
-        (ec_id, hid, ticker, SIZE_PCT_OF_EQUITY,
-         f"trader_baseline: long {ticker} at ${last} (quant_score={hyp_row['quant_score']})",
+        (ec_id, hid, ticker, conviction,
+         f"trader_baseline: long {ticker} at ${last} (quant_score={hyp_row['quant_score']}, "
+         f"sizing={sizing['sizing_basis']}, kelly={sizing.get('kelly_fraction')})",
          json.dumps(edge_scorecard), _now_iso()),
     )
 
@@ -210,7 +364,8 @@ def author(conn, hyp_row, *, equity: float, dry_run: bool) -> dict:
         "UPDATE hypotheses SET state='active' WHERE id=? AND state='ready'", (hid,)
     )
     return {"id": hid, "ticker": ticker, "authored": True, "intent_id": intent_id,
-            "qty": qty, "price": last, "notional": realized_notional}
+            "qty": qty, "price": last, "notional": realized_notional,
+            "episode_signal": episode_flag}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        equity = _equity_usd()
+        equity, cash_remaining = _account_snapshot()
     except ConnectorError as exc:
         print(json.dumps({"error": f"alpaca_account: {exc}",
                           "authored": 0}, indent=2))
@@ -252,10 +407,14 @@ def main(argv: list[str] | None = None) -> int:
     authored = 0
     for r in rows:
         if authored >= min(capacity, args.max):
-            break
-        res = author(conn, r, equity=equity, dry_run=args.dry_run)
+            res = {"id": r["id"], "ticker": json.loads(r["tickers"] or "[]")[0],
+                   "skip": True, "reason": "intent_capacity_reached"}
+            results.append(res)
+            continue
+        res = author(conn, r, equity=equity, cash_remaining=cash_remaining, dry_run=args.dry_run)
         if res.get("authored") or res.get("would_author"):
             authored += 1
+            cash_remaining = max(0.0, cash_remaining - float(res.get("notional") or 0.0))
         results.append(res)
 
     if not args.dry_run:
@@ -266,6 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         "open_intents_before": open_existing,
         "capacity": capacity,
         "equity_usd": round(equity, 2),
+        "cash_remaining_usd": round(cash_remaining, 2),
         "regime": regime,
         "dry_run": bool(args.dry_run),
         "results": results,

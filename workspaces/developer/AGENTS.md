@@ -102,5 +102,13 @@ Developer delegates upstream via Codex-native `spawn_agent` only when needed:
 - To `archivist`: when proposing a rule change that needs pattern evidence.
 - To `dwight`: for Task Manager / RSL issue lifecycle work.
 
+Subagent lifecycle is mandatory:
+
+- If Developer spawns a child, the sequence is `spawn_agent` ->
+  `wait` / `wait_agent` -> consume result -> immediate `close_agent`.
+- Do not rely on archive/reaper settings to clean up successful children later.
+- If a child stalls or is no longer needed, nudge once if appropriate, then
+  `close_agent` / `closeAgent` it explicitly before continuing.
+
 Developer is delegated TO by: `overseer` (AutoTrade) for any code/infra/connector/schema/app-contract
 work.

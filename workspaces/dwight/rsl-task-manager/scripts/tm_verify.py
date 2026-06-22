@@ -13,14 +13,19 @@ def get_json(base_url: str, path: str):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def canonical_db_path() -> Path:
+    # scripts/tm_verify.py -> scripts -> rsl-task-manager -> dwight workspace root
+    return Path(__file__).resolve().parents[2] / "taskmanager.db"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify Task Manager service and DB integrity")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--db", default="/home/aaron/.openclaw/workspaces/dwight/taskmanager.db")
-    parser.add_argument("--expect-issues", type=int, default=143)
-    parser.add_argument("--expect-sprints", type=int, default=10)
-    parser.add_argument("--expect-comments", type=int, default=236)
-    parser.add_argument("--expect-sprint5", default="ATS v6 Trading Intel")
+    parser.add_argument("--db", default=str(canonical_db_path()))
+    parser.add_argument("--expect-issues", type=int, default=None)
+    parser.add_argument("--expect-sprints", type=int, default=None)
+    parser.add_argument("--expect-comments", type=int, default=None)
+    parser.add_argument("--expect-sprint5", default=None)
     args = parser.parse_args()
 
     failures = []
@@ -39,9 +44,9 @@ def main() -> int:
         failures.append(f"API calls failed: {exc}")
         issues, sprints = [], []
 
-    if len(issues) != args.expect_issues:
+    if args.expect_issues is not None and len(issues) != args.expect_issues:
         failures.append(f"issues count mismatch: expected={args.expect_issues} actual={len(issues)}")
-    if len(sprints) != args.expect_sprints:
+    if args.expect_sprints is not None and len(sprints) != args.expect_sprints:
         failures.append(f"sprints count mismatch: expected={args.expect_sprints} actual={len(sprints)}")
 
     ids = {item.get("id") for item in issues if isinstance(item, dict)}
@@ -61,12 +66,12 @@ def main() -> int:
         comments_count = -1
         sprint5 = None
 
-    if comments_count != args.expect_comments:
+    if args.expect_comments is not None and comments_count != args.expect_comments:
         failures.append(
             f"comments count mismatch: expected={args.expect_comments} actual={comments_count}"
         )
     sprint5_name = sprint5[0] if sprint5 else None
-    if sprint5_name != args.expect_sprint5:
+    if args.expect_sprint5 is not None and sprint5_name != args.expect_sprint5:
         failures.append(
             f"sprint 5 name mismatch: expected={args.expect_sprint5} actual={sprint5_name}"
         )

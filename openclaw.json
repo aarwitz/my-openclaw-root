@@ -126,12 +126,15 @@
         "toolResultMaxChars": 12000,
         "postCompactionMaxChars": 8000
       },
+      "maxConcurrent": 4,
       "subagents": {
         "delegationMode": "prefer",
+        "maxConcurrent": 8,
         "allowAgents": [
           "researcher",
           "quant",
           "critic",
+          "risk",
           "archivist",
           "trader",
           "executor",
@@ -145,6 +148,13 @@
         "id": "main",
         "workspace": "/home/aaron/.openclaw/workspace",
         "model": "openai/gpt-5.4",
+        "tools": {
+          "profile": "full",
+          "allow": [
+            "message",
+            "group:messaging"
+          ]
+        },
         "identity": {
           "name": "Jerry",
           "emoji": "\ud83e\udd9e"
@@ -154,6 +164,13 @@
         "id": "resi",
         "workspace": "/home/aaron/.openclaw/workspaces/resi",
         "model": "openai/gpt-5.4",
+        "tools": {
+          "profile": "full",
+          "allow": [
+            "message",
+            "group:messaging"
+          ]
+        },
         "groupChat": {
           "mentionPatterns": [
             "@resi_rsl_bot\\b"
@@ -233,6 +250,7 @@
             "researcher",
             "quant",
             "critic",
+            "risk",
             "archivist",
             "developer"
           ]
@@ -259,6 +277,23 @@
         }
       },
       {
+        "id": "risk",
+        "workspace": "/home/aaron/.openclaw/workspaces/risk",
+        "model": "openai/gpt-5.4",
+        "verboseDefault": "full",
+        "toolProgressDetail": "raw",
+        "skills": [
+          "finnhub",
+          "massive",
+          "druck-research",
+          "financialmodeling-prep-api"
+        ],
+        "identity": {
+          "name": "Risk",
+          "emoji": "\ud83d\udee1\ufe0f"
+        }
+      },
+      {
         "id": "archivist",
         "workspace": "/home/aaron/.openclaw/workspaces/archivist",
         "model": "openai/gpt-5.4",
@@ -279,6 +314,15 @@
         "model": "openai/gpt-5.4",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
+        "agentRuntime": {
+          "id": "codex"
+        },
+        "tools": {
+          "exec": {
+            "security": "full",
+            "ask": "off"
+          }
+        },
         "skills": [
           "github-ssh",
           "druck-research"
@@ -299,6 +343,13 @@
         "id": "dwight",
         "workspace": "/home/aaron/.openclaw/workspaces/dwight",
         "model": "openai/gpt-5.4",
+        "tools": {
+          "profile": "full",
+          "allow": [
+            "message",
+            "group:messaging"
+          ]
+        },
         "humanDelay": {
           "mode": "custom",
           "minMs": 1200,
@@ -329,6 +380,13 @@
         "id": "overseer",
         "workspace": "/home/aaron/.openclaw/workspaces/overseer",
         "model": "openai/gpt-5.4",
+        "tools": {
+          "profile": "full",
+          "allow": [
+            "message",
+            "group:messaging"
+          ]
+        },
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "humanDelay": {
@@ -356,6 +414,7 @@
             "researcher",
             "quant",
             "critic",
+            "risk",
             "trader",
             "executor",
             "archivist",
@@ -411,12 +470,16 @@
   ],
   "tools": {
     "profile": "coding",
+    "allow": [
+      "group:messaging"
+    ],
     "agentToAgent": {
       "enabled": true,
       "allow": [
         "researcher",
         "quant",
         "critic",
+        "risk",
         "trader",
         "executor",
         "archivist",
@@ -496,7 +559,6 @@
       "mode": "enforce",
       "pruneAfter": "30d",
       "maxEntries": 500,
-      "rotateBytes": "10mb",
       "resetArchiveRetention": "7d",
       "maxDiskBytes": "500mb"
     }
@@ -636,7 +698,7 @@
                 "financialmodeling-prep-api",
                 "task-manager"
               ],
-              "systemPrompt": "You are AutoTrade (agent id overseer) in Trading Desk topic 641. You are\nthe chat front door + pipeline orchestrator. You do not have a human name.\n\nPipeline order is strict: researcher -> quant -> critic -> trader -> executor.\narchivist runs as an async learning pass. developer owns scripts/schema/\nconnectors. dwight owns rsl-task-manager.\n\nChat behavior:\n- @druck_rsl_bot -> reply expected.\n- FYI/cc -> listen-only.\n- No markdown tables, no pipe-separated rows, no fenced code blocks unless\n  explicitly requested.\n- For trade execution: spawn trader to mint intents, then spawn executor.\n- For dev/infra changes: spawn developer.\n- For task manager work: spawn dwight.\n- For status: read data.json at\n  /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n- For the priority queue: use scripts under\n  /home/aaron/.openclaw/workspaces/overseer/scripts/\n"
+              "systemPrompt": "You are AutoTrade (agent id overseer) in Trading Desk topic 641. You are\nthe chat front door + pipeline orchestrator. You do not have a human name.\n\nThe canonical system description lives in /home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md and it wins over local summaries.\nPipeline order is strict: researcher -> quant -> critic -> trader -> risk -> executor.\narchivist runs the learning loop. developer owns scripts/schema/connectors.\ndwight owns rsl-task-manager.\n\nChat behavior:\n- @druck_rsl_bot -> reply expected.\n- FYI/cc -> listen-only.\n- No markdown tables, no pipe-separated rows, no fenced code blocks unless\n  explicitly requested.\n- For trade execution: follow the canonical pipeline and gate ownership from\n  SYSTEM_ARCHITECTURE.md; trader authors intents, risk owns the final\n  intent->order veto, executor places paper orders.\n- For dev/infra changes: spawn developer.\n- For task manager work: spawn dwight.\n- For status: read data.json at\n  /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n- For the priority queue and overseer helper scripts: use\n  ~/.openclaw/scripts/run-with-trace.sh with scripts under\n  /home/aaron/.openclaw/workspaces/overseer/scripts/\n"
             }
           }
         }
@@ -644,6 +706,7 @@
       "historyLimit": 20,
       "accounts": {
         "jerry": {
+          "enabled": true,
           "dmPolicy": "pairing",
           "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token",
           "allowFrom": [
@@ -807,13 +870,15 @@
     }
   },
   "plugins": {
+    "bundledDiscovery": "compat",
     "allow": [
       "codex",
       "telegram",
       "brave",
       "openai",
       "ollama",
-      "github-copilot"
+      "github-copilot",
+      "memory-core"
     ],
     "entries": {
       "codex": {
@@ -832,6 +897,9 @@
         "enabled": true
       },
       "github-copilot": {
+        "enabled": true
+      },
+      "memory-core": {
         "enabled": true
       }
     }

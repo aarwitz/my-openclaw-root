@@ -4,6 +4,12 @@ from sqlalchemy.orm import sessionmaker
 import os
 from pathlib import Path
 
+
+def canonical_workspace_db_path() -> Path:
+    # backend/database.py -> backend -> rsl-task-manager -> dwight workspace root
+    return Path(__file__).resolve().parents[2] / "taskmanager.db"
+
+
 db_url = os.environ.get("TASKMANAGER_DB_URL", "").strip()
 db_path = os.environ.get("TASKMANAGER_DB_PATH", "").strip()
 
@@ -13,7 +19,7 @@ elif db_path:
     resolved = Path(db_path).expanduser().resolve()
     SQLALCHEMY_DATABASE_URL = f"sqlite:///{resolved}"
 else:
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./taskmanager.db"
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{canonical_workspace_db_path()}"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

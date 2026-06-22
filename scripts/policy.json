@@ -19,6 +19,13 @@
       "rationale": "Trader workspace ops scripts; run by the trader agent inside the gateway container.",
       "wrapperRequired": true,
       "ignore": ["__pycache__/"]
+    },
+    {
+      "path": "~/.openclaw/workspaces/overseer/scripts",
+      "owner": "overseer",
+      "rationale": "Overseer workspace ops scripts for pipeline status and priority-queue control on the gateway container.",
+      "wrapperRequired": true,
+      "ignore": ["__pycache__/"]
     }
   ],
   "exemptDirs": [

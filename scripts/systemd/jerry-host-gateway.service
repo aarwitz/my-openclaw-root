@@ -1,0 +1,14 @@
+[Unit]
+Description=Jerry dedicated host gateway runtime (loopback :18790)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/home/aaron/.openclaw/credentials/jerry-host-gateway.env
+ExecStart=/usr/bin/node /home/aaron/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway run --port 18790 --bind loopback --auth none --ws-log compact
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

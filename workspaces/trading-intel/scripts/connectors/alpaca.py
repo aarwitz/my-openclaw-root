@@ -62,11 +62,34 @@ def list_orders(status: str = "open", limit: int = 100) -> list[dict[str, Any]]:
     return _get(PAPER_API, "/v2/orders", {"status": status, "limit": limit}) or []
 
 
+def portfolio_history(period: str = "all", timeframe: str = "1D") -> list[dict[str, Any]]:
+    """Daily account equity history, oldest first: [{date, equity}, ...].
+
+    Zero/None equity points (pre-funding placeholder days) are dropped.
+    """
+    raw = _get(
+        PAPER_API,
+        "/v2/account/portfolio/history",
+        {"period": period, "timeframe": timeframe},
+    )
+    out: list[dict[str, Any]] = []
+    for ts, eq in zip(raw.get("timestamp") or [], raw.get("equity") or []):
+        if not eq:
+            continue
+        date = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+        out.append({"date": date, "equity": float(eq)})
+    return out
+
+
 # ----- market data -----
 
-def daily_bars(symbol: str, days: int = 260) -> list[dict[str, Any]]:
-    """Return up to `days` daily bars for `symbol`, oldest first."""
-    cache_key = f"alpaca_{symbol.lower()}_1d_{days}"
+def daily_bars(symbol: str, days: int = 260, adjustment: str = "raw") -> list[dict[str, Any]]:
+    """Return up to `days` daily bars for `symbol`, oldest first.
+
+    `adjustment` defaults to "raw" (live behavior unchanged); pass "split" for
+    multi-year backtests/grading so stock splits don't create spurious returns.
+    """
+    cache_key = f"alpaca_{symbol.lower()}_1d_{days}_{adjustment}"
     cached = cache_read(cache_key, max_age_h=6.0)
     if cached:
         return cached.get("bars", [])
@@ -77,7 +100,7 @@ def daily_bars(symbol: str, days: int = 260) -> list[dict[str, Any]]:
         "start": start.isoformat(),
         "end": end.isoformat(),
         "limit": 10000,
-        "adjustment": "raw",
+        "adjustment": adjustment,
         "feed": "iex",
     }
     raw = _get(DATA_API, f"/v2/stocks/{symbol}/bars", params)
@@ -86,6 +109,19 @@ def daily_bars(symbol: str, days: int = 260) -> list[dict[str, Any]]:
         raise ConnectorError(f"alpaca daily_bars: no bars for {symbol}")
     cache_write(cache_key, {"bars": bars, "symbol": symbol})
     return bars
+
+
+def latest_trade(symbol: str) -> dict[str, Any] | None:
+    """LIVE last-trade price for execution-time freshness checks — NOT cached. Returns
+    {'price': float, 'ts': iso} or None if unavailable. (Free IEX feed can be ~15min delayed but is
+    vastly fresher than the multi-hour-cached daily bars, and is the broker's own view of price.)"""
+    try:
+        raw = _get(DATA_API, f"/v2/stocks/{symbol}/trades/latest", {"feed": "iex"})
+        t = (raw or {}).get("trade") or {}
+        p = t.get("p")
+        return {"price": float(p), "ts": t.get("t")} if p is not None else None
+    except Exception:
+        return None
 
 
 def spy_trend() -> dict[str, Any]:

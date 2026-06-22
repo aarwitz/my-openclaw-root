@@ -30,6 +30,11 @@ directories are governed**. The lint, audit, and scaffolder all read it.
 
 To add a new governed directory: edit `policy.json`, then run the lint.
 
+Prompt/config generators and operator docs must follow the same rule. If a
+file shows a runnable command for a governed script, the example must use
+`run-with-trace.sh`; do not teach direct `python3`, `bash`, or raw-path
+invocation for governed entries.
+
 ## Mandatory wrapper
 
 Every governed `.sh` / `.py` file must begin with the wrapper guard:
@@ -50,9 +55,10 @@ from require_wrapper import require_wrapper
 require_wrapper()
 ```
 
-The guard rejects direct invocation (exit 126) and forces all runs through
-`run-with-trace.sh`, which writes a JSONL trail to
-`~/.openclaw/logs/script-runs.jsonl`.
+The guard auto-reexecs through `run-with-trace.sh` by default, which writes a
+JSONL trail to `~/.openclaw/logs/script-runs.jsonl`. If
+`OPENCLAW_REQUIRE_WRAPPER_NO_AUTORUN=1` is set, direct invocation is rejected
+with exit `126` instead.
 
 ## Running scripts
 

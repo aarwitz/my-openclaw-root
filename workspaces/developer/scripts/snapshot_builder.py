@@ -31,6 +31,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
+from connectors.alpaca import ConnectorError, get_account, list_orders, list_positions  # noqa: E402
+
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 DEFAULT_OUT = Path(
     "/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
@@ -56,6 +59,15 @@ def _now_utc_iso() -> str:
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return None if row is None else {k: row[k] for k in row.keys()}
+
+
+def _safe_float(value: Any, default: float | None = 0.0) -> float | None:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +244,115 @@ def _load_positions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [_row_to_dict(r) for r in rows]
 
 
+def _load_portfolio_snapshots(conn: sqlite3.Connection, limit: int = 180) -> list[dict[str, Any]]:
+    try:
+        rows = conn.execute(
+            "SELECT captured_at, equity, spy_close, cash, buying_power, day_pl "
+            "FROM portfolio_snapshots ORDER BY captured_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    points = []
+    for r in reversed(rows):
+        points.append(
+            {
+                "timestamp": r["captured_at"],
+                "equity": _safe_float(r["equity"]),
+                "spy_close": _safe_float(r["spy_close"], None),
+                "cash": _safe_float(r["cash"], None),
+                "buying_power": _safe_float(r["buying_power"], None),
+                "day_pl": _safe_float(r["day_pl"], None),
+            }
+        )
+    return points
+
+
+def _benchmark_spy_comparison(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    try:
+        rows = conn.execute(
+            "SELECT horizon, alpha_pct, portfolio_return_pct, spy_return_pct, captured_at "
+            "FROM benchmarks ORDER BY captured_at DESC LIMIT 50"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    latest_by_h: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        h = r["horizon"]
+        if h not in latest_by_h:
+            latest_by_h[h] = {
+                "horizon": h,
+                "captured_at": r["captured_at"],
+                "portfolio_return_pct": _safe_float(r["portfolio_return_pct"], None),
+                "spy_return_pct": _safe_float(r["spy_return_pct"], None),
+                "alpha_pct": _safe_float(r["alpha_pct"], None),
+            }
+    if not latest_by_h:
+        return None
+    horizons = [
+        latest_by_h[h]
+        for h in ("intraday", "swing_1_5d", "position_1_4w", "trend_1_3m", "long_6m_plus")
+        if h in latest_by_h
+    ]
+    return {"available": True, "source": "benchmarks", "horizons": horizons}
+
+
+def _snapshot_spy_comparison(points: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(points) < 2:
+        return {"available": False, "note": "portfolio_snapshots_insufficient"}
+
+    first = points[0]
+    last = points[-1]
+    if not first.get("equity") or not last.get("equity"):
+        return {"available": False, "note": "equity_series_missing"}
+    if not first.get("spy_close") or not last.get("spy_close"):
+        return {"available": False, "note": "spy_series_missing"}
+
+    port_ret = ((last["equity"] / first["equity"]) - 1.0) * 100.0
+    spy_ret = ((last["spy_close"] / first["spy_close"]) - 1.0) * 100.0
+    alpha_pct = port_ret - spy_ret
+    return {
+        "available": True,
+        "source": "portfolio_snapshots",
+        "period_start": first["timestamp"],
+        "period_end": last["timestamp"],
+        "portfolio_return_pct": round(port_ret, 4),
+        "spy_return_pct": round(spy_ret, 4),
+        "alpha_pct": round(alpha_pct, 4),
+        "alpha_bps": round(alpha_pct * 100.0, 1),
+    }
+
+
+def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    try:
+        acct = get_account()
+        positions = list_positions()
+        orders = list_orders(status="all", limit=20)
+        broker = {
+            "status": acct.get("status"),
+            "account_number": acct.get("account_number"),
+            "equity": _safe_float(acct.get("equity"), 0.0),
+            "last_equity": _safe_float(acct.get("last_equity"), 0.0),
+            "cash": _safe_float(acct.get("cash"), 0.0),
+            "buying_power": _safe_float(acct.get("buying_power"), 0.0),
+            "day_pl": _safe_float(acct.get("equity"), 0.0)
+            - _safe_float(acct.get("last_equity"), 0.0),
+            "available": True,
+            "name": "alpaca_paper",
+        }
+        return broker, positions, orders
+    except ConnectorError as exc:
+        return (
+            {
+                "name": "alpaca_paper",
+                "available": False,
+                "note": f"connector_error: {str(exc)[:180]}",
+            },
+            [],
+            [],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Cron + agent freshness
 # ---------------------------------------------------------------------------
@@ -278,10 +399,26 @@ def _build_retail_insights(
     intents: list[dict[str, Any]],
     counts: dict[str, Any],
     last_pass: dict[str, str | None],
+    spy_comparison: dict[str, Any],
 ) -> dict[str, Any]:
     top_scored = [h for h in hypotheses if h["quant_score"] is not None][:5]
     open_position_tickers = sorted({p["ticker"] for p in positions})
     pending_intents = [i for i in intents if i["state"] in ("proposed", "approved", "submitted", "partial")]
+    regime_label = (regime.get("current") or "unknown").upper()
+    top_tickers = [
+        ",".join(h.get("tickers") or []) if isinstance(h.get("tickers"), list) else str(h.get("tickers") or "")
+        for h in top_scored[:3]
+    ]
+    top_tickers = [t for t in top_tickers if t]
+    headline = (
+        f"{regime_label} regime, {counts['positions_open']} open positions, "
+        f"{counts['intents_open']} open intents."
+    )
+    takeaways = [
+        f"Top scored ideas: {', '.join(top_tickers)}" if top_tickers else "No scored ideas yet; sourcing/scoring in progress.",
+        f"Pending intents: {len(pending_intents)}.",
+        f"Active pauses: {counts['pauses_active']}.",
+    ]
 
     return {
         "generated_at": _now_utc_iso(),
@@ -353,17 +490,14 @@ def _build_retail_insights(
             },
         ],
         # Narrative slots filled by a downstream overseer pass with strict JSON.
-        "headline": None,
-        "three_takeaways": [],
+        "headline": headline,
+        "three_takeaways": takeaways,
         "regime_one_liner": (
             None if regime.get("current") is None
             else f"Regime is {regime['current']}."
         ),
         "next_24h_watch": [],
-        "spy_comparison": {
-            "available": False,
-            "note": "attribution + benchmarks tables not yet populated",
-        },
+        "spy_comparison": spy_comparison,
         "pending_intents_count": len(pending_intents),
     }
 
@@ -416,6 +550,10 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     audits = _load_audits(conn)
     watchlist = _load_watchlist(conn)
     positions = _load_positions(conn)
+    equity_history = _load_portfolio_snapshots(conn)
+    benchmark_cmp = _benchmark_spy_comparison(conn)
+    spy_comparison = benchmark_cmp or _snapshot_spy_comparison(equity_history)
+    broker, broker_positions, broker_orders = _load_broker_snapshot()
     cron = _load_cron_state()
     last_pass = _last_pass_per_agent(audits)
 
@@ -427,10 +565,10 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
             {**a, "last_pass_at": last_pass.get(a["id"])} for a in AGENTS
         ],
         "regime": regime,
-        "broker": {"name": "alpaca_paper", "available": False, "note": "stub"},
-        "brokerPositions": [],
-        "brokerOrders": [],
-        "equityHistory": [],
+        "broker": broker,
+        "brokerPositions": broker_positions,
+        "brokerOrders": broker_orders,
+        "equityHistory": equity_history,
         "positions": positions,
         "hypotheses": hypotheses,
         "criticReviews": critic_reviews,
@@ -442,7 +580,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "audits": audits,
         "counts": counts,
         "retail_insights": _build_retail_insights(
-            regime, hypotheses, positions, intents, counts, last_pass
+            regime, hypotheses, positions, intents, counts, last_pass, spy_comparison
         ),
         "system_health": _build_system_health(regime, counts, last_pass, cron),
     }

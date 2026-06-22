@@ -1,6 +1,11 @@
 # 02 - Architecture
 
-Status: active. Canonical description of the OpenClaw trading system topology, source map, decision flow, execution loop, and feedback loops. Implements [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md).
+> ⚠️ **SUPERSEDED (2026-06-06).** The authoritative system description is now
+> [`SYSTEM_ARCHITECTURE.md`](../../../SYSTEM_ARCHITECTURE.md) (topology v4). This
+> doc predates the Risk agent and the World-Model & Calibration layer; where it
+> disagrees, the canonical doc wins.
+
+Status: superseded. Historical description of the OpenClaw trading system topology, source map, decision flow, execution loop, and feedback loops. Implements [01_OPERATING_AUTHORITY.md](01_OPERATING_AUTHORITY.md).
 
 ## 1. System shape
 

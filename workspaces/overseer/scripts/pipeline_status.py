@@ -28,6 +28,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 DB = Path("/home/aaron/.openclaw/state/trading-intel.sqlite")
 
 

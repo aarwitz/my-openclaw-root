@@ -5,7 +5,7 @@ if (!username) {
 
 document.getElementById('currentUser').textContent = username;
 const { fetchJson, fetchSprints, renderIssueCard, findDuplicateCandidates, formatSprintLabel } = window.TM_SHARED;
-const { submitIssueForm } = window.TMIssueForm;
+const { prepareIssueForm, submitIssueForm } = window.TMIssueForm;
 let searchTimeout = null;
 let searchSprints = [];
 let searchSprintMap = new Map();
@@ -26,7 +26,10 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
     window.location.href = '/static/index.html';
 });
 
-createIssueBtn.addEventListener('click', () => createIssueModal.classList.add('show'));
+createIssueBtn.addEventListener('click', async () => {
+    await prepareIssueForm({ form: document.getElementById('createIssueForm'), fetchJson });
+    createIssueModal.classList.add('show');
+});
 closeModal.addEventListener('click', () => createIssueModal.classList.remove('show'));
 cancelBtn.addEventListener('click', () => createIssueModal.classList.remove('show'));
 window.addEventListener('click', (e) => {

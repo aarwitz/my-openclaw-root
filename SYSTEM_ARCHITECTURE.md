@@ -114,6 +114,10 @@ World-model tables (migration `0008`, §6): `mechanisms`,
 Everything is threaded by `experiment_id`, and **every** state transition writes
 an `audits` row (`actor`, `before_state`, `after_state`, rationale).
 
+A **second, offline analytics DB** — `~/.openclaw/state/features.sqlite` — holds the point-in-time
+feature store, backtest results, and the calibrated mechanism set (§11). It is deliberately separate
+from the live store so the empirical foundation can be (re)built without touching production.
+
 ---
 
 ## 5. The trading pipeline (deterministic core)
@@ -181,6 +185,11 @@ yields up → duration repricing → high-multiple tech/AI underperforms) and
 govt-contract award, reflexive political signal, launch-dependency shock,
 no-cashflow narrative decay, leveraged-ETF trend compounding, memory supercycle,
 priced-in insider distribution).
+
+> **As of 2026-06-18 these are *seeds*, not canon.** They are now validated (and supplemented by
+> machine-discovered mechanisms) against 20 years of point-in-time, survivorship-safe data with FDR
+> control — see **§11**. The live world model will be bootstrapped from the resulting
+> `calibrated_mechanisms` set, not from hand-authored beliefs.
 
 ### 6.7 Episode library (`episodes`) — named, dated ground truth (schema v9)
 The desk learns market structure from a curated library of **real, named,
@@ -409,7 +418,153 @@ cron→SQLite migration in this build). The overseer drives the desk:
 
 ---
 
-## 11. Invariants (must never be violated)
+## 11. Empirical foundation — feature store, backtesting & mechanism discovery (2026-06-18)
+
+The world model (§6) was bootstrapped from hand-authored mechanisms + a small, hindsight-biased
+episode library (12/13 episodes "confirmed"). That is being replaced by an **empirical, point-in-time,
+survivorship-safe foundation** that lets the system *discover and validate* mechanisms from 20 years of
+data. Built and validated 2026-06-18; live integration is the next gated step (see end).
+
+**Feature store — `~/.openclaw/state/features.sqlite`** (separate from the live DB; analytics/offline).
+One tall, point-in-time table `features(ticker, as_of, name, value, knowable_at, source)`; a read is
+"latest `as_of ≤ D`". Built by `workspaces/trading-intel/scripts/feature_store.py`:
+- *Technical* (computed from prices): `rsi14`, `mom_12_1`, `vol_20d_annual`, `dist_sma50/200`,
+  `drawdown_252`, `dist_52w_high`.
+- *Fundamental* (FMP, stamped at **`filingDate`** = knowable_at, NOT the fiscal-period date):
+  `revenue_ttm`, `eps_ttm`, `net_margin_ttm`, `revenue_growth_yoy`; `pe_ttm` derived at read time;
+  plus `eps_surprise_pct` events.
+- Universe: **1,510 names, all-cap NASDAQ/NYSE (not S&P-restricted) ∪ delisted/failed** names, each
+  usable only within its real [IPO → delist] window. `members_asof()` reconstructs point-in-time S&P
+  membership from FMP constituent-change history (for survivorship-safe index studies).
+
+**Data sources & connectors.** `connectors/fmp.py` (FMP **Premium**) is the historical backbone:
+deep (20–30yr) **split-adjusted** prices incl. delisted names, quarterly fundamentals + ratios,
+analyst estimates, earnings surprise, constituent history, delisted list. **Alpaca remains the LIVE
+broker/execution + real-time** feed; FMP supplies history (Alpaca's free IEX is capped ~6yr). FRED =
+macro, EDGAR = filings/insider/13F (free). **MCP is intentionally not wired** for this layer — the
+feature store/backtest require deterministic, cached REST, not LLM-mediated MCP; an MCP *client* is a
+later agent-research add (FMP and Unusual Whales both publish MCP servers).
+
+**Mechanisms are now declarative data, not code.** A mechanism = `{conds:[(feature, op, threshold)],
+direction, horizon, kind}`. The 17 hand-authored mechanisms (§6.1) are **seeds**, not canon; the system
+also **generates** candidates (single-feature quintile triggers + cross-sectional rank factors) and
+holds seeds, generated, and cross-sectional to the *same* bar.
+
+**Backtest / discovery engine — `mechanism_backtest.py` + `worldmodel_stats.py`.** Walk-forward,
+strictly point-in-time (decision uses `as_of` features + entry on the next bar; outcome graded on
+future bars only — **no-look-ahead proven** by a dataset-truncation diff). Streams ticker-by-ticker
+(scales to thousands). Rigor controls:
+- **non-overlapping** samples (spacing ≥ horizon) — no autocorrelation inflation;
+- graded **market-relative vs the empirical base rate** (~0.49 on the broad universe, not 0.5);
+- **train/test holdout**; primary significance = one-sided **t-test on net mean-alpha** (catches
+  skew/tail edges), hit-rate secondary;
+- **Benjamini-Hochberg FDR + Bonferroni** across every (mechanism × horizon) + cross-sectional factor;
+- **data-quality / tradability controls**: $5 price floor, $5M dollar-volume floor, per-horizon return
+  winsorization, and a round-trip **transaction-cost** model (+short borrow) — alpha is reported **net**.
+
+Informed by **AlphaAgent (arXiv 2502.16789)**: the enemy is *alpha decay* (overfit + crowding); the
+generator is regularized toward originality / hypothesis-alignment / complexity, and only OOS+FDR
+survivors earn weight. An LLM proposer (richer multi-feature hypotheses) slots in at the generator.
+
+**Calibrated mechanism set — `features.sqlite::calibrated_mechanisms`** (`promote_mechanisms.py`): the
+FDR-significant, net-positive-alpha survivors with their measured edge + a provisional world-model
+posterior. This is the **bootstrap source** for the live world model.
+
+**LIVE as of 2026-06-18.** `integrate_calibrated.py` (backup-first) reset the hindsight-biased learned
+state and replaced the live `mechanisms` table with the **31 calibrated survivors** (active; calibrated
+weight encoded in `prior_alpha/prior_beta` with a pseudo-count so `calibrate.py` preserves it and live
+outcomes update it additively). Backup: `~/.openclaw/backups/trading-intel-PRE-CALIBRATION-*.sqlite`.
+
+Three loops now close around it:
+- **Live learning loop (closed):** `archivist/scripts/grade_outcomes.py` grades matured predictions from
+  realized market-relative returns → sets `hypotheses.resolved_state` → `calibrate.py` folds per-mechanism
+  observations into the posteriors. Run via the governed `scripts/trader-learn-deterministic.sh`
+  (grade_outcomes → calibrate → extract_patterns); the live trading pass is untouched.
+- **Deterministic activation:** `signal_scan.py` fires the calibrated mechanisms from each ticker's
+  *current* features → ranked conviction (advisory; wiring into live intents is the next gated step).
+- **Mechanism discovery (ongoing):** `mechanism_backtest.py` (`gen_candidates` single-feature +
+  `gen_multi` economically-aligned 2-feature) keeps proposing candidates under the same OOS+FDR+cost bar;
+  survivors promote via `promote_mechanisms.py`. The free-form LLM proposer is the next layer.
+
+**Now wired into cron (2026-06-18):**
+- `overseer-daily-learning-1630-et` (weekday 16:30 ET) — Step 1 also runs `feature_store.py refresh-live`
+  (fresh point-in-time features) + `archivist/scripts/grade_outcomes.py` (grade matured trades → set
+  `resolved_state`); Step 4 `calibrate.py` folds the outcomes into posteriors. **The learning loop now runs daily.**
+- `world-model-signals-0900-et` (weekday 9:00 ET, NEW) — `signals_to_hypotheses.py` turns the calibrated
+  mechanisms' top deterministic signals (`signal_scan.scan()`) into RAW hypotheses; the day's passes +
+  the non-bypassable **Risk gate** trade them.
+- `mechanism-proposer-weekly` (Sun 10:00 ET, NEW) — the researcher proposes new mechanisms, each gated by
+  `validate_mechanism.py` (OOS net-alpha screen, p<0.01); survivors require a full FDR backtest + human
+  promotion (`integrate_calibrated.py`). Auto-promotion stays human-gated (invariant 4).
+
+**Still open:** turning `signals_to_hypotheses` confidence into native return-aware sizing in `author_intents`;
+broadening the daily refresh universe; and tuning proposer cadence. Plan: `~/.claude/plans/vast-wishing-pony.md`.
+
+---
+
+## 11b. Current state (2026-06-18) — backbone, news, evidence tiers
+
+**Data backbone (revised).** **Massive** (=formerly Polygon; upgraded, UNLIMITED calls, base
+`api.massive.com`, `apiKey=` param) is now the **price + news** workhorse: 10yr split-adjusted prices
+incl. delisted (`_prices` = Massive→FMP(20yr depth)→Alpaca), and historical ticker news back to ~2021
+(`_news` = Massive; AI `insights.sentiment` recent-only, so history uses a deterministic finance
+lexicon over title+description). **FMP** = fundamentals, insider, analyst ratings, constituents. FRED =
+macro; Event Registry = real-time catalysts; Alpaca = live broker. (Alpha Vantage / GDELT no longer
+needed.) Connectors: `connectors/{massive,fmp,fred,edgar,eventregistry,alphavantage,gdelt}.py`.
+
+**Calibrated set: 40 live mechanisms** (17 seed + 23 machine-generated, 30 Bonferroni). The system now
+sorts evidence into THREE tiers — this is the core design principle:
+1. **Validated mechanical edges** (backtested, cost-net, FDR; live + sized): mean-reversion
+   (oversold/deep-drawdown), the multi-feature **drawdown-within-uptrend (+5.8%/qtr, strongest)**, value
+   (cheap P/E), growth, momentum/trend, vol factor, earnings-beat, **rating-upgrades**, **news-sentiment
+   momentum** (`positive_sentiment`).
+2. **Rejected as blind rules → handled by LLM judgment**: the **overreaction-contrarian** (bearish-news +
+   cheap-for-growth — fails FDR because it also buys value traps like the saaspocalypse names), insider-
+   selling, sector-chasing. These run through the **bull/bear debate** (`catalyst-research` agent, the one
+   idea adopted from TauricResearch/TradingAgents) + forward learning, NOT as quant mechanisms.
+3. The **closed loop** (`grade_outcomes` → `calibrate`) grades all live trades forward into the posteriors.
+
+**Macro findings (mined 2026-06-18).** The jobs/CPI/Fed → rate-move → duration-repricing → tech-down
+chain (`rates_up_duration`) was tested via FRED rate/real-yield/curve/credit-spread/VIX features (the
+rate move is the transmission signal). Result: **NOT a robust mechanical edge over 2020–2026** — real in
+2022 but the regime flipped (2023–26 was AI-narrative-driven, tech rose regardless of rates) → it joins
+tier-2 (regime-dependent, judgment). What DID survive (now live, 47 mechanisms): **VIX-capitulation**
+(`vix_high + deep_drawdown → long`, +3%/qtr, robust all horizons) and `vix_high → long`.
+
+**Regime layer (LLM judgment for the regime-dependent chains).** `regime_brief.py` classifies the current
+macro regime from FRED (rates rising/falling/dominant, risk_off, curve, credit, VIX) and lists the active
+playbooks; it's Step 0 of the `catalyst-research` agent so the bull/bear **judge applies the rate→duration
+and risk-off chains ONLY when the regime warrants** (e.g. today = `neutral_narrative_driven` → it explicitly
+does NOT apply the rate→tech chain). Validated mechanical edges trade regardless; regime-dependent chains are
+gated on the regime. This is the operating principle: **mechanical where proven, LLM judgment where the edge is regime-dependent.**
+
+## 11c. Conviction-quality improvements (2026-06-18) — 5 weaknesses the system surfaced about itself
+
+After using the desk to read the live tape, five weaknesses were fixed. `signal_scan` conviction now
+weights each fired mechanism by **redundancy_weight × regime_fit**, ranks names by **correlation-novelty**,
+and the learning loop blends backtest + live evidence:
+
+1. **Cross-name correlation (novelty).** `signal_scan._correlation_adjust`: a name's conviction is
+   discounted by its return-correlation to higher-ranked candidates (novelty = 1−max corr); reports
+   EFFECTIVE independent bets. Data correction: large-caps are only ~0.45 correlated even within a sector
+   (not "one bet") → graded discount, not binary clusters. `signals_to_hypotheses` skips novelty<0.5.
+2. **Within-name mechanism redundancy.** `mechanism_correlation.py` → `mechanism_clusters` table
+   (redundancy_weight = 1/cluster_size from Jaccard>0.5 of firing vectors). De-dups same-theme stacking.
+   Data correction: redundancy is only ~1.21× at 0.5 (the families fire on different cells), not 10×.
+3. **Regime-conditional weights.** `mechanism_regime.py` → `mechanism_regime` table (per-mechanism alpha
+   by VIX/rate regime). signal_scan `regime_fit` = alpha(current regime)/alpha(ALL). **Finding: the
+   growth-vs-value rotation is rate-regime-driven** — growth/momentum/high-vol mechanisms pay when rates
+   fall, value when rates rise. This is the operator's jobs→rates→duration chain, correctly placed as a
+   *conditioner* (it failed FDR as a standalone factor). The QUANT layer now weights by regime too.
+4. **Two learning rates.** `calibrate.py` PRIOR_DECAY_N: the backtest prior shrinks as the desk's own
+   live observations accrue (shrink = 30/(30+n_live)) → live P&L progressively overrides the backtest.
+5. **Short interest (last data gap closed).** Massive FINRA `/stocks/v1/short-interest` →
+   `feature_store._short_interest` (days_to_cover, short_int_chg_2m; stamped settlement+8 business days
+   to respect FINRA's dissemination lag). New crowded_short/squeeze mechanisms in the engine.
+
+New tables: `mechanism_clusters`, `mechanism_regime` (regenerate via their scripts).
+
+## 12. Invariants (must never be violated)
 
 1. Numbers come from deterministic scripts; LLMs author judgement/prose only.
 2. Single canonical store; every transition is audited and `experiment_id`-threaded.

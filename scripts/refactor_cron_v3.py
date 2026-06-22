@@ -20,6 +20,12 @@ Changes:
 Backs up `cron/jobs.json` first.
 """
 from __future__ import annotations
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+
+require_wrapper()
+
 import json
 import shutil
 import time
@@ -28,13 +34,19 @@ from pathlib import Path
 
 CRON = Path("/home/aaron/.openclaw/cron/jobs.json")
 BACKUP = CRON.with_suffix(f".json.pre-phase-e.{int(time.time())}.bak")
+RUN_WITH_TRACE = "~/.openclaw/scripts/run-with-trace.sh"
+OVERSEER_SCRIPTS = "~/.openclaw/workspaces/overseer/scripts"
+PQ_APPEND_CMD = (
+    f"{RUN_WITH_TRACE} {OVERSEER_SCRIPTS}/pq_append.py --by overseer "
+    "--category <cat> --title <t> --details <d> --priority <1-5>"
+)
 
 NEW_MESSAGE = (
     "[DETERMINISTIC-PASS-V1] You are AutoTrade (agent id overseer). Run the "
     "deterministic pipeline first, then narrate.\n"
     "\n"
-    "Step 1 (deterministic): exec "
-    "`~/.openclaw/scripts/trader-pass-deterministic.sh` and capture stdout JSON. "
+    "Step 1 (deterministic): execute "
+    "`~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture stdout JSON. "
     "This runs classify_regime -> score_hypotheses -> gate_evaluator -> "
     "execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot.\n"
     "\n"
@@ -58,8 +70,7 @@ NEW_MESSAGE = (
     "\n"
     "Step 5 (queue): if you spotted anything that needs a follow-up issue, "
     "append a priority-queue row via "
-    "`python3 ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer "
-    "--category <cat> --title <t> --details <d> --priority <1-5>`."
+    f"`{PQ_APPEND_CMD}`."
 )
 
 
@@ -94,8 +105,7 @@ def main() -> int:
         jobs.append({
             "id": str(uuid.uuid4()),
             "agentId": "dwight",
-            "sessionKey": "agent:dwight:telegram:direct:6043080629",
-            "sessionTarget": "session:agent:dwight:telegram:direct:6043080629",
+            "sessionTarget": "isolated",
             "name": POLL_NAME,
             "description": "Poll ~/.openclaw/state/priority-queue.jsonl every 6h; promote eligible rows into rsl-task-manager issues on sprint 5 via Dwight's queue rail.",
             "createdAtMs": int(time.time() * 1000),
@@ -105,8 +115,8 @@ def main() -> int:
             "payload": {
                 "kind": "agentTurn",
                 "message": (
-                    "[DETERMINISTIC-DWIGHT-PQ] Run "
-                    "`~/.openclaw/scripts/dwight-pq-rail.sh` "
+                    "[DETERMINISTIC-DWIGHT-PQ] Execute exactly one command: "
+                    "`~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/dwight-pq-rail.sh` "
                     "and report claimed/reconciled/failed counts. If anything failed, surface the error "
                     "messages and propose a fix path. Do not modify the queue manually."
                 ),

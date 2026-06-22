@@ -1,5 +1,11 @@
 # FULL DESIGN ASCII
 
+> ⚠️ **SUPERSEDED (2026-06-06).** The authoritative system description is now
+> [`SYSTEM_ARCHITECTURE.md`](../../SYSTEM_ARCHITECTURE.md). This diagram is
+> stale: it shows five agents and conflates overseer+executor+trader, omits the
+> Risk agent and the World-Model layer, and lists Alpaca under "trader" (now
+> executor). Retained for history only.
+
 Canonical top-level diagram for the OpenClaw trading system.
 
 Source of truth: the live architecture, execution, schema, and implementation policy docs under this root.

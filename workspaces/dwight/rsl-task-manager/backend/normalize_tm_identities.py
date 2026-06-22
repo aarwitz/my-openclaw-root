@@ -11,6 +11,11 @@ ALIASES = {
 REMOVE_USERS = {"telegram", "aaron", "taylor", "Claw", "claw"}
 
 
+def canonical_db_path():
+    # backend/normalize_tm_identities.py -> backend -> rsl-task-manager -> dwight workspace root
+    return Path(__file__).resolve().parents[2] / "taskmanager.db"
+
+
 def canonicalize(value):
     if value is None:
         return None
@@ -27,7 +32,7 @@ def canonicalize(value):
 
 
 def main():
-    db_path = Path(__file__).resolve().parent / 'taskmanager.db'
+    db_path = canonical_db_path()
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 

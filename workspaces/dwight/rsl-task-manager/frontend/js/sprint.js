@@ -5,7 +5,7 @@ if (!username) {
 
 document.getElementById('currentUser').textContent = username;
 const { fetchJson, fetchSprints, buildSprintSelectOptions, renderIssueCard, attachInlineIssueEditors } = window.TM_SHARED;
-const { submitIssueForm } = window.TMIssueForm;
+const { prepareIssueForm, submitIssueForm } = window.TMIssueForm;
 let currentSprint = null;
 let currentSprintIssues = [];
 let sprintList = [];
@@ -29,6 +29,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 
 createIssueBtn.addEventListener('click', async () => {
     await populateIssueSprintOptions();
+    await prepareIssueForm({ form: document.getElementById('createIssueForm'), fetchJson });
     createIssueModal.classList.add('show');
 });
 closeModal.addEventListener('click', () => createIssueModal.classList.remove('show'));
