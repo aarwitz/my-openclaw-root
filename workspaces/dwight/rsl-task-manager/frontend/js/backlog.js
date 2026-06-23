@@ -4,7 +4,7 @@ if (!username) {
 }
 
 document.getElementById('currentUser').textContent = username;
-const { fetchJson, fetchSprints, buildSprintSelectOptions, renderIssueCard, attachInlineIssueEditors, findDuplicateCandidates, STATUS_OPTIONS, formatSprintLabel } = window.TM_SHARED;
+const { fetchJson, authenticatedFetch, fetchSprints, buildSprintSelectOptions, renderIssueCard, attachInlineIssueEditors, findDuplicateCandidates, STATUS_OPTIONS, formatSprintLabel } = window.TM_SHARED;
 const { prepareIssueForm, submitIssueForm } = window.TMIssueForm;
 let backlogIssues = [];
 let backlogSprints = [];
@@ -55,7 +55,12 @@ if (issueImagesInput && issueImagesLabel) {
 async function populateIssueSprintOptions() {
     if (!issueSprintSelect) return;
     try {
-        const activeSprint = await fetch('/api/sprints/active').then(r => r.ok ? r.json() : null);
+        let activeSprint = null;
+        try {
+            activeSprint = await fetchJson('/api/sprints/active');
+        } catch (error) {
+            activeSprint = null;
+        }
         issueSprintSelect.innerHTML = buildSprintSelectOptions(backlogSprints, activeSprint?.id ?? null, false, true);
         if (activeSprint) issueSprintSelect.value = String(activeSprint.id);
     } catch (error) {
@@ -68,7 +73,7 @@ async function uploadIssueImages(issueId, files) {
     await Promise.all(Array.from(files).map((file) => {
         const formData = new FormData();
         formData.append('file', file);
-        return fetch(`/api/issues/${issueId}/images?source_type=description&uploaded_by=${encodeURIComponent(username)}`, { method: 'POST', body: formData });
+        return authenticatedFetch(`/api/issues/${issueId}/images?source_type=description&uploaded_by=${encodeURIComponent(username)}`, { method: 'POST', body: formData });
     }));
 }
 
@@ -107,10 +112,18 @@ window.addEventListener('click', (e) => {
 document.getElementById('createSprintForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
+        const allowedUsersRaw = document.getElementById('sprintAllowedUsers').value || '';
+        const allowedUsers = allowedUsersRaw
+            .split(/\r?\n|,/)
+            .map((value) => value.trim())
+            .filter(Boolean);
         await fetchJson('/api/sprints', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: document.getElementById('sprintName').value })
+            body: JSON.stringify({
+                name: document.getElementById('sprintName').value,
+                allowed_users: allowedUsers.length ? allowedUsers : null
+            })
         });
         createSprintModal.classList.remove('show');
         document.getElementById('createSprintForm').reset();
@@ -138,6 +151,7 @@ async function loadSprints() {
                 <div class="sprint-meta">
                     <p>${sprint.started_at ? `Started: ${new Date(sprint.started_at).toLocaleDateString()}` : 'Not started yet'}</p>
                     ${sprint.ended_at ? `<p>Ended: ${new Date(sprint.ended_at).toLocaleDateString()}</p>` : ''}
+                    <p>${Array.isArray(sprint.allowed_users) && sprint.allowed_users.length ? `Access: ${sprint.allowed_users.join(', ')}` : 'Access: All users'}</p>
                 </div>
                 <div class="sprint-actions">
                     ${!sprint.is_active ? `<button class="btn btn-success btn-sm" onclick="startSprint(${sprint.id})">Start</button>` : `<button class="btn btn-danger btn-sm" onclick="endSprint(${sprint.id})">End</button>`}
@@ -168,6 +182,7 @@ async function loadArchivedSprints() {
                 <div class="sprint-meta">
                     ${sprint.started_at ? `<p>Started: ${new Date(sprint.started_at).toLocaleDateString()}</p>` : '<p>Never started</p>'}
                     ${sprint.ended_at ? `<p>Ended: ${new Date(sprint.ended_at).toLocaleDateString()}</p>` : ''}
+                    <p>${Array.isArray(sprint.allowed_users) && sprint.allowed_users.length ? `Access: ${sprint.allowed_users.join(', ')}` : 'Access: All users'}</p>
                 </div>
                 <div class="sprint-actions">
                     <button class="btn btn-secondary btn-sm" onclick="unarchiveSprint(${sprint.id})">Unarchive</button>

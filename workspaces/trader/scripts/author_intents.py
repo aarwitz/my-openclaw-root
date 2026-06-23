@@ -54,7 +54,11 @@ import worldmodel as wm  # noqa: E402
 SIZE_PCT_OF_EQUITY = 0.01      # 1% per intent (baseline fallback when no prediction)
 NOTIONAL_FLOOR = 200.0
 NOTIONAL_CEILING = 2000.0
-MAX_OPEN_INTENTS = 5
+# Desk-wide open-intent COUNT throttle. NOT the risk limit — the Risk gate enforces real exposure
+# (per-name / gross / correlation-cluster caps). 5 was far too low (blocked 42 ready ideas with the book
+# only ~10 names); raised + env-tunable so the ranked ready-queue can actually flow. Per-pass churn is
+# still bounded by --max (default 3).
+MAX_OPEN_INTENTS = int(os.environ.get("TRADER_MAX_OPEN_INTENTS", "25"))
 STOP_RULE = "-8% from entry"
 MODELED_SLIPPAGE_BPS = 8.0
 # Fractional-Kelly sizing (SUGGESTION ONLY — the Risk agent enforces the cap).
@@ -368,6 +372,68 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
             "episode_signal": episode_flag}
 
 
+SWAP_ENABLED = os.environ.get("SWAP_ENABLED", "1") == "1"
+
+
+def _author_swap_exits(conn, dry_run: bool) -> list[dict]:
+    """Ranked queue-vs-holdings SWAP (overseer pq-2ec10abce13e). When the book is at the concurrent-names
+    cap, author an EXIT for the weakest holding so a higher-conviction ready idea can take its slot. The
+    Risk gate auto-approves the exit (risk-reducing) and frees the slot; the replacement opens normally.
+    Conservative: rank_swaps requires the candidate to clear the holding by a margin + the holding to be
+    genuinely weak + not a fresh entry, and caps swaps per pass."""
+    if not SWAP_ENABLED:
+        return []
+    try:
+        import rank_swaps
+        swaps = rank_swaps.evaluate_swaps(conn)
+    except Exception as exc:  # never let swap logic break the normal authoring pass
+        return [{"swap_error": str(exc)[:160]}]
+    out = []
+    for s in swaps:
+        tk = s["exit_ticker"]
+        if conn.execute(
+            "SELECT 1 FROM trade_intents WHERE UPPER(ticker)=? AND action IN ('exit','trim') AND state IN "
+            "('proposed','critic_review','risk_review','approved','submitted','partial') LIMIT 1",
+            (tk,)).fetchone():
+            continue  # an exit is already in flight for this name
+        rec = {"swap": s["reason"], "exit_ticker": tk, "exit_qty": s["exit_qty"],
+               "open_ticker": s["open_ticker"]}
+        if dry_run:
+            out.append({**rec, "dry_run": True})
+            continue
+        row = conn.execute("SELECT hypothesis_id FROM positions WHERE id=?", (s["exit_pos_id"],)).fetchone()
+        hid = row[0] if row else None
+        if not hid:
+            out.append({**rec, "skipped": "holding has no hypothesis_id (cannot author a clean exit)"})
+            continue
+        try:
+            last = _last_close(tk)
+        except Exception:
+            last = None
+        now = _now_iso()
+        # trade_intents requires both hypothesis_id AND expression_candidate_id (NOT NULL); mint an
+        # expression_candidate for the exit the same way opens do, tied to the holding's original thesis.
+        ec_id = "ec-swap-" + uuid.uuid4().hex[:18]
+        conn.execute(
+            "INSERT INTO expression_candidates (id, hypothesis_id, vehicle, ticker, conviction_weight, "
+            "quant_rationale, recommended, score_json, created_at) "
+            "VALUES (?, ?, 'direct_equity', ?, 0, ?, 0, '{}', ?)",
+            (ec_id, hid, tk, "swap-rotation exit: " + s["reason"], now))
+        iid = "ti-swap-" + uuid.uuid4().hex[:18]
+        conn.execute(
+            "INSERT INTO trade_intents (id, hypothesis_id, expression_candidate_id, created_by, created_at, "
+            "action, tranche_type, ticker, vehicle, size, entry_price_target, stop_rule, time_horizon, "
+            "triggered_by, modeled_slippage_bps, state) VALUES (?, ?, ?, 'trader', ?, 'exit', NULL, ?, "
+            "'direct_equity', ?, ?, NULL, 'position_1_4w', 'swap_rotation', ?, 'proposed')",
+            (iid, hid, ec_id, now, tk, float(s["exit_qty"]), last, MODELED_SLIPPAGE_BPS))
+        _audit(conn, entity_id=iid, action="author", before_state=None, after_state="proposed",
+               rationale="SWAP-EXIT: " + s["reason"])
+        out.append({**rec, "intent_id": iid})
+    if out and not dry_run:
+        conn.commit()
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dry-run", action="store_true")
@@ -388,6 +454,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": f"alpaca_account: {exc}",
                           "authored": 0}, indent=2))
         return 2
+
+    # Ranked SWAP first: if the book is at the name-cap, free a slot by exiting the weakest holding so a
+    # higher-conviction ready idea can take it (instead of blocking every new name).
+    swap_exits = _author_swap_exits(conn, args.dry_run)
 
     open_existing = _count_open_intents(conn)
     capacity = max(0, MAX_OPEN_INTENTS - open_existing)
@@ -428,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         "cash_remaining_usd": round(cash_remaining, 2),
         "regime": regime,
         "dry_run": bool(args.dry_run),
+        "swap_exits": swap_exits,
         "results": results,
     }, indent=2, default=str))
     return 0

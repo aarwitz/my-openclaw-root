@@ -4,7 +4,7 @@ if (!username) {
 }
 
 document.getElementById('currentUser').textContent = username;
-const { escapeHtml, formatStatus, fetchJson, buildSprintSelectOptions, fetchSprints, fetchAssignableUsers } = window.TM_SHARED;
+const { escapeHtml, formatStatus, fetchJson, authenticatedFetch, buildSprintSelectOptions, fetchSprints, fetchAssignableUsers } = window.TM_SHARED;
 let currentIssue = null;
 let issueSprints = [];
 let assignableUsers = [];
@@ -209,7 +209,13 @@ function renderPlanning(issue) {
 }
 
 async function populateIssueSprintOptions() {
-    const { sprints, activeSprint } = await fetchSprints().then(async ({ sprints, sprintMap }) => ({ sprints, activeSprint: await fetch('/api/sprints/active').then(r => r.ok ? r.json() : null) }));
+    const { sprints } = await fetchSprints();
+    let activeSprint = null;
+    try {
+        activeSprint = await fetchJson('/api/sprints/active');
+    } catch (error) {
+        activeSprint = null;
+    }
     issueSprints = sprints;
     newIssueSprintSelect.innerHTML = buildSprintSelectOptions(sprints, activeSprint?.id ?? null, false, true);
     if (activeSprint) newIssueSprintSelect.value = String(activeSprint.id);
@@ -237,7 +243,7 @@ async function uploadIssueImages(issueId, files, sourceType, commentId = null) {
         if (commentId !== null) params.set('comment_id', String(commentId));
         const formData = new FormData();
         formData.append('file', file);
-        return fetch(`/api/issues/${issueId}/images?${params.toString()}`, { method: 'POST', body: formData });
+        return authenticatedFetch(`/api/issues/${issueId}/images?${params.toString()}`, { method: 'POST', body: formData });
     });
     const results = await Promise.all(uploads);
     if (results.some((result) => !result.ok)) throw new Error('One or more image uploads failed');

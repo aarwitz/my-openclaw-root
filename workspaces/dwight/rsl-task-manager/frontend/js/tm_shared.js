@@ -21,6 +21,11 @@ window.TM_SHARED = (() => {
       if (token && !headers.has('Authorization')) {
         headers.set('Authorization', `Bearer ${token}`);
       }
+    } else {
+      const actor = getCurrentActor();
+      if (actor && !headers.has('X-TM-User')) {
+        headers.set('X-TM-User', actor);
+      }
     }
     return headers;
   }
@@ -162,6 +167,13 @@ window.TM_SHARED = (() => {
     return body;
   }
 
+  function authenticatedFetch(url, options = {}) {
+    return fetch(url, {
+      ...options,
+      headers: buildApiHeaders(options.headers)
+    });
+  }
+
   async function patchIssue(issueId, fields) {
     return fetchJson(`/api/issues/${issueId}`, {
       method: 'PATCH',
@@ -187,6 +199,9 @@ window.TM_SHARED = (() => {
     if (!sprint) return 'Sprint';
     const base = String(sprint.name || `Sprint ${sprint.id || ''}`).trim();
     if (sprint.is_archived) return `${base} (Archived)`;
+    if (Array.isArray(sprint.allowed_users) && sprint.allowed_users.length) {
+      return sprint.is_active ? `${base} (Active, Restricted)` : `${base} (Restricted)`;
+    }
     if (sprint.is_active) return `${base} (Active)`;
     return base;
   }
@@ -197,7 +212,7 @@ window.TM_SHARED = (() => {
     else if (includeBacklog) options.push('<option value="">Backlog</option>');
     sprints.forEach((sprint) => {
       const selected = String(selectedSprintId ?? '') === String(sprint.id) ? ' selected' : '';
-      const label = sprint.is_active ? `${sprint.name} (Active)` : sprint.name;
+      const label = formatSprintLabel(sprint);
       options.push(`<option value="${sprint.id}"${selected}>${escapeHtml(label)}</option>`);
     });
     return options.join('');
@@ -761,6 +776,7 @@ window.TM_SHARED = (() => {
     STATUS_OPTIONS,
     clearSession,
     escapeHtml,
+    authenticatedFetch,
     formatStatus,
     fetchJson,
     getPublicSessionToken,

@@ -62,7 +62,7 @@ EWAG_ALLOWED_REPOS = set(
 AUTO_APPROVE_EMAILS = {email.lower() for email in parse_csv_env(
     os.getenv(
         "AUTO_APPROVE_EMAILS",
-        "taylor@lidisolutions.ai,PurvaPravin.Dhuri@su.suffolk.edu,Bhargav.Patel@su.suffolk.edu,Yongqian.Wen@su.suffolk.edu,DoanDuyMinh.Nguyen@su.suffolk.edu",
+        "taylor@lidisolutions.ai",
     )
 )}
 GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
@@ -95,6 +95,13 @@ def run_safe_migrations():
             conn.execute(sql_text("ALTER TABLE issues ADD COLUMN story_points INTEGER"))
         if "blocked_reason" not in columns:
             conn.execute(sql_text("ALTER TABLE issues ADD COLUMN blocked_reason TEXT"))
+
+        sprint_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sprints)").fetchall()}
+        if "is_archived" not in sprint_columns:
+            conn.execute(sql_text("ALTER TABLE sprints ADD COLUMN is_archived BOOLEAN DEFAULT 0"))
+            conn.execute(sql_text("UPDATE sprints SET is_archived = 0 WHERE is_archived IS NULL"))
+        if "allowed_users_json" not in sprint_columns:
+            conn.execute(sql_text("ALTER TABLE sprints ADD COLUMN allowed_users_json TEXT"))
 
         image_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(issue_images)").fetchall()}
         if "comment_id" not in image_columns:
@@ -393,6 +400,39 @@ def normalize_optional_text(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
+def normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def parse_allowed_users_json(raw_value: Optional[str]) -> List[str]:
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    values: List[str] = []
+    for item in parsed:
+        normalized = normalize_optional_text(str(item)) if item is not None else None
+        if normalized:
+            values.append(normalized)
+    return values
+
+
+def serialize_sprint(sprint: models.Sprint) -> schemas.SprintResponse:
+    return schemas.SprintResponse(
+        id=sprint.id,
+        name=sprint.name,
+        is_active=bool(sprint.is_active),
+        is_archived=bool(getattr(sprint, "is_archived", False)),
+        allowed_users=parse_allowed_users_json(getattr(sprint, "allowed_users_json", None)),
+        started_at=sprint.started_at,
+        ended_at=sprint.ended_at,
+    )
+
+
 def normalize_status(value: Optional[str]) -> str:
     status_value = (value or "to_do").strip().lower()
     if status_value not in models.STATUS_OPTIONS:
@@ -536,10 +576,6 @@ def resolve_sprint_name(db: Session, sprint_id: Optional[int]) -> str:
         return "Backlog"
     sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
     return sprint.name if sprint else f"Sprint {sprint_id}"
-
-
-def normalize_email(value: str) -> str:
-    return value.strip().lower()
 
 
 def hash_password(password: str) -> str:
@@ -743,6 +779,48 @@ def resolve_lidi_actor(request: Request, db: Session, requested_by: Optional[str
         return session_user.email
     except HTTPException:
         return validate_actor_identity(db, requested_by, field_name="requested_by")
+
+
+def resolve_request_viewer(request: Request, db: Session) -> Optional[str]:
+    token = get_bearer_token(request)
+    if token:
+        try:
+            return require_public_session(request, db).email
+        except HTTPException:
+            return None
+    internal_user = normalize_optional_text(request.headers.get("x-tm-user"))
+    if internal_user:
+        return validate_actor_identity(db, internal_user, field_name="x-tm-user")
+    return None
+
+
+def parse_and_validate_allowed_users(db: Session, values: Optional[List[str]]) -> List[str]:
+    deduped: List[str] = []
+    for raw_value in values or []:
+        normalized = normalize_optional_text(raw_value)
+        if not normalized:
+            continue
+        identity = validate_actor_identity(db, normalized, field_name="allowed_users")
+        if identity not in deduped:
+            deduped.append(identity)
+    return deduped
+
+
+def viewer_can_access_sprint(viewer: Optional[str], sprint: models.Sprint) -> bool:
+    allowed_users = parse_allowed_users_json(getattr(sprint, "allowed_users_json", None))
+    if not allowed_users:
+        return True
+    if viewer is None:
+        return False
+    viewer_lower = viewer.lower()
+    return any(viewer_lower == allowed.lower() for allowed in allowed_users)
+
+
+def require_sprint_access(request: Request, db: Session, sprint: models.Sprint) -> Optional[str]:
+    viewer = resolve_request_viewer(request, db)
+    if not viewer_can_access_sprint(viewer, sprint):
+        raise HTTPException(status_code=403, detail="You do not have access to this sprint")
+    return viewer
 
 
 def parse_lidi_payload(action: models.LidiActionRequest) -> Dict[str, Any]:
@@ -1086,6 +1164,25 @@ def update_public_user_status(
     db.commit()
     db.refresh(user)
     return user
+
+
+@app.delete("/api/public/users/{user_id}")
+def delete_public_user(user_id: int, request: Request, db: Session = Depends(get_db)):
+    approver = require_public_session(request, db, owner_only=True)
+    user = db.query(models.PublicUser).filter(models.PublicUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_owner:
+        raise HTTPException(status_code=403, detail="Owner account cannot be deleted here")
+
+    user_email = user.email
+    db.query(models.PublicSession).filter(models.PublicSession.user_id == user.id).delete(synchronize_session=False)
+    db.query(models.PasswordResetToken).filter(models.PasswordResetToken.user_id == user.id).delete(synchronize_session=False)
+    db.query(models.EmailVerificationToken).filter(models.EmailVerificationToken.user_id == user.id).delete(synchronize_session=False)
+    db.query(models.SignupRequest).filter(models.SignupRequest.email == user_email).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    return {"ok": True, "deleted_email": user_email, "deleted_by": approver.email}
 
 
 @app.post("/api/public/forgot-password")
@@ -1541,14 +1638,18 @@ async def create_issue(request: Request, response: Response, db: Session = Depen
         raise HTTPException(status_code=415, detail="Unsupported content type")
 
     target_sprint_id = issue.sprint_id
+    target_sprint: Optional[models.Sprint] = None
     if target_sprint_id is None:
         active_sprint = db.query(models.Sprint).filter(models.Sprint.is_active == True).first()
         if active_sprint:
+            require_sprint_access(request, db, active_sprint)
+            target_sprint = active_sprint
             target_sprint_id = active_sprint.id
     else:
-        sprint = db.query(models.Sprint).filter(models.Sprint.id == target_sprint_id).first()
-        if not sprint:
+        target_sprint = db.query(models.Sprint).filter(models.Sprint.id == target_sprint_id).first()
+        if not target_sprint:
             raise HTTPException(status_code=404, detail="Sprint not found")
+        require_sprint_access(request, db, target_sprint)
 
     created_by = validate_actor_identity(db, issue.created_by, field_name="created_by")
     assigned_to = validate_assignee_identity(db, issue.assigned_to, field_name="assigned_to", allow_blank=True)
@@ -1599,19 +1700,28 @@ async def create_issue(request: Request, response: Response, db: Session = Depen
     return db_issue
 
 @app.get("/api/issues", response_model=List[schemas.IssueResponse])
-def get_issues(sprint_id: int = None, in_backlog: bool = False, db: Session = Depends(get_db)):
+def get_issues(request: Request, sprint_id: int = None, in_backlog: bool = False, db: Session = Depends(get_db)):
     """Get all issues, optionally filtered by sprint or backlog"""
     query = db.query(models.Issue)
     
     if in_backlog:
         query = query.filter(models.Issue.sprint_id == None)
     elif sprint_id is not None:
+        sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
+        if not sprint:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        require_sprint_access(request, db, sprint)
         query = query.filter(models.Issue.sprint_id == sprint_id)
-    
-    return query.order_by(models.Issue.created_at.desc()).all()
+    issues = query.order_by(models.Issue.created_at.desc()).all()
+    viewer = resolve_request_viewer(request, db)
+    return [
+        issue for issue in issues
+        if issue.sprint_id is None or viewer_can_access_sprint(viewer, issue.sprint)
+    ]
 
 @app.get("/api/issues/search", response_model=List[schemas.IssueResponse])
 def search_issues(
+    request: Request,
     q: str = "",
     search_in: str = Query("all", description="Where to search: all, title, description, comments"),
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -1710,23 +1820,32 @@ def search_issues(
         except ValueError:
             pass
 
-    return query.order_by(models.Issue.created_at.desc()).all()
+    issues = query.order_by(models.Issue.created_at.desc()).all()
+    viewer = resolve_request_viewer(request, db)
+    return [
+        issue for issue in issues
+        if issue.sprint_id is None or viewer_can_access_sprint(viewer, issue.sprint)
+    ]
 
 
 @app.get("/api/issues/{issue_id}", response_model=schemas.IssueResponse)
-def get_issue(issue_id: int, db: Session = Depends(get_db)):
+def get_issue(issue_id: int, request: Request, db: Session = Depends(get_db)):
     """Get a specific issue by ID"""
     issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
     return issue
 
 @app.patch("/api/issues/{issue_id}", response_model=schemas.IssueResponse)
-def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, db: Session = Depends(get_db)):
+def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, request: Request, db: Session = Depends(get_db)):
     """Update an issue"""
     db_issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not db_issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if db_issue.sprint_id is not None and db_issue.sprint is not None:
+        require_sprint_access(request, db, db_issue.sprint)
 
     update_data = issue_update.dict(exclude_unset=True)
     actor = validate_actor_identity(db, update_data.pop("updated_by", None), field_name="updated_by", allow_blank=True)
@@ -1747,6 +1866,7 @@ def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, db: Session =
         sprint = db.query(models.Sprint).filter(models.Sprint.id == normalized_updates["sprint_id"]).first()
         if not sprint:
             raise HTTPException(status_code=404, detail="Sprint not found")
+        require_sprint_access(request, db, sprint)
 
     if normalized_updates.get("blocked_reason") and "status" not in normalized_updates:
         normalized_updates["status"] = "blocked"
@@ -1772,11 +1892,13 @@ def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, db: Session =
     return db_issue
 
 @app.delete("/api/issues/{issue_id}")
-def delete_issue(issue_id: int, db: Session = Depends(get_db)):
+def delete_issue(issue_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete an issue and its related records"""
     issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
 
     uploads_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "uploads")
     for image in issue.images:
@@ -1789,11 +1911,13 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     return {"message": "Issue deleted successfully"}
 
 @app.post("/api/issues/{issue_id}/comments", response_model=schemas.CommentResponse)
-def add_comment(issue_id: int, comment: schemas.CommentCreate, db: Session = Depends(get_db)):
+def add_comment(issue_id: int, comment: schemas.CommentCreate, request: Request, db: Session = Depends(get_db)):
     """Add a comment to an issue"""
     issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
     
     comment_username = validate_actor_identity(db, comment.username, field_name="username")
     db_comment = models.Comment(
@@ -1811,6 +1935,7 @@ def add_comment(issue_id: int, comment: schemas.CommentCreate, db: Session = Dep
 @app.post("/api/issues/{issue_id}/images", response_model=schemas.IssueImageResponse)
 async def upload_image(
     issue_id: int,
+    request: Request,
     source_type: str = Query("issue", description="issue, description, or comment"),
     comment_id: Optional[int] = Query(None),
     uploaded_by: Optional[str] = Query(None),
@@ -1821,6 +1946,8 @@ async def upload_image(
     issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
 
     normalized_source = source_type.strip().lower()
     if normalized_source not in {"issue", "description", "comment"}:
@@ -1879,8 +2006,14 @@ async def upload_image(
     return db_image
 
 @app.delete("/api/issues/{issue_id}/images/{image_id}")
-def delete_image(issue_id: int, image_id: int, db: Session = Depends(get_db)):
+def delete_image(issue_id: int, image_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete an image from an issue"""
+    issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
+
     image = db.query(models.IssueImage).filter(
         models.IssueImage.id == image_id,
         models.IssueImage.issue_id == issue_id
@@ -1903,61 +2036,100 @@ def delete_image(issue_id: int, image_id: int, db: Session = Depends(get_db)):
 @app.post("/api/sprints", response_model=schemas.SprintResponse)
 def create_sprint(sprint: schemas.SprintCreate, db: Session = Depends(get_db)):
     """Create a new sprint"""
-    db_sprint = models.Sprint(name=sprint.name, is_active=False)
+    allowed_users = parse_and_validate_allowed_users(db, sprint.allowed_users)
+    db_sprint = models.Sprint(
+        name=sprint.name,
+        is_active=False,
+        is_archived=False,
+        allowed_users_json=json.dumps(allowed_users) if allowed_users else None,
+    )
     db.add(db_sprint)
     db.commit()
     db.refresh(db_sprint)
-    return db_sprint
+    return serialize_sprint(db_sprint)
 
 @app.get("/api/sprints", response_model=List[schemas.SprintResponse])
-def get_sprints(active_only: bool = False, db: Session = Depends(get_db)):
+def get_sprints(request: Request, active_only: bool = False, db: Session = Depends(get_db)):
     """Get all sprints"""
     query = db.query(models.Sprint)
     if active_only:
         query = query.filter(models.Sprint.is_active == True)
-    return query.order_by(models.Sprint.id.desc()).all()
+    viewer = resolve_request_viewer(request, db)
+    sprints = query.order_by(models.Sprint.id.desc()).all()
+    return [serialize_sprint(sprint) for sprint in sprints if viewer_can_access_sprint(viewer, sprint)]
 
 @app.get("/api/sprints/active", response_model=schemas.SprintResponse)
-def get_active_sprint(db: Session = Depends(get_db)):
+def get_active_sprint(request: Request, db: Session = Depends(get_db)):
     """Get the currently active sprint"""
-    sprint = db.query(models.Sprint).filter(models.Sprint.is_active == True).first()
+    viewer = resolve_request_viewer(request, db)
+    sprint = None
+    for candidate in db.query(models.Sprint).filter(models.Sprint.is_active == True).order_by(models.Sprint.id.desc()).all():
+        if viewer_can_access_sprint(viewer, candidate):
+            sprint = candidate
+            break
     if not sprint:
         raise HTTPException(status_code=404, detail="No active sprint")
-    return sprint
+    return serialize_sprint(sprint)
 
 @app.get("/api/sprints/{sprint_id}", response_model=schemas.SprintResponse)
-def get_sprint(sprint_id: int, db: Session = Depends(get_db)):
+def get_sprint(sprint_id: int, request: Request, db: Session = Depends(get_db)):
     """Get a specific sprint by ID"""
     sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    return sprint
+    require_sprint_access(request, db, sprint)
+    return serialize_sprint(sprint)
 
-@app.post("/api/sprints/{sprint_id}/start")
-def start_sprint(sprint_id: int, db: Session = Depends(get_db)):
-    """Start a sprint"""
-    # End any currently active sprints
-    active_sprints = db.query(models.Sprint).filter(models.Sprint.is_active == True).all()
-    for sprint in active_sprints:
-        sprint.is_active = False
-        sprint.ended_at = datetime.now()
-    
-    # Start the new sprint
+
+@app.patch("/api/sprints/{sprint_id}", response_model=schemas.SprintResponse)
+def update_sprint(sprint_id: int, payload: schemas.SprintUpdate, request: Request, db: Session = Depends(get_db)):
     sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    require_sprint_access(request, db, sprint)
+
+    changed = False
+    if payload.name is not None:
+        sprint.name = payload.name
+        changed = True
+    if payload.is_archived is not None:
+        sprint.is_archived = bool(payload.is_archived)
+        changed = True
+    if payload.allowed_users is not None:
+        allowed_users = parse_and_validate_allowed_users(db, payload.allowed_users)
+        sprint.allowed_users_json = json.dumps(allowed_users) if allowed_users else None
+        changed = True
+    if changed:
+        db.commit()
+        db.refresh(sprint)
+    return serialize_sprint(sprint)
+
+@app.post("/api/sprints/{sprint_id}/start")
+def start_sprint(sprint_id: int, request: Request, db: Session = Depends(get_db)):
+    """Start a sprint"""
+    sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    require_sprint_access(request, db, sprint)
+
+    active_sprints = db.query(models.Sprint).filter(models.Sprint.is_active == True).all()
+    for active in active_sprints:
+        active.is_active = False
+        active.ended_at = datetime.now()
     
     sprint.is_active = True
     sprint.started_at = datetime.now()
+    sprint.is_archived = False
     db.commit()
     return {"message": "Sprint started", "sprint_id": sprint_id}
 
 @app.post("/api/sprints/{sprint_id}/end")
-def end_sprint(sprint_id: int, db: Session = Depends(get_db)):
+def end_sprint(sprint_id: int, request: Request, db: Session = Depends(get_db)):
     """End a sprint without moving its issues to backlog."""
     sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    require_sprint_access(request, db, sprint)
 
     issue_count = db.query(models.Issue).filter(models.Issue.sprint_id == sprint_id).count()
     sprint.is_active = False
@@ -1966,15 +2138,18 @@ def end_sprint(sprint_id: int, db: Session = Depends(get_db)):
     return {"message": "Sprint ended", "issues_retained": issue_count, "sprint_id": sprint_id}
 
 @app.post("/api/issues/{issue_id}/assign-to-sprint")
-def assign_to_sprint(issue_id: int, sprint_id: int, db: Session = Depends(get_db)):
+def assign_to_sprint(issue_id: int, sprint_id: int, request: Request, db: Session = Depends(get_db)):
     """Assign an issue to a sprint without rewriting its status."""
     issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.sprint_id is not None and issue.sprint is not None:
+        require_sprint_access(request, db, issue.sprint)
 
     sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    require_sprint_access(request, db, sprint)
 
     old_sprint_id = issue.sprint_id
     issue.sprint_id = sprint_id
@@ -1983,6 +2158,21 @@ def assign_to_sprint(issue_id: int, sprint_id: int, db: Session = Depends(get_db
         log_issue_activity(db, issue_id, "field_changed", field_name="sprint_id", old_value=resolve_sprint_name(db, old_sprint_id), new_value=resolve_sprint_name(db, sprint_id))
     db.commit()
     return {"message": "Issue assigned to sprint", "sprint_id": sprint_id, "issue_id": issue_id, "status": issue.status}
+
+
+@app.delete("/api/sprints/{sprint_id}")
+def delete_sprint(sprint_id: int, request: Request, db: Session = Depends(get_db)):
+    sprint = db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    require_sprint_access(request, db, sprint)
+    db.query(models.Issue).filter(models.Issue.sprint_id == sprint_id).update(
+        {models.Issue.sprint_id: None, models.Issue.updated_at: datetime.now()},
+        synchronize_session=False,
+    )
+    db.delete(sprint)
+    db.commit()
+    return {"message": "Sprint deleted", "sprint_id": sprint_id}
 
 
 @app.post("/api/issues/{issue_id}/contracts/pr-check")

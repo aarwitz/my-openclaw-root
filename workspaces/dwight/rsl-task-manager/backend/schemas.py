@@ -100,11 +100,20 @@ class IssueResponse(BaseModel):
 
 class SprintCreate(BaseModel):
     name: str
+    allowed_users: Optional[List[str]] = None
+
+
+class SprintUpdate(BaseModel):
+    name: Optional[str] = None
+    is_archived: Optional[bool] = None
+    allowed_users: Optional[List[str]] = None
 
 class SprintResponse(BaseModel):
     id: int
     name: str
     is_active: bool
+    is_archived: bool = False
+    allowed_users: List[str] = []
     started_at: Optional[datetime]
     ended_at: Optional[datetime]
     

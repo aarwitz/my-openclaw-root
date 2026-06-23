@@ -140,6 +140,17 @@ def apply_repairs(conn, result: dict) -> dict:
             "reason": "cannot insert order without valid trade_intent foreign key",
         })
 
+    # Advance trade_intents whose broker order is no longer open (filled/closed) out of the OPEN-intents
+    # count. Without this, filled orders leave their intents stuck 'submitted' forever, silently consuming
+    # the desk-wide open-intent throttle until it re-blocks new ideas (the 2026-06-22 incident).
+    adv = conn.execute(
+        "UPDATE trade_intents SET state='filled' WHERE state IN ('submitted','partial','approved') "
+        "AND broker_order_id IN (SELECT broker_order_id FROM orders WHERE status IN "
+        "('filled','closed_unknown','closed','canceled','cancelled','expired','rejected','done_for_day'))"
+    ).rowcount
+    if adv:
+        repaired.append({"type": "stale_open_intents", "action": "advanced_to_filled", "count": adv})
+
     return {"repaired": repaired, "unresolved": unresolved}
 
 

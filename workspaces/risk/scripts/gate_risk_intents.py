@@ -167,7 +167,12 @@ def _concurrent_name_count(conn) -> int:
         PENDING_INTENT_STATES,
     ):
         names.add(r["t"])
-    return len(names)
+    # Names with a pending EXIT/TRIM are leaving the book — don't count them against the max-concurrent
+    # cap, so a ranked SWAP can free a slot for its higher-conviction replacement in the same pass.
+    exiting = {r["t"] for r in conn.execute(
+        "SELECT DISTINCT UPPER(ticker) AS t FROM trade_intents WHERE action IN ('exit','trim') "
+        "AND state IN ('proposed','critic_review','risk_review','approved','submitted','partial')")}
+    return len(names - exiting)
 
 
 def gate(conn, intent, equity, day_pl, regime) -> dict:
@@ -176,6 +181,15 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
     price = float(intent["entry_price_target"] or 0)
     req_qty = int(intent["size"] or 0)
     req_notional = req_qty * price
+    action = (intent["action"] or "open").lower()
+
+    # EXITS / TRIMS reduce risk: approve the full requested qty and skip every buy-side exposure cap AND
+    # halt (a risk-reducing sell is always allowed, even risk_off / drawdown). This is what lets a ranked
+    # SWAP close a weak holding to free a concurrent-name slot for a higher-conviction replacement.
+    if action in ("exit", "trim") and req_qty >= 1:
+        return {"verdict": "approved", "approved_qty": req_qty,
+                "limits": {"action": action, "requested_qty": req_qty, "equity": round(equity, 2)},
+                "breaches": [], "reason": f"{action} (risk-reducing sell) approved at full size"}
 
     name_cap = MAX_NAME_PCT * equity
     gross_cap = MAX_GROSS_PCT * equity
@@ -345,7 +359,7 @@ def main(argv=None) -> int:
     results = []
     for iid in ids:
         intent = conn.execute(
-            "SELECT id, ticker, size, entry_price_target, state FROM trade_intents "
+            "SELECT id, ticker, size, entry_price_target, state, action FROM trade_intents "
             "WHERE id=?", (iid,)).fetchone()
         if not intent:
             results.append({"intent_id": iid, "error": "not_found"})

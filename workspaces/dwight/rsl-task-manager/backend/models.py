@@ -55,6 +55,8 @@ class Sprint(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     is_active = Column(Boolean, default=False)
+    is_archived = Column(Boolean, default=False)
+    allowed_users_json = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
     

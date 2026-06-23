@@ -64,7 +64,7 @@ window.TMIssueForm = (() => {
       const files = imageInput?.files;
 
       if (submitButton) submitButton.textContent = 'Creating...';
-      const createdIssue = await fetch('/api/issues', {
+      const createdIssue = await window.TM_SHARED.authenticatedFetch('/api/issues', {
         method: 'POST',
         body: formData
       }).then(async (response) => {
