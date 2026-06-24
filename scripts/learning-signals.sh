@@ -33,9 +33,11 @@ FAILED=""
 if "$PY" "$TI/feature_store.py" refresh-live >>"$LOG" 2>&1; then log "   ok: refresh-live"
 else log "   FAIL: refresh-live"; FAILED="refresh-live"; fi
 
-# 2) fire calibrated mechanisms -> top-conviction RAW hypotheses (extra args pass through)
-log "-> signals_to_hypotheses --max-new 4 $*"
-sig="$("$PY" "$TI/signals_to_hypotheses.py" --max-new 4 "$@" 2>&1)"; rc=$?
+# 2) fire calibrated mechanisms -> top-conviction RAW hypotheses (extra args pass through).
+# --scan-top-n 600: scan the top-600 liquid names (not just 200) so the 4 picks are
+# selected from the full high-conviction pool; downstream caps/gates are unchanged.
+log "-> signals_to_hypotheses --max-new 4 --scan-top-n 600 $*"
+sig="$("$PY" "$TI/signals_to_hypotheses.py" --max-new 4 --scan-top-n 600 "$@" 2>&1)"; rc=$?
 printf '%s\n' "$sig" >>"$LOG"
 [[ $rc -ne 0 ]] && FAILED="${FAILED:+$FAILED, }signals_to_hypotheses"
 

@@ -34,9 +34,11 @@ def main():
     ap.add_argument("--max-new", type=int, default=4)
     ap.add_argument("--p-min", type=float, default=0.62)
     ap.add_argument("--min-fired", type=int, default=3)
+    ap.add_argument("--scan-top-n", type=int, default=200,
+                    help="liquidity-ranked names to scan (UNION live_watch); raise to surface more candidates")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
-    names = [s.strip().upper() for s in a.watchlist.split(",") if s.strip()] or signal_scan.live_watchlist()
+    names = [s.strip().upper() for s in a.watchlist.split(",") if s.strip()] or signal_scan.live_watchlist(top_n=a.scan_top_n)
 
     rows, _ = signal_scan.scan(names, a.min_fired)
     cands = [r for r in rows if r["direction"] == "long" and r["p_long"] >= a.p_min][:a.max_new * 3]
