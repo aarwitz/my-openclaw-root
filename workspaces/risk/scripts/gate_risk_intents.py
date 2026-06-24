@@ -52,7 +52,7 @@ import risk_model  # noqa: E402  (correlation-cluster cap; degrades gracefully)
 # --- risk limits (single source of truth) ----------------------------------
 MAX_NAME_PCT = 0.10        # <=10% of equity in any one name
 MAX_GROSS_PCT = 0.60       # <=60% of equity deployed gross
-MAX_POSITIONS = 12         # conservative max concurrent names (positions + pending intents)
+MAX_POSITIONS = 24         # max concurrent names (positions + pending intents); 12->24 per rule_proposal rp-e907106afbfb49a4aff1 (risk-gate audit: ~94% idle cash, all blocks were name-count)
 DAILY_DD_HALT_PCT = 0.03   # halt new risk if day P&L <= -3% of equity
 # Correlation cap: a correlated cluster (a new name + holdings it co-moves with at
 # corr>=0.70) can't exceed this % of equity combined — the "8 names, 1 bet" guard.
