@@ -199,7 +199,36 @@ restore_cron_jobs() {
         "$CRON_JOBS" > "$CRON_JOBS.tmp" 2>/dev/null && [[ -s "$CRON_JOBS.tmp" ]]; then
     mv "$CRON_JOBS.tmp" "$CRON_JOBS"
     log "  Cron jobs restored ($(cron_enabled_count "$CRON_JOBS") enabled, re-applied from manifest)."
-    rm -f "$CRON_ENABLED_MANIFEST" "$CRON_SAFETY_BAK"
+    # The jq edit above fixes jobs.json on disk, but the RUNNING gateway does not
+    # reliably reload that write across a restart: the live scheduler can be left
+    # with every job disabled (`cron status` -> nextWakeAtMs:null) while the file
+    # shows them enabled. That silent desync darkened the trading desk for days
+    # (incidents 2026-06-11, 2026-06-20, 2026-06-24). Re-arm the enabled set
+    # THROUGH the gateway so the live registry matches the file.
+    if gateway_healthy; then
+      local _id _armed=0 _failed=0
+      while IFS= read -r _id; do
+        [[ -n "$_id" ]] || continue
+        if "${OPENCLAW_BIN}" cron enable "$_id" >/dev/null 2>&1; then
+          _armed=$((_armed + 1))
+        else
+          _failed=$((_failed + 1))
+          warn "  Live re-arm failed for cron job ${_id} (jobs.json edit retained)."
+        fi
+      done < "$CRON_ENABLED_MANIFEST"
+      if (( _failed > 0 )); then
+        warn "  Re-armed ${_armed} cron job(s) in the live gateway; ${_failed} failed."
+      else
+        log "  Re-armed ${_armed} cron job(s) in the live gateway scheduler."
+      fi
+      if "${OPENCLAW_BIN}" cron status 2>/dev/null | jq -e '.nextWakeAtMs == null' >/dev/null 2>&1; then
+        warn "  Scheduler still reports nextWakeAtMs=null after re-arm — verify: openclaw cron status"
+      fi
+      rm -f "$CRON_ENABLED_MANIFEST" "$CRON_SAFETY_BAK"
+    else
+      warn "  Gateway not healthy during cron restore; live scheduler NOT re-armed (jobs.json is correct on disk)."
+      warn "  Recover once the gateway is up: while read id; do openclaw cron enable \"\$id\"; done < ${CRON_ENABLED_MANIFEST}"
+    fi
   else
     rm -f "$CRON_JOBS.tmp"
     warn "Cron restore FAILED; kept manifest ($CRON_ENABLED_MANIFEST) and snapshot ($CRON_SAFETY_BAK) for manual recovery."

@@ -6,8 +6,11 @@ This is the world model used as a *scanner*: for each watchlist name it reads th
 point-in-time features, checks which `calibrated_mechanisms` (features.sqlite) fire, and combines
 their posteriors (log-odds, opposing shorts subtract) into a p_correct + an expected net-alpha.
 
-Read-only / advisory: it emits a ranked signal list. Wiring these into live hypotheses/intents
-(so the desk trades them) is the gated next step — this tool is the deterministic activation layer.
+Read-only library: it computes and ranks but never writes to the stores. Its `scan()` output is
+consumed live — `signals_to_hypotheses.py` (the `world-model-signals` cron) turns top-conviction
+signals into `hypotheses`, which flow through predict -> author_intents (fractional-Kelly sizing
+off the prediction band) -> the Risk gate -> execution. `rank_swaps`, `catalyst_scan`, and
+`contagion_scan` reuse the same diversification-adjusted edge.
 
   python3 signal_scan.py [--watchlist AAPL,MSFT,...] [--min-fired 2] [--top 25]
 """
