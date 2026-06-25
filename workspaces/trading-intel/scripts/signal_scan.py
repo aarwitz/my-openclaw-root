@@ -60,6 +60,27 @@ def latest_features(conn, ticker):
     return out
 
 
+_LATEST_MACRO: dict = {}
+
+
+def latest_macro():
+    """Current value of each GLOBAL macro feature (latest point-in-time observation) so that
+    macro-conditioned mechanisms can FIRE LIVE. Same source as the backtest's `_macro_series`,
+    so a mechanism validated on macro in discovery is actionable live (closes the gap where
+    macro mechanisms were backtest-only). Cached per process."""
+    if _LATEST_MACRO:
+        return _LATEST_MACRO
+    try:
+        import mechanism_backtest as mb
+        for name, series in mb._macro_series().items():
+            if series:
+                d, v = series[-1]
+                _LATEST_MACRO[name] = (v, d)
+    except Exception:
+        pass
+    return _LATEST_MACRO
+
+
 def cond_holds(conds, feats):
     for name, op, thr in conds:
         v = feats.get(name)
@@ -177,6 +198,7 @@ def scan(names, min_fired=1):
         feats = latest_features(conn, t)
         if not feats:
             continue
+        feats.update(latest_macro())       # merge global macro so macro-conditioned mechanisms fire live
         try:
             px = fs._prices(t, 800)
             close = px[-1]["c"] if px else None

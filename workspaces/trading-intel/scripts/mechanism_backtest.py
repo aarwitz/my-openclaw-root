@@ -87,6 +87,9 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "insider_net_180d", "rating_net_90d", "sector_rel_63d",
                 "news_sent_7d", "news_sent_30d", "news_vol_z",
                 "rate_10y_chg_63d", "real_yield_chg_63d", "credit_spread_chg_63d", "vix_level",
+                "yield_curve_10y2y", "rate_2y_level", "rate_10y_level", "rate_2y_chg_63d",
+                "real_yield_10y_level", "curve_10y3m", "ig_spread_level", "ig_spread_chg_63d",
+                "hy_spread_level", "vix_chg_21d", "dollar_chg_63d", "oil_chg_63d", "fedfunds_level",
                 "days_to_cover", "short_int_chg_2m"]
 
 
@@ -119,6 +122,19 @@ def _macro_series():
         "credit_spread_chg_63d": chg("BAMLH0A0HYM2", 63),  # HY OAS 3-mo change (credit stress)
         "yield_curve_10y2y": level("T10Y2Y"),            # curve level (inversion)
         "vix_level": level("VIXCLS"),
+        # --- expanded macro (all DAILY market series → knowable same-day, no release-date/revision leak) ---
+        "rate_2y_level": level("DGS2"),                  # short rate (Fed path)
+        "rate_10y_level": level("DGS10"),                # long rate level
+        "rate_2y_chg_63d": chg("DGS2", 63),              # front-end repricing (3-mo)
+        "real_yield_10y_level": level("DFII10"),         # 10y real yield level (financial conditions)
+        "curve_10y3m": level("T10Y3M"),                  # 10y-3m slope (recession signal)
+        "ig_spread_level": level("BAMLC0A0CM"),          # IG OAS level (credit risk appetite)
+        "ig_spread_chg_63d": chg("BAMLC0A0CM", 63),      # IG OAS 3-mo change
+        "hy_spread_level": level("BAMLH0A0HYM2"),        # HY OAS level (credit stress level)
+        "vix_chg_21d": chg("VIXCLS", 21),                # 1-mo vol momentum (regime turns)
+        "dollar_chg_63d": chg("DTWEXBGS", 63),           # broad USD 3-mo change (global flows / risk)
+        "oil_chg_63d": chg("DCOILWTICO", 63),            # WTI 3-mo change (growth + inflation impulse)
+        "fedfunds_level": level("DFF"),                  # effective fed funds (policy stance)
     })
     return _MACRO
 
