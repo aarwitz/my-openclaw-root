@@ -96,6 +96,12 @@ def upgrades_downgrades(symbol: str, limit: int = 400) -> list[dict]:
     return _get("grades", {"symbol": symbol, "limit": limit})
 
 
+def grades_historical(symbol: str, limit: int = 1000) -> list[dict]:
+    """Dated analyst rating DISTRIBUTION (date + strongBuy/buy/hold/sell/strongSell counts) — a clean
+    point-in-time consensus series. Each row's `date` is knowable_at."""
+    return _get("grades-historical", {"symbol": symbol, "limit": limit}, cache_h=24.0)
+
+
 # --- prices (works for delisted names too) ---
 def historical_price(symbol: str, frm: str | None = None, to: str | None = None) -> list[dict]:
     p: dict[str, Any] = {"symbol": symbol}
