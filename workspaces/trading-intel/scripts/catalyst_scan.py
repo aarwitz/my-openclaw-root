@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import eventregistry, fmp   # noqa: E402
+from connectors import eventregistry, fmp, x as xsocial   # noqa: E402
 import signal_scan                          # noqa: E402
 
 OUT = os.path.expanduser("~/.openclaw/state/catalyst_brief.json")
@@ -117,6 +117,7 @@ def main():
         pos_hit = sorted({k for k in POS if k in titles})
         neg_hit = sorted({k for k in NEG if k in titles})
         themes = sorted({c[0] for x in arts for c in x.get("concepts", []) if c[1] in ("org", "wiki") and c[0]})[:6]
+        x_z, x_count = xsocial.recent_attention(t)   # advisory social-attention spike (NOT sizing)
 
         s = sig.get(t, {})
         flags = []
@@ -128,6 +129,8 @@ def main():
             flags.append("CATALYST_NEG")
         if s.get("n_fired", 0) >= 6 and s.get("p_long", 0) >= 0.65:
             flags.append("QUANT_CONVICTION")
+        if x_z is not None and x_z >= 2.5:
+            flags.append("SOCIAL_SPIKE")               # abnormal X attention — investigate catalyst
         if not flags:
             continue
         if sec_rel is not None and sec_rel > 5:
@@ -141,9 +144,10 @@ def main():
             "news": {"avg_sentiment": avg_sent, "n_articles": len(arts), "pos_catalysts": pos_hit,
                      "neg_catalysts": neg_hit, "themes": themes,
                      "headlines": [x.get("title") for x in arts[:3]]},
+            "social": {"x_attention_z": x_z, "x_mentions_today": x_count},
         })
     conn.close()
-    order = {"OVERREACTION_LONG": 0, "CATALYST_POS": 1, "CATALYST_NEG": 2, "QUANT_CONVICTION": 3}
+    order = {"OVERREACTION_LONG": 0, "CATALYST_POS": 1, "CATALYST_NEG": 2, "QUANT_CONVICTION": 3, "SOCIAL_SPIKE": 4}
     brief.sort(key=lambda b: min(order.get(f, 9) for f in b["flags"]))
     json.dump({"generated": __import__("datetime").datetime.utcnow().isoformat() + "Z", "brief": brief},
               open(OUT, "w"), indent=2)
@@ -158,6 +162,9 @@ def main():
         print(f"         news : sent={n['avg_sentiment']} pos={n['pos_catalysts']} neg={n['neg_catalysts']}")
         if n["headlines"]:
             print(f"         head : {n['headlines'][0]}")
+        soc = b.get("social", {})
+        if soc.get("x_attention_z") is not None:
+            print(f"         social: X attention z={soc['x_attention_z']} ({soc.get('x_mentions_today')} mentions today)")
     print("\n(advisory — the research agent reasons over this brief to judge over/under-reaction and emit hypotheses)")
 
 

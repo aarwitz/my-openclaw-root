@@ -61,3 +61,31 @@ def daily_mention_counts(cashtag: str, start: str, end: str, use_cache: bool = T
     series = sorted(out.items())
     cache_write(ck, {"series": series, "cashtag": sym})
     return series
+
+
+def recent_attention(cashtag: str, lookback_days: int = 40, use_cache: bool = True):
+    """Current social-attention z-score = latest daily mention count vs the trailing ~30d.
+    For the ADVISORY/catalyst layer only (this signal did not clear the sizing backtest gate).
+    Returns (z, latest_count) or (None, None) — resilient: never raises. Cached 12h."""
+    from datetime import date, timedelta
+    sym = cashtag.lstrip("$").upper()
+    ck = f"x_recent_attn_{sym}"
+    if use_cache:
+        c = cache_read(ck, max_age_h=12.0)
+        if c and "z" in c:
+            return (c["z"], c.get("latest"))
+    try:
+        end = date.today().isoformat()
+        start = (date.today() - timedelta(days=lookback_days)).isoformat()
+        series = daily_mention_counts("$" + sym, start, end, use_cache=use_cache)
+    except Exception:
+        return (None, None)
+    if len(series) < 12:
+        return (None, None)
+    vals = [v for _, v in series]
+    latest, prior = vals[-1], vals[-31:-1]
+    mu = sum(prior) / len(prior)
+    sd = (sum((v - mu) ** 2 for v in prior) / len(prior)) ** 0.5
+    z = round((latest - mu) / sd, 2) if sd > 0 else 0.0
+    cache_write(ck, {"z": z, "latest": latest})
+    return (z, latest)
