@@ -221,9 +221,47 @@ def check_pipeline():
     return finding("pipeline", sev, f"last audit {age_h:.0f}h ago ({last}), {n24} in 24h")
 
 
+def check_data_freshness():
+    """Per-source freshness of the feature intake (features.sqlite). check_pipeline confirms the
+    pipeline RUNS; this confirms it runs on FRESH data — a refresh job can die silently while passes
+    keep trading stale features. Daily-cadence sources only; 'x' is advisory and excluded."""
+    db = f"{ROOT}/state/features.sqlite"
+    if not os.path.exists(db):
+        return finding("data_freshness", "warn", "features.sqlite not found")
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+        rows = c.execute("SELECT source, MAX(as_of) FROM features GROUP BY source").fetchall()
+        c.close()
+    except Exception as e:
+        return finding("data_freshness", "warn", f"features query failed: {e}")
+    today = datetime.now(timezone.utc).date()
+    WATCH = {"price", "fmp", "massive", "sector", "news"}
+    seen, stale = {}, []
+    for src, maxd in rows:
+        if src not in WATCH or not maxd:
+            continue
+        try:
+            age = (today - datetime.strptime(maxd[:10], "%Y-%m-%d").date()).days
+        except Exception:
+            continue
+        seen[src] = (maxd[:10], age)
+        if age > 4:  # tolerant of a long holiday weekend
+            stale.append((src, maxd[:10], age))
+    missing = WATCH - set(seen)
+    if not stale and not missing:
+        return finding("data_freshness", "ok",
+                       "intake fresh: " + ", ".join(f"{s}={d}" for s, (d, _) in sorted(seen.items())))
+    worst = max([a for _, _, a in stale], default=99)
+    sev = "crit" if (worst > 7 or missing) else "warn"
+    bits = [f"{s}: {a}d stale (latest {d})" for s, d, a in stale]
+    if missing:
+        bits.append("MISSING: " + ",".join(sorted(missing)))
+    return finding("data_freshness", sev, "STALE intake — " + "; ".join(bits))
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
-    check_taskmanager, check_disk, check_pipeline,
+    check_taskmanager, check_disk, check_pipeline, check_data_freshness,
 ]
 
 
