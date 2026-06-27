@@ -17,10 +17,12 @@ import hashlib
 import hmac
 import secrets
 import json
+import subprocess
+import urllib.parse
 
 import models
 import schemas
-from database import engine, get_db
+from database import SessionLocal, engine, get_db
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -39,6 +41,10 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 LIDI_TM_BASE_URL = os.getenv("LIDI_TM_BASE_URL", "https://tm.lidisolutions.ai").strip().rstrip('/')
 PUBLIC_SESSION_TTL_HOURS = int(os.getenv("PUBLIC_SESSION_TTL_HOURS", "336"))
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "72"))
+TASK_MANAGER_INTERNAL_BASE_URL = os.getenv("TASK_MANAGER_INTERNAL_BASE_URL", "http://127.0.0.1:8000").strip().rstrip('/')
+DWIGHT_LAUNCH_WRAPPER = os.path.expanduser(os.getenv("DWIGHT_LAUNCH_WRAPPER", "~/.openclaw/scripts/run-with-trace.sh"))
+DWIGHT_LAUNCH_SCRIPT = os.path.expanduser(os.getenv("DWIGHT_LAUNCH_SCRIPT", "~/.openclaw/scripts/dwight-launch-from-issue.py"))
+DWIGHT_WORKSPACE_ROOT = os.path.expanduser(os.getenv("DWIGHT_WORKSPACE_ROOT", "~/.openclaw/workspaces/dwight"))
 
 
 def parse_csv_env(value: str) -> List[str]:
@@ -95,6 +101,21 @@ def run_safe_migrations():
             conn.execute(sql_text("ALTER TABLE issues ADD COLUMN story_points INTEGER"))
         if "blocked_reason" not in columns:
             conn.execute(sql_text("ALTER TABLE issues ADD COLUMN blocked_reason TEXT"))
+        if "auto_launch_enabled" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN auto_launch_enabled BOOLEAN DEFAULT 0"))
+            conn.execute(sql_text("UPDATE issues SET auto_launch_enabled = 0 WHERE auto_launch_enabled IS NULL"))
+        if "launch_state" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN launch_state VARCHAR"))
+        if "launch_error" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN launch_error TEXT"))
+        if "last_launch_at" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN last_launch_at DATETIME"))
+        if "launch_signature" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN launch_signature TEXT"))
+        if "launch_claim_token" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN launch_claim_token VARCHAR"))
+        if "launch_claimed_at" not in columns:
+            conn.execute(sql_text("ALTER TABLE issues ADD COLUMN launch_claimed_at DATETIME"))
 
         sprint_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sprints)").fetchall()}
         if "is_archived" not in sprint_columns:
@@ -258,12 +279,19 @@ def cleanup_priority_column_if_present():
                 story_points INTEGER,
                 blocked_reason TEXT,
                 repo_slug VARCHAR,
+                auto_launch_enabled BOOLEAN DEFAULT 0,
+                launch_state VARCHAR,
+                launch_error TEXT,
+                last_launch_at DATETIME,
+                launch_signature TEXT,
+                launch_claim_token VARCHAR,
+                launch_claimed_at DATETIME,
                 FOREIGN KEY(sprint_id) REFERENCES sprints (id)
             )
         """))
         conn.execute(sql_text("""
-            INSERT INTO issues_new (id, title, description, status, sprint_id, created_at, created_by, assigned_to, branch, acceptance_criteria, updated_at, story_points, blocked_reason, repo_slug)
-            SELECT id, title, description, status, sprint_id, created_at, created_by, assigned_to, branch, acceptance_criteria, updated_at, story_points, blocked_reason, repo_slug
+            INSERT INTO issues_new (id, title, description, status, sprint_id, created_at, created_by, assigned_to, branch, acceptance_criteria, updated_at, story_points, blocked_reason, repo_slug, auto_launch_enabled, launch_state, launch_error, last_launch_at, launch_signature, launch_claim_token, launch_claimed_at)
+            SELECT id, title, description, status, sprint_id, created_at, created_by, assigned_to, branch, acceptance_criteria, updated_at, story_points, blocked_reason, repo_slug, auto_launch_enabled, launch_state, launch_error, last_launch_at, launch_signature, launch_claim_token, launch_claimed_at
             FROM issues
         """))
         conn.execute(sql_text("DROP TABLE issues"))
@@ -276,6 +304,8 @@ cleanup_priority_column_if_present()
 
 CANONICAL_TM_USERS = ["Dwight", "Jerry", "Resi", "Druck", "Aaron", "Taylor"]
 LOGIN_ALLOWED_USERS = CANONICAL_TM_USERS.copy()
+INTERNAL_HUMAN_USERS = ["Aaron", "Taylor"]
+EXECUTING_AGENT_USERS = ["Dwight", "Jerry", "Resi", "Druck"]
 USERNAME_ALIASES = {
     "claw": "Jerry",
     "aaron": "Aaron",
@@ -421,6 +451,30 @@ def parse_allowed_users_json(raw_value: Optional[str]) -> List[str]:
     return values
 
 
+def all_agent_users() -> List[str]:
+    ordered: List[str] = []
+    for value in [*EXECUTING_AGENT_USERS, *EWAG_AGENT_USERS]:
+        if value and value not in ordered:
+            ordered.append(value)
+    return ordered
+
+
+def is_admin_viewer(viewer: Optional[str]) -> bool:
+    canonical = canonicalize_username(viewer)
+    if canonical in INTERNAL_HUMAN_USERS:
+        return True
+    return normalize_email(viewer or "") == APPROVER_EMAIL
+
+
+def collect_sprint_working_agents(sprint: models.Sprint) -> List[str]:
+    assigned = []
+    for issue in sprint.issues or []:
+        assignee = normalize_optional_text(issue.assigned_to)
+        if assignee and assignee in all_agent_users() and assignee not in assigned:
+            assigned.append(assignee)
+    return assigned
+
+
 def serialize_sprint(sprint: models.Sprint) -> schemas.SprintResponse:
     return schemas.SprintResponse(
         id=sprint.id,
@@ -428,6 +482,8 @@ def serialize_sprint(sprint: models.Sprint) -> schemas.SprintResponse:
         is_active=bool(sprint.is_active),
         is_archived=bool(getattr(sprint, "is_archived", False)),
         allowed_users=parse_allowed_users_json(getattr(sprint, "allowed_users_json", None)),
+        human_members=INTERNAL_HUMAN_USERS.copy(),
+        working_agent_members=collect_sprint_working_agents(sprint),
         started_at=sprint.started_at,
         ended_at=sprint.ended_at,
     )
@@ -551,11 +607,213 @@ def parse_issue_create_form(form) -> schemas.IssueCreate:
         "repo_slug": form.get("repo_slug") or None,
         "story_points": int(form.get("story_points")) if form.get("story_points") not in (None, "") else None,
         "sprint_id": int(form.get("sprint_id")) if form.get("sprint_id") not in (None, "") else None,
+        "auto_launch_enabled": str(form.get("auto_launch_enabled") or "").strip().lower() in {"1", "true", "yes", "on"},
     }
     try:
         return schemas.IssueCreate(**payload)
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+APPROVAL_GATE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bapproval\b",
+        r"\bapprove\b",
+        r"\bowner\b",
+        r"\bhuman\b",
+        r"\bmanual\b",
+        r"\bwaiting\b",
+        r"\bexternal\b",
+        r"\bsign[\s-]?off\b",
+        r"\bblocked by\b",
+        r"\bclient\b",
+    ]
+]
+LAUNCH_TERMINAL_STATES = {"launched", "failed"}
+LAUNCH_READY_STATES = {"ready", "queued"}
+
+
+def build_issue_launch_signature(issue: models.Issue) -> str:
+    parts = [
+        normalize_optional_text(issue.status) or "",
+        normalize_optional_text(issue.assigned_to) or "",
+        normalize_optional_text(issue.branch) or "",
+        normalize_optional_text(issue.repo_slug) or "",
+        normalize_optional_text(issue.acceptance_criteria) or "",
+        normalize_optional_text(issue.title) or "",
+        normalize_optional_text(issue.description) or "",
+        "1" if bool(issue.auto_launch_enabled) else "0",
+    ]
+    return "|".join(parts)
+
+
+def issue_combined_launch_text(issue: models.Issue) -> str:
+    return " ".join(
+        value
+        for value in [
+            normalize_optional_text(issue.title) or "",
+            normalize_optional_text(issue.description) or "",
+            normalize_optional_text(issue.acceptance_criteria) or "",
+            normalize_optional_text(issue.blocked_reason) or "",
+        ]
+        if value
+    )
+
+
+def launch_readiness(issue: models.Issue) -> tuple[bool, str]:
+    assigned_to = normalize_optional_text(issue.assigned_to)
+    acceptance = normalize_optional_text(issue.acceptance_criteria)
+    branch = normalize_optional_text(issue.branch)
+    repo_slug = normalize_optional_text(issue.repo_slug)
+    status = normalize_optional_text(issue.status)
+    blocked_reason = normalize_optional_text(issue.blocked_reason)
+    combined_text = issue_combined_launch_text(issue)
+
+    if not issue.auto_launch_enabled:
+        return False, "auto_launch_disabled"
+    if assigned_to not in EXECUTING_AGENT_USERS:
+        return False, "assigned_to_not_executing_agent"
+    if status != "in_progress":
+        return False, f"status_{status or 'missing'}"
+    if blocked_reason:
+        return False, "blocked_reason_present"
+    if any(pattern.search(combined_text) for pattern in APPROVAL_GATE_PATTERNS):
+        return False, "approval_gated"
+    if not branch:
+        return False, "branch_missing"
+    if not repo_slug:
+        return False, "repo_slug_missing"
+    if not acceptance:
+        return False, "acceptance_missing"
+    if not (normalize_optional_text(issue.title) or normalize_optional_text(issue.description)):
+        return False, "goal_missing"
+    return True, "ready"
+
+
+def determine_launch_state(issue: models.Issue) -> str:
+    if not issue.auto_launch_enabled:
+        return "disabled"
+    ready, _ = launch_readiness(issue)
+    return "ready" if ready else "waiting"
+
+
+def record_issue_field_change(
+    db: Session,
+    issue: models.Issue,
+    field_name: str,
+    new_value: Optional[object],
+    *,
+    actor: Optional[str],
+) -> bool:
+    old_value = getattr(issue, field_name)
+    if old_value == new_value:
+        return False
+    setattr(issue, field_name, new_value)
+    log_issue_activity(db, issue.id, "field_changed", actor=actor, field_name=field_name, old_value=old_value, new_value=new_value)
+    return True
+
+
+def build_launch_command(issue_id: int, claim_token: str) -> List[str]:
+    return [
+        DWIGHT_LAUNCH_WRAPPER,
+        DWIGHT_LAUNCH_SCRIPT,
+        "--issue-id",
+        str(issue_id),
+        "--execute",
+        "--claim-token",
+        claim_token,
+        "--claim-source",
+        "task_manager_auto",
+        "--tm-base",
+        TASK_MANAGER_INTERNAL_BASE_URL,
+    ]
+
+
+def start_detached_launch(command: List[str]) -> None:
+    if not (os.path.isfile(DWIGHT_LAUNCH_WRAPPER) and os.path.isfile(DWIGHT_LAUNCH_SCRIPT)):
+        raise RuntimeError("Dwight launch scripts are not available on this runtime")
+    subprocess.Popen(
+        command,
+        cwd=DWIGHT_WORKSPACE_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def recompute_issue_launch_state(db: Session, issue: models.Issue, *, actor: Optional[str]) -> Optional[List[str]]:
+    command: Optional[List[str]] = None
+    desired_state = determine_launch_state(issue)
+    current_signature = build_issue_launch_signature(issue)
+
+    if desired_state == "ready":
+        if issue.launch_signature == current_signature and issue.launch_state in {"queued", "launched", "failed"}:
+            return None
+        issue.launch_signature = current_signature
+        record_issue_field_change(db, issue, "launch_error", None, actor=actor)
+        issue.launch_claim_token = None
+        issue.launch_claimed_at = None
+        record_issue_field_change(db, issue, "launch_state", "ready", actor=actor)
+
+        claim_token = secrets.token_urlsafe(24)
+        now = datetime.now()
+        issue.launch_claim_token = claim_token
+        issue.launch_claimed_at = now
+        record_issue_field_change(db, issue, "last_launch_at", now, actor=actor)
+        record_issue_field_change(db, issue, "launch_state", "queued", actor=actor)
+        command = build_launch_command(issue.id, claim_token)
+        return command
+
+    record_issue_field_change(db, issue, "launch_state", desired_state, actor=actor)
+    issue.launch_signature = None
+    issue.launch_claim_token = None
+    issue.launch_claimed_at = None
+    if desired_state in {"disabled", "waiting"}:
+        record_issue_field_change(db, issue, "launch_error", None, actor=actor)
+    return None
+
+
+def issue_has_recent_execution_evidence(issue: models.Issue) -> bool:
+    last_launch_at = issue.last_launch_at
+    if last_launch_at is None:
+        return False
+    for event in issue.activity_events or []:
+        if event.created_at is None or event.created_at <= last_launch_at:
+            continue
+        if event.actor and event.actor not in {"Dwight"}:
+            return True
+        if event.event_type == "comment_added" and event.actor not in {"Dwight"}:
+            return True
+    return False
+
+
+def issue_has_pr_evidence(issue: models.Issue) -> bool:
+    pr_pattern = re.compile(r"github\.com/.+/pull/\d+|pr_status=opened", re.IGNORECASE)
+    for comment in issue.comments or []:
+        if pr_pattern.search(comment.content or ""):
+            return True
+    for event in issue.activity_events or []:
+        if pr_pattern.search((event.new_value or "") + " " + (event.old_value or "")):
+            return True
+    return False
+
+
+def mark_issue_launch_start_failure(db: Session, issue: models.Issue, error_message: str, *, actor: str = "Dwight") -> None:
+    prior_state = issue.launch_state
+    prior_error = issue.launch_error
+    issue.launch_state = "failed"
+    issue.launch_error = normalize_optional_text(error_message) or "Detached launcher start failed"
+    issue.launch_claim_token = None
+    issue.launch_claimed_at = None
+    issue.updated_at = datetime.now()
+    if prior_state != issue.launch_state:
+        log_issue_activity(db, issue.id, "field_changed", actor=actor, field_name="launch_state", old_value=prior_state, new_value=issue.launch_state)
+    if prior_error != issue.launch_error:
+        log_issue_activity(db, issue.id, "field_changed", actor=actor, field_name="launch_error", old_value=prior_error, new_value=issue.launch_error)
+    db.commit()
+    db.refresh(issue)
 
 
 def log_issue_activity(db: Session, issue_id: int, event_type: str, actor: Optional[str] = None, field_name: Optional[str] = None, old_value: Optional[object] = None, new_value: Optional[object] = None):
@@ -807,6 +1065,8 @@ def parse_and_validate_allowed_users(db: Session, values: Optional[List[str]]) -
 
 
 def viewer_can_access_sprint(viewer: Optional[str], sprint: models.Sprint) -> bool:
+    if is_admin_viewer(viewer):
+        return True
     allowed_users = parse_allowed_users_json(getattr(sprint, "allowed_users_json", None))
     if not allowed_users:
         return True
@@ -1601,6 +1861,7 @@ def find_recent_duplicate_issue(
     repo_slug: Optional[str],
     story_points: Optional[int],
     blocked_reason: Optional[str],
+    auto_launch_enabled: bool,
 ) -> Optional[models.Issue]:
     """Return a recent issue that matches the create payload exactly.
 
@@ -1622,6 +1883,7 @@ def find_recent_duplicate_issue(
         models.Issue.repo_slug.is_(None) if repo_slug is None else models.Issue.repo_slug == repo_slug,
         models.Issue.story_points.is_(None) if story_points is None else models.Issue.story_points == story_points,
         models.Issue.blocked_reason.is_(None) if blocked_reason is None else models.Issue.blocked_reason == blocked_reason,
+        models.Issue.auto_launch_enabled == bool(auto_launch_enabled),
     )
     return query.order_by(models.Issue.created_at.desc()).first()
 
@@ -1659,6 +1921,7 @@ async def create_issue(request: Request, response: Response, db: Session = Depen
     repo_slug = normalize_optional_text(issue.repo_slug)
     story_points = validate_story_points(issue.story_points)
     blocked_reason = normalize_optional_text(issue.blocked_reason)
+    auto_launch_enabled = bool(issue.auto_launch_enabled)
     issue_status = "blocked" if blocked_reason else "to_do"
 
     duplicate = find_recent_duplicate_issue(
@@ -1673,6 +1936,7 @@ async def create_issue(request: Request, response: Response, db: Session = Depen
         repo_slug=repo_slug,
         story_points=story_points,
         blocked_reason=blocked_reason,
+        auto_launch_enabled=auto_launch_enabled,
     )
     if duplicate:
         response.status_code = status.HTTP_200_OK
@@ -1689,14 +1953,21 @@ async def create_issue(request: Request, response: Response, db: Session = Depen
         repo_slug=repo_slug,
         story_points=story_points,
         blocked_reason=blocked_reason,
+        auto_launch_enabled=auto_launch_enabled,
         status=issue_status,
         updated_at=datetime.now(),
     )
     db.add(db_issue)
     db.flush()
     log_issue_activity(db, db_issue.id, "created", actor=created_by, new_value=db_issue.title)
+    launch_command = recompute_issue_launch_state(db, db_issue, actor=created_by)
     db.commit()
     db.refresh(db_issue)
+    if launch_command:
+        try:
+            start_detached_launch(launch_command)
+        except Exception as exc:
+            mark_issue_launch_start_failure(db, db_issue, str(exc))
     return db_issue
 
 @app.get("/api/issues", response_model=List[schemas.IssueResponse])
@@ -1736,6 +2007,7 @@ def search_issues(
     needs_review: bool = False,
     stale_days: Optional[int] = None,
     in_backlog: bool = False,
+    operator_view: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Search issues with filters across title, description, comments, or exact issue ID."""
@@ -1822,10 +2094,23 @@ def search_issues(
 
     issues = query.order_by(models.Issue.created_at.desc()).all()
     viewer = resolve_request_viewer(request, db)
-    return [
+    visible_issues = [
         issue for issue in issues
         if issue.sprint_id is None or viewer_can_access_sprint(viewer, issue.sprint)
     ]
+    if operator_view == "ready_not_queued":
+        return [issue for issue in visible_issues if bool(issue.auto_launch_enabled) and issue.launch_state == "ready"]
+    if operator_view == "active_launch_without_recent_evidence":
+        return [
+            issue for issue in visible_issues
+            if issue.launch_state in {"queued", "launched"} and not issue_has_recent_execution_evidence(issue)
+        ]
+    if operator_view == "in_progress_no_pr":
+        return [
+            issue for issue in visible_issues
+            if issue.status == "in_progress" and normalize_optional_text(issue.branch) and not issue_has_pr_evidence(issue)
+        ]
+    return visible_issues
 
 
 @app.get("/api/issues/{issue_id}", response_model=schemas.IssueResponse)
@@ -1858,6 +2143,8 @@ def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, request: Requ
             value = validate_assignee_identity(db, value, field_name="assigned_to", allow_blank=True)
         elif field == "status":
             value = normalize_status(value)
+        elif field == "auto_launch_enabled":
+            value = bool(value)
         if field == "story_points":
             value = validate_story_points(value)
         normalized_updates[field] = value
@@ -1886,10 +2173,123 @@ def update_issue(issue_id: int, issue_update: schemas.IssueUpdate, request: Requ
 
     if changed:
         db_issue.updated_at = datetime.now()
+    launch_command = recompute_issue_launch_state(db, db_issue, actor=actor)
 
     db.commit()
     db.refresh(db_issue)
+    if launch_command:
+        try:
+            start_detached_launch(launch_command)
+        except Exception as exc:
+            mark_issue_launch_start_failure(db, db_issue, str(exc))
     return db_issue
+
+
+@app.post("/api/issues/{issue_id}/launch-claim", response_model=schemas.IssueLaunchClaimResponse)
+def claim_issue_launch(issue_id: int, payload: schemas.IssueLaunchClaimCreate, db: Session = Depends(get_db)):
+    issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    claimant = validate_actor_identity(db, payload.claimant, field_name="claimant")
+    expected_signature = normalize_optional_text(payload.expected_signature)
+    current_signature = build_issue_launch_signature(issue)
+    if not expected_signature or expected_signature != current_signature:
+        raise HTTPException(status_code=409, detail="Launch signature no longer matches the current issue state")
+
+    ready, reason = launch_readiness(issue)
+    if not ready and issue.launch_state not in {"queued", "launched"}:
+        raise HTTPException(status_code=409, detail=f"Issue is not launch-ready: {reason}")
+
+    if issue.launch_claim_token and issue.launch_signature == expected_signature:
+        return schemas.IssueLaunchClaimResponse(
+            issue_id=issue.id,
+            claim_token=issue.launch_claim_token,
+            launch_state=issue.launch_state or "queued",
+            launch_signature=issue.launch_signature or expected_signature,
+        )
+
+    prior_state = issue.launch_state
+    prior_error = issue.launch_error
+    issue.launch_signature = expected_signature
+    issue.launch_claim_token = secrets.token_urlsafe(24)
+    issue.launch_claimed_at = datetime.now()
+    issue.last_launch_at = datetime.now()
+    issue.launch_state = "queued"
+    issue.launch_error = None
+    issue.updated_at = datetime.now()
+    if prior_state != issue.launch_state:
+        log_issue_activity(db, issue.id, "field_changed", actor=claimant, field_name="launch_state", old_value=prior_state, new_value=issue.launch_state)
+    if prior_error != issue.launch_error:
+        log_issue_activity(db, issue.id, "field_changed", actor=claimant, field_name="launch_error", old_value=prior_error, new_value=issue.launch_error)
+    db.commit()
+    db.refresh(issue)
+    return schemas.IssueLaunchClaimResponse(
+        issue_id=issue.id,
+        claim_token=issue.launch_claim_token,
+        launch_state=issue.launch_state or "queued",
+        launch_signature=issue.launch_signature or expected_signature,
+    )
+
+
+@app.delete("/api/issues/{issue_id}/launch-claim")
+def release_issue_launch_claim(issue_id: int, claim_token: str = Query(...), db: Session = Depends(get_db)):
+    issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.launch_claim_token and issue.launch_claim_token != claim_token:
+        raise HTTPException(status_code=409, detail="Launch claim token mismatch")
+    prior_state = issue.launch_state
+    issue.launch_claim_token = None
+    issue.launch_claimed_at = None
+    issue.launch_state = determine_launch_state(issue)
+    issue.updated_at = datetime.now()
+    if prior_state != issue.launch_state:
+        log_issue_activity(db, issue.id, "field_changed", actor="Dwight", field_name="launch_state", old_value=prior_state, new_value=issue.launch_state)
+    db.commit()
+    return {"issue_id": issue.id, "launch_state": issue.launch_state}
+
+
+@app.post("/api/issues/{issue_id}/launch-result", response_model=schemas.IssueResponse)
+def post_issue_launch_result(issue_id: int, payload: schemas.IssueLaunchResultCreate, db: Session = Depends(get_db)):
+    issue = db.query(models.Issue).filter(models.Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    actor = validate_actor_identity(db, payload.username, field_name="username")
+    if payload.claim_token and issue.launch_claim_token and payload.claim_token != issue.launch_claim_token:
+        raise HTTPException(status_code=409, detail="Launch claim token mismatch")
+
+    next_launch_state = normalize_optional_text(payload.launch_state)
+    if next_launch_state not in LAUNCH_TERMINAL_STATES:
+        raise HTTPException(status_code=400, detail="launch_state must be launched or failed")
+
+    prior_state = issue.launch_state
+    prior_error = issue.launch_error
+    launch_error = normalize_optional_text(payload.launch_error)
+    issue.launch_state = next_launch_state
+    issue.launch_error = launch_error
+    issue.launch_claim_token = None
+    issue.launch_claimed_at = None
+    if issue.last_launch_at is None:
+        issue.last_launch_at = datetime.now()
+    issue.updated_at = datetime.now()
+
+    if prior_state != issue.launch_state:
+        log_issue_activity(db, issue.id, "field_changed", actor=actor, field_name="launch_state", old_value=prior_state, new_value=issue.launch_state)
+    if prior_error != issue.launch_error:
+        log_issue_activity(db, issue.id, "field_changed", actor=actor, field_name="launch_error", old_value=prior_error, new_value=issue.launch_error)
+
+    comment_content = normalize_optional_text(payload.comment_content)
+    if comment_content:
+        db_comment = models.Comment(content=comment_content, username=actor, issue_id=issue_id)
+        db.add(db_comment)
+        db.flush()
+        log_issue_activity(db, issue_id, "comment_added", actor=actor, new_value=comment_content[:120])
+
+    db.commit()
+    db.refresh(issue)
+    return issue
 
 @app.delete("/api/issues/{issue_id}")
 def delete_issue(issue_id: int, request: Request, db: Session = Depends(get_db)):

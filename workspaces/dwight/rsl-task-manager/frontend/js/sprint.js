@@ -4,7 +4,7 @@ if (!username) {
 }
 
 document.getElementById('currentUser').textContent = username;
-const { fetchJson, authenticatedFetch, fetchSprints, buildSprintSelectOptions, renderIssueCard, attachInlineIssueEditors } = window.TM_SHARED;
+const { fetchJson, fetchSprints, buildSprintSelectOptions, renderIssueCard, attachInlineIssueEditors } = window.TM_SHARED;
 const { prepareIssueForm, submitIssueForm } = window.TMIssueForm;
 let currentSprint = null;
 let currentSprintIssues = [];
@@ -55,7 +55,7 @@ async function uploadIssueImages(issueId, files) {
     await Promise.all(Array.from(files).map((file) => {
         const formData = new FormData();
         formData.append('file', file);
-        return authenticatedFetch(`/api/issues/${issueId}/images?source_type=description&uploaded_by=${encodeURIComponent(username)}`, { method: 'POST', body: formData });
+        return fetch(`/api/issues/${issueId}/images?source_type=description&uploaded_by=${encodeURIComponent(username)}`, { method: 'POST', body: formData });
     }));
 }
 
@@ -82,7 +82,9 @@ document.getElementById('createIssueForm').addEventListener('submit', async (e) 
 
 async function getActiveSprint() {
     try {
-        return await fetchJson('/api/sprints/active');
+        const response = await fetch('/api/sprints/active');
+        if (response.ok) return await response.json();
+        return null;
     } catch (error) {
         console.error('Error fetching active sprint:', error);
         return null;
@@ -122,7 +124,6 @@ async function loadSprint() {
     if (sprint.started_at) sprintMeta.push(`Started: ${new Date(sprint.started_at).toLocaleString()}`);
     if (sprint.is_active) sprintMeta.push('Status: Active');
     if (!sprint.is_active) sprintMeta.push('Status: Planned / inactive');
-    sprintMeta.push(Array.isArray(sprint.allowed_users) && sprint.allowed_users.length ? `Access: ${sprint.allowed_users.join(', ')}` : 'Access: All users');
     document.getElementById('sprintInfo').textContent = sprintMeta.join(' · ');
     document.getElementById('startSprintBtn').style.display = sprint.is_active ? 'none' : 'block';
     document.getElementById('endSprintBtn').style.display = sprint.is_active ? 'block' : 'none';

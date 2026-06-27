@@ -2,42 +2,6 @@
   "version": 1,
   "jobs": [
     {
-      "id": "e36576ae-0300-4d9e-aa2a-a6679a8efd62",
-      "name": "Jerry Morning Telegram Update",
-      "enabled": false,
-      "createdAtMs": 1774713658477,
-      "updatedAtMs": 1775044827595,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 6 * * *",
-        "tz": "America/New_York",
-        "staggerMs": 0
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "You are running the 6:00 AM Jerry morning Telegram update.\n\nSend exactly one concise Telegram update to the configured delivery target for this job.\n\nRequirements:\n1. Keep it short and factual.\n2. Include only: Jerry current focus, Aaron next task, Taylor next task, and any real blocker.\n3. If there is no blocker, say 'Blockers: none'.\n4. Do not send email.\n5. Do not create extra side tasks from this morning update job.\n6. Avoid filler or repeated stale status.",
-        "thinking": "low",
-        "timeoutSeconds": 120
-      },
-      "delivery": {
-        "mode": "announce",
-        "channel": "telegram",
-        "to": "-1003643056525:topic:1"
-      },
-      "state": {
-        "nextRunAtMs": 1775210400000,
-        "lastRunAtMs": 1775044800004,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "lastDurationMs": 27591,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "consecutiveErrors": 0
-      }
-    },
-    {
       "id": "98d267ad-1265-4c79-b909-4640bbdcad5e",
       "name": "EWAG Active Execution Loop",
       "description": "Continue active EWAG iOS/product execution work and only report meaningful progress",
@@ -53,7 +17,7 @@
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running the EWAG active execution loop for the Telegram group chat 'EWAG' owner-dashboard topic.\n\nMission:\nKeep EWAG owner-dashboard/product execution moving forward without needing manual re-prompting. Prioritize the active in-progress Jerry owner-dashboard/internal-tools task in the Task Manager unless reality clearly changed. Resi is primary iOS developer; Dwight is official Task Manager orchestrator/developer.\n\nPrimary active task:\n- Issue #23 — \"Exhaustively harden EWAG owner dashboard card configuration wiring\"\n- Task Manager base URL: http://127.0.0.1:8000 (alias rsl:8000, same machine)\n\nRequired execution loop each run:\n1. Review the latest EWAG context from recent session history, workspace files, relevant memory, local OpenClaw docs when behavior/config matters, and current task/code/PR state.\n2. Inspect Task Manager issue #23 first. If it is still the active Jerry in-progress owner-dashboard/internal-tools issue, continue it. If another Jerry internal-tools issue is now the clear active in-progress item, continue that instead and note the handoff in the task comment.\n3. Advance the highest-value next step you can safely do now. Prefer concrete outputs over planning: code changes, requirement clarification, wiring audit, tests, build prep, PR updates, review response, deployment prep, or precise task-manager updates.\n4. If the work is complex, spawn a sub-agent and use it to keep momentum, but keep ownership of follow-through.\n5. When you make meaningful progress, add a concise Task Manager comment on the issue you worked on. Include:\n   - what changed\n   - evidence/check performed\n   - next step\n   Do not spam repetitive comments if nothing materially changed.\n6. Persist meaningful execution state in memory files when useful:\n   - daily progress/blockers/checkpoints in memory/YYYY-MM-DD.md\n   - only stable long-term rules in group memory/MEMORY\n7. Telegram update policy is STRICT:\n   - Send a Telegram update only for a materially new outcome, such as: a new commit, PR state change, new test/build result that changes readiness, automation loop fix, or a real blocker/decision needed from Aaron.\n   - Do NOT send Telegram updates for simple revalidation of the same branch/test/blocker state.\n   - If the run only reconfirms previously reported status, reply exactly: NO_REPLY\n8. If there is nothing materially new for Telegram, reply exactly: NO_REPLY\n\nQuality bar:\n- Do not invent fake progress.\n- Do not repeat stale status.\n- Prefer continuing existing work over creating new meta-work.\n- Use local OpenClaw docs as source of truth for OpenClaw behavior/configuration.\n- Keep Telegram updates concise and outcome-focused.",
+        "message": "You are running the EWAG active execution loop for the Telegram group chat 'EWAG' owner-dashboard topic.\n\nMission:\nKeep EWAG owner-dashboard/product execution moving forward without needing manual re-prompting. Prioritize the active in-progress Jerry owner-dashboard/internal-tools task in the Task Manager unless reality clearly changed. Resi is primary iOS developer; Dwight is official Task Manager orchestrator/developer.\n\nPrimary active task:\n- Issue #23 — \"Exhaustively harden EWAG owner dashboard card configuration wiring\"\n- Task Manager base URL: https://tm.lidisolutions.ai\n\nRequired execution loop each run:\n1. Review the latest EWAG context from recent session history, workspace files, relevant memory, local OpenClaw docs when behavior/config matters, and current task/code/PR state.\n2. Inspect Task Manager issue #23 first. If it is still the active Jerry in-progress owner-dashboard/internal-tools issue, continue it. If another Jerry internal-tools issue is now the clear active in-progress item, continue that instead and note the handoff in the task comment.\n3. Advance the highest-value next step you can safely do now. Prefer concrete outputs over planning: code changes, requirement clarification, wiring audit, tests, build prep, PR updates, review response, deployment prep, or precise task-manager updates.\n4. If the work is complex, spawn a sub-agent and use it to keep momentum, but keep ownership of follow-through.\n5. When you make meaningful progress, add a concise Task Manager comment on the issue you worked on. Include:\n   - what changed\n   - evidence/check performed\n   - next step\n   Do not spam repetitive comments if nothing materially changed.\n6. Persist meaningful execution state in memory files when useful:\n   - daily progress/blockers/checkpoints in memory/YYYY-MM-DD.md\n   - only stable long-term rules in group memory/MEMORY\n7. Telegram update policy is STRICT:\n   - Send a Telegram update only for a materially new outcome, such as: a new commit, PR state change, new test/build result that changes readiness, automation loop fix, or a real blocker/decision needed from Aaron.\n   - Do NOT send Telegram updates for simple revalidation of the same branch/test/blocker state.\n   - If the run only reconfirms previously reported status, reply exactly: NO_REPLY\n8. If there is nothing materially new for Telegram, reply exactly: NO_REPLY\n\nQuality bar:\n- Do not invent fake progress.\n- Do not repeat stale status.\n- Prefer continuing existing work over creating new meta-work.\n- Use local OpenClaw docs as source of truth for OpenClaw behavior/configuration.\n- Keep Telegram updates concise and outcome-focused.",
         "thinking": "low",
         "timeoutSeconds": 300
       },

@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """Task Manager MCP server.
 
-Provides a stable MCP tool surface over the local Task Manager API.
+Provides a stable MCP tool surface over the hosted Task Manager API.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import mimetypes
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-TM_BASE_URL = os.environ.get("TM_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+TM_BASE_URL = os.environ.get("TM_BASE_URL", "http://taskmanager:8000").rstrip("/")
 TM_TIMEOUT_SECONDS = float(os.environ.get("TM_TIMEOUT_SECONDS", "15"))
 TM_DEFAULT_ACTOR = os.environ.get("TM_DEFAULT_ACTOR", "Dwight")
 TM_READ_ONLY = os.environ.get("TM_READ_ONLY", "false").lower() in {"1", "true", "yes", "on"}
 TM_WRITE_ACTOR = os.environ.get("TM_WRITE_ACTOR", "Dwight")
+TM_INTERNAL_USER_HEADER = os.environ.get("TM_INTERNAL_USER_HEADER", "X-TM-User")
 
 mcp = FastMCP("task-manager-mcp")
 
@@ -40,10 +43,80 @@ def _request_json(
 
     body = None
     headers = {"Accept": "application/json"}
+    if TM_DEFAULT_ACTOR:
+        headers[TM_INTERNAL_USER_HEADER] = TM_DEFAULT_ACTOR
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
+    req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=TM_TIMEOUT_SECONDS) as resp:
+            raw = resp.read().decode("utf-8")
+            if not raw.strip():
+                return {"ok": True}
+            return json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Task Manager HTTP {exc.code} {method} {path}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Task Manager request failed {method} {path}: {exc.reason}") from exc
+
+
+def _encode_multipart_form_data(
+    fields: dict[str, str],
+    file_field_name: str,
+    file_path: str,
+) -> tuple[bytes, str]:
+    boundary = f"----OpenClawTaskManager{uuid.uuid4().hex}"
+    filename = os.path.basename(file_path)
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    with open(file_path, "rb") as fh:
+        file_bytes = fh.read()
+
+    body = bytearray()
+    for name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(str(value).encode("utf-8"))
+        body.extend(b"\r\n")
+
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(
+        (
+            f'Content-Disposition: form-data; name="{file_field_name}"; filename="{filename}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode("utf-8")
+    )
+    body.extend(file_bytes)
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+    return bytes(body), boundary
+
+
+def _request_multipart(
+    path: str,
+    *,
+    file_field_name: str,
+    file_path: str,
+    fields: dict[str, str] | None = None,
+    method: str = "POST",
+    query: dict[str, Any] | None = None,
+) -> Any:
+    url = f"{TM_BASE_URL}{path}"
+    if query:
+        encoded = urllib.parse.urlencode({k: v for k, v in query.items() if v is not None})
+        if encoded:
+            url = f"{url}?{encoded}"
+
+    body, boundary = _encode_multipart_form_data(fields or {}, file_field_name, file_path)
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    if TM_DEFAULT_ACTOR:
+        headers[TM_INTERNAL_USER_HEADER] = TM_DEFAULT_ACTOR
     req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
 
     try:
@@ -204,6 +277,42 @@ def issue_add_comment(issue_id: int, content: str, username: str = TM_DEFAULT_AC
         method="POST",
         payload={"content": content, "username": username},
     )
+
+
+@mcp.tool()
+def issue_upload_image(
+    issue_id: int,
+    file_path: str,
+    source_type: str = "issue",
+    comment_id: int | None = None,
+    uploaded_by: str = TM_DEFAULT_ACTOR,
+) -> dict[str, Any]:
+    """Upload an image for an issue, description, or comment."""
+    _require_write_access("issue_upload_image")
+    if not os.path.isfile(file_path):
+        raise RuntimeError(f"issue_upload_image file not found: {file_path}")
+    normalized_source = source_type.strip().lower()
+    if normalized_source not in {"issue", "description", "comment"}:
+        raise RuntimeError("issue_upload_image source_type must be one of: issue, description, comment")
+    if normalized_source == "comment" and comment_id is None:
+        raise RuntimeError("issue_upload_image requires comment_id when source_type=comment")
+    return _request_multipart(
+        f"/api/issues/{issue_id}/images",
+        file_field_name="file",
+        file_path=file_path,
+        query={
+            "source_type": normalized_source,
+            "comment_id": comment_id,
+            "uploaded_by": uploaded_by,
+        },
+    )
+
+
+@mcp.tool()
+def issue_delete_image(issue_id: int, image_id: int) -> dict[str, Any]:
+    """Delete an image from an issue."""
+    _require_write_access("issue_delete_image")
+    return _request_json(f"/api/issues/{issue_id}/images/{image_id}", method="DELETE")
 
 
 @mcp.tool()

@@ -23,7 +23,7 @@ const PORT   = Number(process.env.PORT || 18790)
 const TOKEN  = (process.env.BRIDGE_TOKEN || readFileSync('/home/aaron/.openclaw/credentials/gateway-token', 'utf8')).trim()
 const OPENCLAW = process.env.OPENCLAW_BIN || 'openclaw'
 
-const AGENTS = ['overseer','researcher','quant','critic','trader','risk','executor','archivist','developer','dwight']
+const AGENTS = ['overseer','researcher','quant','critic','trader','risk','executor','archivist','developer','dwight','montra-pm']
 
 // --- auth ---
 function authed(req) {
@@ -113,7 +113,7 @@ const srv = http.createServer(async (req, res) => {
 
   // --- /api/trader-run (fire-and-forget, Run button) ---
   if (!isChat && (url === '/api/trader-run' || url === '/trader-run' || url === '/')) {
-    const target = AGENTS.includes(data.target) ? data.target : null
+    const target = AGENTS.includes(String(data.target || '').trim().toLowerCase()) ? String(data.target || '').trim().toLowerCase() : null
     const agent  = (!target || target === 'run_all') ? 'overseer' : target
     const msg    = (!target || target === 'run_all')
       ? '[PIPELINE-TRIGGER] Run the full trading pipeline now. Execute the deterministic core (trader-pass-deterministic.sh), inventory the DB, and complete all mandatory steps per your system prompt. Narrate the results to Telegram when done.'
@@ -133,7 +133,8 @@ const srv = http.createServer(async (req, res) => {
 
   // --- /api/trader-chat (streaming SSE) ---
   if (isChat) {
-    const agent   = AGENTS.includes(data.target) ? data.target : 'overseer'
+    const target  = String(data.target || '').trim().toLowerCase()
+    const agent   = AGENTS.includes(target) ? target : 'overseer'
     const message = String(data.message || '').trim().slice(0, 8000)
     const session = String(data.session_id || '').replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 64) || `web-${Date.now()}`
 

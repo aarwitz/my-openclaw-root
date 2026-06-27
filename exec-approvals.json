@@ -140,6 +140,17 @@
     },
     "dwight": {
       "allowlist": []
+    },
+    "Montra-PM": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "allowlist": [
+        {
+          "pattern": "/home/aaron/.openclaw/scripts/montra-mac-safe.sh",
+          "id": "0d2f8a35-cf62-4eeb-9492-4df8a2f8e3f3"
+        }
+      ]
     }
   }
 }

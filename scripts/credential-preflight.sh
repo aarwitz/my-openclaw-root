@@ -114,8 +114,8 @@ check "mac ssh (BatchMode)" ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST
 check "github auth" gh auth status
 check "github account router present" test -x "$GH_ROUTER_BIN"
 check "github mcp validator present" test -x "$GH_MCP_VALIDATE_BIN"
-check_output "github account (jerry/main)" "^aaronclawrsl-bot$" \
-  "$GH_ROUTER_BIN" --agent main api user --jq '.login'
+check_output "github account (jerry)" "^aaronclawrsl-bot$" \
+  "$GH_ROUTER_BIN" --agent jerry api user --jq '.login'
 check_output "github account (dwight)" "^aaronclawrsl-bot$" \
   "$GH_ROUTER_BIN" --agent dwight api user --jq '.login'
 check_output "github account (druck)" "^aaronclawrsl-bot$" \
@@ -137,8 +137,8 @@ else
   failures=$((failures + 1))
 fi
 
-check_output "google account (jerry/main)" "^aaronclawrsl@gmail\\.com$" \
-  "$GOG_ROUTER_BIN" --agent main --print-account
+check_output "google account (jerry)" "^aaronclawrsl@gmail\\.com$" \
+  "$GOG_ROUTER_BIN" --agent jerry --print-account
 check "google workspace mcp validator present" test -x "$GOOGLE_MCP_VALIDATE_BIN"
 check "google workspace mcp readonly validation" "$GOOGLE_MCP_VALIDATE_BIN"
 check "cloudflare default token verify" "$CF_ROUTER_BIN" --mode default --verify

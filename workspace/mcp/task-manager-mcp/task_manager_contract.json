@@ -5,6 +5,8 @@
     "/api/issues/search": ["get"],
     "/api/issues/{issue_id}/assign-to-sprint": ["post"],
     "/api/issues/{issue_id}/comments": ["post"],
+    "/api/issues/{issue_id}/images": ["post"],
+    "/api/issues/{issue_id}/images/{image_id}": ["delete"],
     "/api/sprints": ["get", "post"],
     "/api/sprints/active": ["get"]
   }

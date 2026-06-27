@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 """Critic · critic_baseline.py
 
-Deterministic baseline critic that prevents the pipeline from stalling forever
-on overly strict LLM critic challenges.
+Deterministic baseline critic for scored hypotheses.
 
-Promotion rule (conservative):
-  - hypothesis is in state in (scored, challenged)
-  - quant_score >= MIN_SCORE
-  - has at least MIN_EVIDENCE primary-source hypothesis_evidence rows
-  - latest evidence freshness <= MAX_EVIDENCE_AGE_H
-  - regime.current is risk_on or neutral (NOT risk_off)
-  - rationale_concise is non-trivial (>= MIN_RATIONALE_LEN)
-  - ticker has no existing open position OR open trade_intent
+Review rule (conservative):
+  - hypothesis is in state = scored
+  - quant_score >= MIN_REVIEW_SCORE
+  - promote only if it also clears the stronger promotion checks:
+    evidence count/freshness, regime, rationale quality, exposure, valuation
 
-When all hold, the hypothesis is promoted state -> ready and a fresh
-critic_review row is recorded with reviewed_by='critic_baseline' and
-all_challenges_addressed=1 so that downstream gates compute a passing
-counterargument_quality_score.
+For every reviewed hypothesis, the script records a fresh `critic_review`.
+Passing names move to `ready` with `all_challenges_addressed=1`.
+Failing names move to or remain in `challenged` with unresolved challenges.
 
-Idempotent: hypotheses already in state=ready or beyond are skipped.
+Idempotent with respect to terminal hypothesis states: rows already in
+`ready`/`active`/`resolved` are skipped.
 
 Usage:
-    python3 critic_baseline.py            # promote all eligible
+    python3 critic_baseline.py            # review all eligible
     python3 critic_baseline.py --dry-run  # show what would happen
-    python3 critic_baseline.py --max 3    # cap promotions this pass
+    python3 critic_baseline.py --max 10   # cap reviewed rows this pass
 """
 from __future__ import annotations
 
@@ -38,6 +34,7 @@ from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
+MIN_REVIEW_SCORE = 60.0
 MIN_SCORE = 65.0
 MIN_EVIDENCE = 1
 MAX_EVIDENCE_AGE_H = 72.0
@@ -127,16 +124,16 @@ def evaluate(conn, hyp_row) -> dict:
     if hyp_row["state"] in ("ready", "active", "resolved"):
         return {"id": hid, "skip": True, "reason": f"already state={hyp_row['state']}"}
 
-    if hyp_row["state"] not in ("scored", "challenged"):
+    if hyp_row["state"] != "scored":
         return {"id": hid, "skip": True, "reason": f"not promotable from state={hyp_row['state']}"}
 
     score = hyp_row["quant_score"]
-    if score is None or float(score) < MIN_SCORE:
-        return {"id": hid, "skip": True, "reason": f"quant_score={score} < {MIN_SCORE}"}
+    if score is None or float(score) < MIN_REVIEW_SCORE:
+        return {"id": hid, "skip": True, "reason": f"quant_score={score} < {MIN_REVIEW_SCORE}"}
 
     rationale = (hyp_row["rationale_concise"] or "").strip()
     if len(rationale) < MIN_RATIONALE_LEN:
-        return {"id": hid, "skip": True,
+        return {"id": hid, "fail": True, "primary_ticker": None, "quant_score": float(score),
                 "reason": f"rationale_len={len(rationale)} < {MIN_RATIONALE_LEN}"}
 
     evid = conn.execute(
@@ -144,26 +141,28 @@ def evaluate(conn, hyp_row) -> dict:
         (hid,),
     ).fetchall()
     if len(evid) < MIN_EVIDENCE:
-        return {"id": hid, "skip": True,
+        return {"id": hid, "fail": True, "primary_ticker": None, "quant_score": float(score),
                 "reason": f"evidence_count={len(evid)} < {MIN_EVIDENCE}"}
     age = _hours_since(max((e["retrieved_at"] for e in evid), default=None))
     if age is None or age > MAX_EVIDENCE_AGE_H:
-        return {"id": hid, "skip": True,
+        return {"id": hid, "fail": True, "primary_ticker": None, "quant_score": float(score),
                 "reason": f"latest_evidence_age={age}h > {MAX_EVIDENCE_AGE_H}h"}
 
     regime = _regime_current(conn)
     if regime == "risk_off":
-        return {"id": hid, "skip": True, "reason": f"regime={regime} blocks new exposure"}
+        return {"id": hid, "fail": True, "primary_ticker": None, "quant_score": float(score),
+                "reason": f"regime={regime} blocks new exposure"}
 
     try:
         tickers = json.loads(hyp_row["tickers"] or "[]")
     except json.JSONDecodeError:
         tickers = []
     if not tickers:
-        return {"id": hid, "skip": True, "reason": "no tickers"}
+        return {"id": hid, "fail": True, "primary_ticker": None, "quant_score": float(score),
+                "reason": "no tickers"}
     primary = str(tickers[0]).upper()
     if _has_open_exposure(conn, primary):
-        return {"id": hid, "skip": True,
+        return {"id": hid, "fail": True, "primary_ticker": primary, "quant_score": float(score),
                 "reason": f"open exposure already on {primary}"}
 
     # Valuation discipline: rich names need stronger conviction to promote.
@@ -178,7 +177,7 @@ def evaluate(conn, hyp_row) -> dict:
                         + (f", market implies {ig*100:.0f}% growth vs {ga*100:.0f}% history" if (ig is not None and ga is not None) else "")
                         + f"); rich → conviction bar raised to {bar:.0f}")
             if float(score) < bar:
-                return {"id": hid, "skip": True,
+                return {"id": hid, "fail": True, "primary_ticker": primary, "quant_score": float(score),
                         "reason": f"{primary} richly valued (MoS {mos*100:+.0f}%, conf {vconf:.2f}); "
                                   f"quant_score={score} < raised bar {bar:.0f}"}
 
@@ -233,6 +232,35 @@ def promote(conn, ev: dict, hyp_row) -> dict:
             "review_id": rid, "from": before, "to": "ready"}
 
 
+def challenge(conn, ev: dict, hyp_row) -> dict:
+    hid = ev["id"]
+    rid = "cr-" + uuid.uuid4().hex[:24]
+    reason = ev["reason"]
+    primary = ev.get("primary_ticker")
+    challenges = [
+        {
+            "challenge": "baseline_challenge",
+            "response": reason,
+            "resolved": False,
+        }
+    ]
+    conn.execute(
+        "INSERT INTO critic_reviews (id, target_type, target_id, reviewed_at, "
+        "reviewed_by, challenges_json, all_challenges_addressed) "
+        "VALUES (?, 'hypothesis', ?, ?, 'critic', ?, 0)",
+        (rid, hid, _now_iso(), json.dumps(challenges)),
+    )
+    before = hyp_row["state"]
+    conn.execute(
+        "UPDATE hypotheses SET state='challenged', last_critic_review_at=? WHERE id=?",
+        (_now_iso(), hid),
+    )
+    _audit(conn, actor="critic", entity_id=hid, action="challenge_hypothesis",
+           before_state=before, after_state="challenged", rationale=reason[:500])
+    return {"id": hid, "ticker": primary, "challenged": True,
+            "review_id": rid, "from": before, "to": "challenged", "reason": reason}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dry-run", action="store_true")
@@ -242,21 +270,34 @@ def main(argv: list[str] | None = None) -> int:
     conn = _connect()
     rows = conn.execute(
         "SELECT id, tickers, state, quant_score, rationale_concise "
-        "FROM hypotheses WHERE state IN ('scored','challenged') "
+        "FROM hypotheses WHERE state='scored' "
+        "AND quant_score >= ? "
         "ORDER BY quant_score DESC NULLS LAST, scored_at DESC NULLS LAST"
-    ).fetchall()
+    , (MIN_REVIEW_SCORE,)).fetchall()
 
     results = []
+    reviewed = 0
     promoted = 0
+    challenged = 0
     for r in rows:
         ev = evaluate(conn, r)
-        if ev.get("promote") and promoted < args.max:
+        if reviewed >= args.max:
+            results.append({"id": r["id"], "skip": True, "reason": f"max_reviews_reached={args.max}"})
+        elif ev.get("promote"):
             if not args.dry_run:
                 results.append(promote(conn, ev, r))
             else:
-                results.append({"id": r["id"], "ticker": ev["primary_ticker"],
-                                "would_promote": True})
+                results.append({"id": r["id"], "ticker": ev["primary_ticker"], "would_promote": True})
             promoted += 1
+            reviewed += 1
+        elif ev.get("fail"):
+            if not args.dry_run:
+                results.append(challenge(conn, ev, r))
+            else:
+                results.append({"id": r["id"], "ticker": ev.get("primary_ticker"),
+                                "would_challenge": True, "reason": ev["reason"]})
+            challenged += 1
+            reviewed += 1
         else:
             results.append(ev)
 
@@ -264,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
         conn.commit()
     print(json.dumps({
         "processed": len(rows),
+        "reviewed": reviewed,
         "promoted": promoted,
+        "challenged": challenged,
         "dry_run": bool(args.dry_run),
         "results": results,
     }, indent=2, default=str))

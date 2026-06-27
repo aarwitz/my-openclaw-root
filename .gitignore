@@ -46,6 +46,13 @@ acpx/*.log
 !workspaces/
 !workspaces/**
 
+# iOS app and mobile backend source
+!ios\ App/
+!ios\ App/**
+# never commit Robinhood session tokens or APNs device token files
+ios\ App/backend/*session*.json
+ios\ App/backend/*token*.json
+
 # Keep editor/local runtime state out.
 .vscode/
 

@@ -119,7 +119,7 @@ When in doubt, assign and add a comment explaining why.
 
 - Task Manager at `http://127.0.0.1:8000` is hosted from Dwight's containerized runtime at `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`
 - Task Manager source must not be developed or run from outside Dwight's container runtime
-- Non-Dwight agents are view-only for Task Manager state; only Dwight performs mutations and maintenance
+- Non-Dwight agents may mutate Task Manager issue state through approved API/MCP rails; only Dwight owns Task Manager maintenance and source changes
 - Do not push directly to `main`
 - Do not manipulate the TM database directly without explicit Aaron approval
 - GitHub bot: aaronclawrsl-bot

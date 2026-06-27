@@ -43,7 +43,7 @@ Default behavior:
 |-------|--------|-----------------|
 | **Resi** | EWAG/ResiLife iOS delivery, builds, tests, QA, screenshots, resilife-product | Any ewag-capture/build/test/QA or ResiLife product execution |
 | **Druck** | News research, market trends, stock/trading analysis | Any newsapi-ai, finnhub, massive, schwab, alpaca, or published-news/market-data query |
-| **Dwight** | Task Manager operations, sprint management, TM source code | Any TM story/sprint work or TM backend changes |
+| **Dwight** | Task Manager platform ownership, sprint management, TM source code | Any TM backend/frontend/source-code change or when Dwight-specific TM oversight is required |
 | **Jerry** | Platform ops, gateway config, GitHub admin, gog, orchestration, Business admin | Default — everything else |
 
 ## Skill Routing
@@ -62,8 +62,8 @@ One skill per job. Pick by intent:
 - If `gh auth status` shows any identity other than `aaronclawrsl-bot`, do not create PRs, comments, or other GitHub mutations until auth is corrected.
 - Treat wrong `gh` identity as a blocker, not as something to route around with the wrong account.
 
-**Project oversight (Jerry reads; Dwight owns TM operations):**
-- `task-manager` — sprint/backlog visibility, cross-agent status checks
+**Project oversight (Jerry can mutate TM issue state; Dwight owns TM platform/codebase):**
+- `task-manager` — sprint/backlog visibility, issue/status/comment/evidence mutations
 
 **Delegated to other agents — do not handle in Jerry's context:**
 - ewag-capture / ewag-build / ewag-test / ewag-testing-menu / ewag-visual-qa / resilife-product → **Resi**
@@ -75,7 +75,8 @@ One skill per job. Pick by intent:
 - Linux is the control plane for planning, coding, docs, Task Manager, GitHub, and operations
 - EWAG iOS build, test, screenshot, and simulator execution always runs on the iOS build node, not Linux
 - Never use "Swift is not installed on Linux" as the final blocker for EWAG validation
-- Use Task Manager at `http://127.0.0.1:8000`
+- Use Task Manager at `https://tm.lidisolutions.ai`
+- Authorized agents may mutate Task Manager issue state directly; only Task Manager codebase/runtime changes route to Dwight
 - Before resuming a non-done EWAG issue or creating a new branch, run `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
 - Do not push directly to `main`
 - Do not run destructive shell operations without explicit approval

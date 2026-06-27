@@ -261,6 +261,92 @@ def test_issue_detail_response_contains_expected_frontend_fields():
     assert isinstance(body['activity_events'], list) and len(body['activity_events']) >= 1
 
 
+def test_ready_issue_moves_to_queued_and_launches_once(monkeypatch):
+    launched_commands = []
+
+    def fake_start(command):
+        launched_commands.append(command)
+
+    monkeypatch.setattr(main, 'start_detached_launch', fake_start)
+
+    issue = create_issue(
+        assigned_to='Jerry',
+        branch='issue-1-ready',
+        repo_slug='aarwitz/Task-Manager',
+        acceptance_criteria='Ship it',
+        auto_launch_enabled=True,
+    )
+    updated = client.patch(
+        f"/api/issues/{issue['id']}",
+        json={'status': 'in_progress', 'updated_by': 'Jerry'},
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body['auto_launch_enabled'] is True
+    assert body['launch_state'] == 'queued'
+    assert body['last_launch_at'] is not None
+    assert len(launched_commands) == 1
+    assert '--issue-id' in launched_commands[0]
+    assert '--execute' in launched_commands[0]
+
+
+def test_launch_result_endpoint_marks_issue_and_adds_comment(monkeypatch):
+    monkeypatch.setattr(main, 'start_detached_launch', lambda command: None)
+
+    issue = create_issue(
+        assigned_to='Jerry',
+        branch='issue-2-ready',
+        repo_slug='aarwitz/Task-Manager',
+        acceptance_criteria='Ship it',
+        auto_launch_enabled=True,
+    )
+    updated = client.patch(
+        f"/api/issues/{issue['id']}",
+        json={'status': 'in_progress', 'updated_by': 'Jerry'},
+    )
+    assert updated.status_code == 200, updated.text
+    claim_token = main.SessionLocal().query(models.Issue).filter(models.Issue.id == issue['id']).first().launch_claim_token
+    assert claim_token
+
+    result = client.post(
+        f"/api/issues/{issue['id']}/launch-result",
+        json={
+            'launch_state': 'launched',
+            'launch_error': None,
+            'comment_content': 'Agent started work and posted evidence.',
+            'username': 'Dwight',
+            'claim_token': claim_token,
+        },
+    )
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body['launch_state'] == 'launched'
+    assert body['launch_error'] is None
+    assert any(comment['content'] == 'Agent started work and posted evidence.' for comment in body['comments'])
+
+
+def test_sprint_response_includes_fixed_humans_and_working_agents():
+    sprint = create_sprint('Roster Sprint')
+    issue = create_issue(sprint_id=sprint['id'], assigned_to='Jerry')
+    assert issue['assigned_to'] == 'Jerry'
+
+    response = client.get(f"/api/sprints/{sprint['id']}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['human_members'] == ['Aaron', 'Taylor']
+    assert body['working_agent_members'] == ['Jerry']
+
+
+def test_aaron_can_access_restricted_sprint_even_when_not_listed():
+    sprint = client.post('/api/sprints', json={'name': 'Restricted Sprint', 'allowed_users': ['Jerry']}).json()
+
+    aaron = client.get(f"/api/sprints/{sprint['id']}", headers={'X-TM-User': 'Aaron'})
+    assert aaron.status_code == 200, aaron.text
+
+    resi = client.get(f"/api/sprints/{sprint['id']}", headers={'X-TM-User': 'Resi'})
+    assert resi.status_code == 403
+
+
 def test_lidi_parallel_approvals_execute_side_effect_once():
     draft = client.post('/api/lidi/actions/draft', json={
         'action_type': 'create_issue',

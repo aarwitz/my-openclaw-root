@@ -31,7 +31,7 @@ Jerry is the outermost layer agent: least specialized, most generalized, and exp
 
 ## RSL Infrastructure
 
-- **Task Manager** at `http://127.0.0.1:8000` — escalate story/sprint work to Dwight; Jerry has read access for oversight
+- **Task Manager** at `https://tm.lidisolutions.ai` — escalate story/sprint work to Dwight; Jerry has read access for oversight
 - **Lidi Solutions repo** at `/home/aaron/.openclaw/workspace/lidi-solutions` — primary business codebase for Redstone Laboratories LLC (DBA Lidi Solutions)
 - **Mac build node** (`ios-build-node`) — iOS execution owned by Resi; see `EWAG_INFRA.md`
 - **GitHub** via `aaronclawrsl-bot`

@@ -48,11 +48,11 @@ c="$(bash "$ROUTER" --scope high --expected-files 12 --risk high --acp-available
 assert_contains "$c" '"lane":"codex-subagent"' "Router: heavy tag -> codex-subagent (ACP disabled)"
 assert_contains "$c" '"fallbackLane":"inline"' "Router: codex-subagent fallback -> inline"
 
-d="$(bash "$LAUNCHER" --task-id TST-100 --owner-agent main --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
+d="$(bash "$LAUNCHER" --task-id TST-100 --owner-agent jerry --repo "$HOME/.openclaw" --goal "low scope" --scope low --expected-files 1 --risk low --acp-available false --tag-heavy false)"
 assert_contains "$d" 'selected=inline' "Launcher: inline dry-run decision"
 
 
-e="$(bash "$LAUNCHER" --task-id TST-101 --owner-agent main --repo "$HOME/.openclaw" --goal "medium scope" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
+e="$(bash "$LAUNCHER" --task-id TST-101 --owner-agent jerry --repo "$HOME/.openclaw" --goal "medium scope" --scope medium --expected-files 2 --risk medium --acp-available false --tag-heavy false)"
 assert_contains "$e" 'selected=codex-subagent' "Launcher: codex-subagent dry-run decision"
 assert_contains "$e" 'spawnAgentUsed' "Launcher: codex-subagent contract hint present"
 

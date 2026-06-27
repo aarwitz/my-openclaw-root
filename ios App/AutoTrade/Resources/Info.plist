@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>AutoTrade</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.lidisolutions.autotrade</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+    <!-- Push notifications entitlement (add aps-environment to Entitlements file) -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Authenticate to view your trading account</string>
+    <!-- Allow local network connections to the AutoTrade server -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>AutoTrade connects to your personal trading server on your local network.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- Remove this in production; use HTTPS via Tailscale -->
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

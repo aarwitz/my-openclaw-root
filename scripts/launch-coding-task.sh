@@ -11,7 +11,7 @@ RUNS_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/tmp/coding-lane-runs"
 source "$SCRIPT_DIR/lib/repo-boundary-policy.sh"
 
 orchestrator_agent="dwight"
-coder_codex_agent="main"
+coder_codex_agent="jerry"
 owner_agent=""
 acp_agent="disabled"
 task_id=""
@@ -93,8 +93,8 @@ Routing inputs:
 Execution options:
   --acceptance <text>            Optional acceptance criteria.
   --orchestrator-agent <id>      Default: dwight
-  --owner-agent <id>             Required assignee (for example: main)
-  --coder-codex-agent <id>       Default: main (Jerry)
+  --owner-agent <id>             Required assignee (for example: jerry)
+  --coder-codex-agent <id>       Default: jerry (Jerry)
   --acp-agent <id>               Compatibility flag only; ignored (ACP disabled).
   --timeout <seconds>            Reserved timeout hint. Default: 1800
   --agent-timeout <seconds>      openclaw agent timeout. Default: 300
@@ -111,7 +111,7 @@ Policy:
 Examples:
   launch-coding-task.sh \
     --task-id TM-421 \
-    --owner-agent main \
+    --owner-agent jerry \
     --repo /home/aaron/repos/lidi-task-manager \
     --goal "Fix OAuth callback race" \
     --acceptance "All auth tests green" \
@@ -119,7 +119,7 @@ Examples:
 
   launch-coding-task.sh \
     --task-id TM-422 \
-    --owner-agent main \
+    --owner-agent jerry \
     --repo /home/aaron/repos/lidi-task-manager \
     --goal "Typo fix in CLI output" \
     --scope low --expected-files 1 --risk low --acp-available false \

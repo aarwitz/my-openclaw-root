@@ -6,7 +6,7 @@
         "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
       ],
       "env": {
-        "TM_BASE_URL": "http://127.0.0.1:8000",
+        "TM_BASE_URL": "http://taskmanager:8000",
         "TM_DEFAULT_ACTOR": "Dwight"
       }
     }

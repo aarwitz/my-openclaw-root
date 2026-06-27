@@ -145,7 +145,7 @@
     },
     "list": [
       {
-        "id": "main",
+        "id": "jerry",
         "workspace": "/home/aaron/.openclaw/workspace",
         "model": "openai/gpt-5.4",
         "tools": {
@@ -377,6 +377,35 @@
         }
       },
       {
+        "id": "Montra-PM",
+        "workspace": "/home/aaron/.openclaw/workspaces/montraassistant",
+        "model": "openai/gpt-5.4",
+        "tools": {
+          "profile": "full",
+          "allow": [
+            "message",
+            "group:messaging"
+          ],
+          "exec": {
+            "host": "gateway",
+            "security": "allowlist",
+            "ask": "off"
+          }
+        },
+        "skills": [
+          "github-ssh",
+          "task-manager"
+        ],
+        "subagents": {
+          "delegationMode": "suggest",
+          "allowAgents": []
+        },
+        "identity": {
+          "name": "Montra-PM",
+          "emoji": "\ud83d\udcf1"
+        }
+      },
+      {
         "id": "overseer",
         "workspace": "/home/aaron/.openclaw/workspaces/overseer",
         "model": "openai/gpt-5.4",
@@ -444,7 +473,7 @@
         "channel": "telegram",
         "accountId": "jerry"
       },
-      "agentId": "main"
+      "agentId": "jerry"
     },
     {
       "match": {
@@ -771,7 +800,7 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:18789",

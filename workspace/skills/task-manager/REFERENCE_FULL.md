@@ -1,19 +1,22 @@
 ---
 name: task-manager
-description: Manage the RSL Task Manager at http://127.0.0.1:8000 for story/sprint visibility and Dwight-routed execution. Task Manager runtime and source are owned by Dwight in /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager. Non-Dwight agents are view-only unless explicitly delegated by Dwight. Do not use for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (EWAG value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for EWAG business context.
+description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai for story/sprint visibility and direct issue mutations by authorized agents. Task Manager runtime is hosted; Dwight's local workspace copy remains at /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager for development/reference. Use this skill for Task Manager issues, comments, sprint assignment, and evidence uploads. Do not use it for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (EWAG value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for EWAG business context.
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
 # RSL Task Manager
 
-The Task Manager is RSL's project management system running on the same Linux host as Jerry.
+The Task Manager is RSL's hosted project management system.
 
 Host mapping for Jerry runtime:
-- `http://127.0.0.1:8000` = local Task Manager on the RSL machine (preferred for local commands/scripts)
-- `http://localhost:8000` = same local service
-- `http://rsl:8000` = host alias of the same service (do not use in curl commands; prefer `127.0.0.1`)
+- `https://tm.lidisolutions.ai` = canonical production Task Manager
+- `http://127.0.0.1:8000`, `http://localhost:8000`, `http://rsl:8000` = retired local lane; do not use
 
-Dwight is the official Task Manager orchestrator/developer. Jerry uses this skill for coordination support, cross-agent visibility, and evidence logging when needed.
+Dwight owns the Task Manager product/runtime/codebase. Authorized agents may mutate Task Manager issue state directly through the hosted API/MCP for normal execution work: create issues, update status, add comments, assign sprints, and upload evidence.
+
+Boundary:
+- Use this skill for Task Manager data mutations.
+- Use `task-manager-maintainer` for Task Manager code changes.
 
 Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAPI + SQLite + vanilla JS frontend).
 
@@ -70,17 +73,17 @@ The app exists to make EWAG's human wellness service feel like a **private fitne
 
 ## API Reference
 
-Canonical local base URL for Jerry: `http://127.0.0.1:8000`
+Canonical base URL for Jerry: `https://tm.lidisolutions.ai`
 
-Compatibility aliases: `http://localhost:8000`, `http://rsl:8000`
+Retired aliases: `http://127.0.0.1:8000`, `http://localhost:8000`, `http://rsl:8000`
 
-Rule: In commands and scripts, always use `http://127.0.0.1:8000` to avoid environment-dependent hostname resolution.
+Rule: In commands and scripts, always use `https://tm.lidisolutions.ai`.
 
 ### Issues (Stories/Tasks)
 
 **Create issue:**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/issues \
+curl -s -X POST https://tm.lidisolutions.ai/api/issues \
   -H "Content-Type: application/json" \
   -d '{
     "title": "[Coaching] Fix button text visibility",
@@ -93,19 +96,19 @@ curl -s -X POST http://127.0.0.1:8000/api/issues \
 
 **Get issue:**
 ```bash
-curl -s http://127.0.0.1:8000/api/issues/43
+curl -s https://tm.lidisolutions.ai/api/issues/43
 ```
 
 **Update issue (status, assignment, title, description, branch):**
 ```bash
-curl -s -X PATCH http://127.0.0.1:8000/api/issues/43 \
+curl -s -X PATCH https://tm.lidisolutions.ai/api/issues/43 \
   -H "Content-Type: application/json" \
   -d '{"status": "done", "assigned_to": "Taylor"}'
 ```
 
 **Set branch on existing issue:**
 ```bash
-curl -s -X PATCH http://127.0.0.1:8000/api/issues/43 \
+curl -s -X PATCH https://tm.lidisolutions.ai/api/issues/43 \
   -H "Content-Type: application/json" \
   -d '{"branch": "issue-43-coaching-button-fix"}'
 ```
@@ -114,34 +117,34 @@ Valid statuses: `to_do`, `in_progress`, `in_review`, `done`
 **List issues (with filters):**
 ```bash
 # All issues in active sprint
-curl -s "http://127.0.0.1:8000/api/issues?sprint_id=2"
+curl -s "https://tm.lidisolutions.ai/api/issues?sprint_id=2"
 
 # Backlog only
-curl -s "http://127.0.0.1:8000/api/issues?in_backlog=true"
+curl -s "https://tm.lidisolutions.ai/api/issues?in_backlog=true"
 ```
 
 **Search issues:**
 ```bash
 # By text
-curl -s "http://127.0.0.1:8000/api/issues/search?q=rewards&search_in=all"
+curl -s "https://tm.lidisolutions.ai/api/issues/search?q=rewards&search_in=all"
 
 # By ID
-curl -s "http://127.0.0.1:8000/api/issues/search?q=%2343&search_in=all"
+curl -s "https://tm.lidisolutions.ai/api/issues/search?q=%2343&search_in=all"
 
 # With filters
-curl -s "http://127.0.0.1:8000/api/issues/search?q=coaching&assigned_to=Jerry&status=in_progress"
+curl -s "https://tm.lidisolutions.ai/api/issues/search?q=coaching&assigned_to=Jerry&status=in_progress"
 ```
 
 **Assign issue to sprint:**
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/issues/43/assign-to-sprint?sprint_id=2"
+curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/assign-to-sprint?sprint_id=2"
 ```
 
 ### Comments
 
 **Add comment to issue:**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/issues/43/comments \
+curl -s -X POST https://tm.lidisolutions.ai/api/issues/43/comments \
   -H "Content-Type: application/json" \
   -d '{
     "content": "Fixed button contrast. Screenshot attached. Build passes, all 5 tab tests green.",
@@ -153,19 +156,19 @@ curl -s -X POST http://127.0.0.1:8000/api/issues/43/comments \
 
 **Upload image attached to the issue (default issue-level evidence):**
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/issues/43/images?source_type=issue&uploaded_by=Jerry" \
+curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/images?source_type=issue&uploaded_by=Jerry" \
   -F "file=@/home/aaron/.openclaw/media/inbound/rewards-screenshot.png"
 ```
 
 **Upload image attached to issue description:**
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/issues/43/images?source_type=description&uploaded_by=Jerry" \
+curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/images?source_type=description&uploaded_by=Jerry" \
   -F "file=@/home/aaron/.openclaw/media/inbound/description-context.png"
 ```
 
 **Upload image attached to a specific comment:**
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/issues/43/images?source_type=comment&comment_id=118&uploaded_by=Jerry" \
+curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/images?source_type=comment&comment_id=118&uploaded_by=Jerry" \
   -F "file=@/home/aaron/.openclaw/media/inbound/comment-evidence.png"
 ```
 
@@ -190,50 +193,50 @@ Issue payload notes:
 
 **Delete image:**
 ```bash
-curl -s -X DELETE http://127.0.0.1:8000/api/issues/43/images/9
+curl -s -X DELETE https://tm.lidisolutions.ai/api/issues/43/images/9
 ```
 
 ### Sprints
 
 **Create sprint:**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/sprints \
+curl -s -X POST https://tm.lidisolutions.ai/api/sprints \
   -H "Content-Type: application/json" \
   -d '{"name": "ResiLife Sprint 3 — Coaching Polish"}'
 ```
 
 **List sprints:**
 ```bash
-curl -s http://127.0.0.1:8000/api/sprints
+curl -s https://tm.lidisolutions.ai/api/sprints
 ```
 
 **Get active sprint:**
 ```bash
-curl -s http://127.0.0.1:8000/api/sprints/active
+curl -s https://tm.lidisolutions.ai/api/sprints/active
 ```
 
 **Start sprint (deactivates all others):**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/sprints/3/start
+curl -s -X POST https://tm.lidisolutions.ai/api/sprints/3/start
 ```
 
 **End sprint (moves issues to backlog):**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/sprints/2/end
+curl -s -X POST https://tm.lidisolutions.ai/api/sprints/2/end
 ```
 
 ### Users
 
 **Login/create user:**
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/users/login \
+curl -s -X POST https://tm.lidisolutions.ai/api/users/login \
   -H "Content-Type: application/json" \
   -d '{"username": "Jerry"}'
 ```
 
 **List users:**
 ```bash
-curl -s http://127.0.0.1:8000/api/users
+curl -s https://tm.lidisolutions.ai/api/users
 ```
 
 ## Story Writing Standards
@@ -268,13 +271,13 @@ This is a hard rule for Jerry:
 Example workflow:
 ```bash
 # Create story
-ISSUE=$(curl -s -X POST http://127.0.0.1:8000/api/issues \
+ISSUE=$(curl -s -X POST https://tm.lidisolutions.ai/api/issues \
   -H "Content-Type: application/json" \
   -d '{"title": "[Coaching] Wire booking endpoint", "description": "...", "created_by": "Jerry", "assigned_to": "Jerry"}' | jq -r '.id')
 
 # Set branch
 BRANCH="issue-${ISSUE}-coaching-booking-wire"
-curl -s -X PATCH "http://127.0.0.1:8000/api/issues/${ISSUE}" \
+curl -s -X PATCH "https://tm.lidisolutions.ai/api/issues/${ISSUE}" \
   -H "Content-Type: application/json" \
   -d "{\"branch\": \"${BRANCH}\"}"
 
@@ -328,11 +331,11 @@ When making progress on a story, Jerry should:
    ```bash
    # After capturing screenshot to /home/aaron/.openclaw/media/inbound/
    # Issue-level image:
-   curl -s -X POST "http://127.0.0.1:8000/api/issues/43/images?source_type=issue&uploaded_by=Jerry" \
+   curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/images?source_type=issue&uploaded_by=Jerry" \
      -F "file=@/home/aaron/.openclaw/media/inbound/coaching-screenshot.png"
 
    # If tied to a specific comment, pass source_type=comment and comment_id:
-   curl -s -X POST "http://127.0.0.1:8000/api/issues/43/images?source_type=comment&comment_id=118&uploaded_by=Jerry" \
+   curl -s -X POST "https://tm.lidisolutions.ai/api/issues/43/images?source_type=comment&comment_id=118&uploaded_by=Jerry" \
      -F "file=@/home/aaron/.openclaw/media/inbound/coaching-screenshot.png"
    ```
 6. **Move to in_review** when PR is ready

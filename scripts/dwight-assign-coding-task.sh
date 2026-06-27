@@ -31,7 +31,7 @@ Usage:
   dwight-assign-coding-task.sh --owner-agent <id> --task-id <id> --repo <abs-path> --goal <text> [options]
 
 Required:
-  --owner-agent <id>      OpenClaw owner agent (for example: resi, main)
+  --owner-agent <id>      OpenClaw owner agent (for example: resi, jerry)
   --task-id <id>          Stable task identifier
   --repo <abs-path>       Absolute repo path
   --goal <text>           Task objective

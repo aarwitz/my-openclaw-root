@@ -4,11 +4,10 @@ if (!username) {
 }
 
 document.getElementById('currentUser').textContent = username;
-const { escapeHtml, formatStatus, fetchJson, authenticatedFetch, buildSprintSelectOptions, fetchSprints, fetchAssignableUsers } = window.TM_SHARED;
+const { escapeHtml, formatStatus, fetchJson, buildSprintSelectOptions, fetchSprints, fetchAssignableUsers } = window.TM_SHARED;
 let currentIssue = null;
 let issueSprints = [];
 let assignableUsers = [];
-let createIssueSubmitInFlight = false;
 const DEFAULT_GITHUB_REPO = 'aarwitz/Task-Manager';
 const urlParams = new URLSearchParams(window.location.search);
 const issueId = urlParams.get('id');
@@ -209,13 +208,7 @@ function renderPlanning(issue) {
 }
 
 async function populateIssueSprintOptions() {
-    const { sprints } = await fetchSprints();
-    let activeSprint = null;
-    try {
-        activeSprint = await fetchJson('/api/sprints/active');
-    } catch (error) {
-        activeSprint = null;
-    }
+    const { sprints, activeSprint } = await fetchSprints().then(async ({ sprints, sprintMap }) => ({ sprints, activeSprint: await fetch('/api/sprints/active').then(r => r.ok ? r.json() : null) }));
     issueSprints = sprints;
     newIssueSprintSelect.innerHTML = buildSprintSelectOptions(sprints, activeSprint?.id ?? null, false, true);
     if (activeSprint) newIssueSprintSelect.value = String(activeSprint.id);
@@ -243,7 +236,7 @@ async function uploadIssueImages(issueId, files, sourceType, commentId = null) {
         if (commentId !== null) params.set('comment_id', String(commentId));
         const formData = new FormData();
         formData.append('file', file);
-        return authenticatedFetch(`/api/issues/${issueId}/images?${params.toString()}`, { method: 'POST', body: formData });
+        return fetch(`/api/issues/${issueId}/images?${params.toString()}`, { method: 'POST', body: formData });
     });
     const results = await Promise.all(uploads);
     if (results.some((result) => !result.ok)) throw new Error('One or more image uploads failed');
@@ -251,7 +244,6 @@ async function uploadIssueImages(issueId, files, sourceType, commentId = null) {
 
 document.getElementById('createIssueForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (createIssueSubmitInFlight) return;
     const assignedTo = resolveAssignableUser(newIssueAssignedToInput?.value, { allowBlank: true });
     const payload = {
         title: document.getElementById('newIssueTitle').value,
@@ -266,14 +258,7 @@ document.getElementById('createIssueForm').addEventListener('submit', async (e) 
         story_points: document.getElementById('newIssueStoryPoints').value ? Number(document.getElementById('newIssueStoryPoints').value) : null,
         blocked_reason: document.getElementById('newIssueBlockedReason').value.trim() || null
     };
-    const submitButton = e.target.querySelector('button[type="submit"]');
-    const originalLabel = submitButton?.textContent || '';
     try {
-        createIssueSubmitInFlight = true;
-        if (submitButton) {
-            submitButton.disabled = true;
-            submitButton.textContent = 'Creating...';
-        }
         if (newIssueAssignedToInput?.value && assignedTo === null) {
             throw new Error(`Unknown assignee. Choose one of: ${assignableUsers.join(', ')}`);
         }
@@ -291,12 +276,6 @@ document.getElementById('createIssueForm').addEventListener('submit', async (e) 
     } catch (error) {
         console.error('Error:', error);
         alert(error.message || 'An error occurred');
-    } finally {
-        createIssueSubmitInFlight = false;
-        if (submitButton) {
-            submitButton.disabled = false;
-            submitButton.textContent = originalLabel;
-        }
     }
 });
 

@@ -6,7 +6,7 @@ CRED_FILE="/home/aaron/.openclaw/credentials/github_credentials.json"
 
 usage() {
   cat <<'EOF'
-Usage: start-github-mcp-official.sh --agent <main|resi|dwight|druck>
+Usage: start-github-mcp-official.sh --agent <jerry|main|resi|dwight|druck>
 
 Starts official GitHub MCP server (stdio) with deterministic bot token mapping.
 EOF
@@ -43,7 +43,7 @@ if [[ ! -f "$CRED_FILE" ]]; then
 fi
 
 case "$agent" in
-  main|dwight|druck|resi)
+  jerry|main|dwight|druck|resi)
     profile="rsl-bot"
     ;;
   *)

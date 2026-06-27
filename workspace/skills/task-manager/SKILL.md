@@ -1,6 +1,6 @@
 ---
 name: task-manager
-description: Manage the RSL Task Manager at http://127.0.0.1:8000 (issues, sprints, comments, assignments, evidence uploads). Use for sprint/backlog execution, not Task Manager source-code changes.
+description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai (issues, sprints, comments, assignments, evidence uploads). Use for sprint/backlog execution, not Task Manager source-code changes.
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
@@ -15,7 +15,7 @@ Do not use this skill for Task Manager codebase changes. For backend/frontend/sc
 Prefer structured tool/MCP actions when available for issues/sprints/comments/search.
 Fallback to HTTP API calls only when structured tools are unavailable.
 
-Canonical base URL: `http://127.0.0.1:8000`
+Canonical base URL: `https://tm.lidisolutions.ai`
 
 ## Non-Negotiable Story Gates
 

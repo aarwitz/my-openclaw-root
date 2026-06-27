@@ -30,23 +30,14 @@ Credential principles:
 
 ## 1) Core truth
 
-There are two separate bot lanes.
+There is one operational Task Manager lane now.
 
-RSL lane:
-- Bots: Jerry, Dwight, Resi, Druck, trading bots
-- Task Manager: http://127.0.0.1:8000
-- Primary repo: /home/aaron/repos/Task-Manager
-- Must not deploy EWAG/Lidi bots
-- Must not interact with /home/aaron/repos/lidi-task-manager
-
-EWAG/Lidi lane:
-- Bots: EWAG fleet + interns (Dhuri, Purva Pravin; Patel, Bhargav; Wen, Yongqian; Nguyen, Doan Duy Minh)
+Hosted lane:
+- Bots: Jerry, Dwight, Resi, Druck, trading bots, EWAG/Lidi fleet
 - Task Manager: https://tm.lidisolutions.ai
-- Allowed repos only:
-  - /home/aaron/repos/lidi-task-manager
-  - /home/aaron/repos/EWAG-dev-iosApp
-- Must not deploy RSL bots
-- Must not interact with /home/aaron/repos/Task-Manager
+- Hosted repo: `aarwitz/lidi-task-manager`
+- Dwight workspace copy may still exist locally for development/reference, but the hosted runtime is the source-of-truth path
+- Retired local lane references (`http://127.0.0.1:8000`, `http://rsl:8000`) must not be used as the primary Task Manager path
 
 Human exception:
 - Aaron and Taylor are humans and can operate across both lanes when needed.
@@ -54,10 +45,8 @@ Human exception:
 
 ## 2) Hard rules (no ambiguity)
 
-- RSL launcher files must not contain EWAG repo allowlists.
-- EWAG launcher files must not contain RSL repo allowlists.
-- RSL launchers must point to RSL Task Manager.
-- EWAG launchers must point to Lidi Task Manager.
+- Launchers and automation must point to `https://tm.lidisolutions.ai`.
+- Retired local Task Manager lane references must be removed from active configs as they are found.
 - If a lane violation is found, stop feature work and fix isolation first.
 
 Temporary enforcement mode:

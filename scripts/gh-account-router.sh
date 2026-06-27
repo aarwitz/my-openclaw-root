@@ -6,7 +6,7 @@ CRED_FILE="/home/aaron/.openclaw/credentials/github_credentials.json"
 
 usage() {
   cat <<'EOF'
-Usage: gh-account-router.sh [--agent <main|resi|dwight|druck>] <gh args...>
+Usage: gh-account-router.sh [--agent <jerry|main|resi|dwight|druck>] <gh args...>
 
 Routes gh CLI auth deterministically by agent:
   - all supported agents -> rsl-bot profile
@@ -15,7 +15,7 @@ You can also set OPENCLAW_AGENT_ID, OPENCLAW_AGENT, or AGENT_ID.
 EOF
 }
 
-agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-main}}}"
+agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-jerry}}}"
 if [[ "${1:-}" == "--agent" ]]; then
   [[ $# -ge 3 ]] || {
     usage

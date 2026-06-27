@@ -4,12 +4,13 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: gog-account-router.sh [--agent <main|resi|dwight|druck>] [--print-account] <gog args...>
+Usage: gog-account-router.sh [--agent <jerry|main|resi|dwight|druck>] [--print-account] <gog args...>
 
 Routes gog account deterministically by agent and enforces non-interactive mode.
 
 Account mapping (override via env vars):
-  - main   -> GOG_ACCOUNT_MAIN   (default: aaronclawrsl@gmail.com)
+  - jerry  -> GOG_ACCOUNT_JERRY  (default: aaronclawrsl@gmail.com)
+  - main   -> compatibility alias for jerry
   - resi   -> GOG_ACCOUNT_RESI   (default: aaronclawrsl@gmail.com)
   - dwight -> GOG_ACCOUNT_DWIGHT (default: aaronclawrsl@gmail.com)
   - druck  -> GOG_ACCOUNT_DRUCK  (default: aaronclawrsl@gmail.com)
@@ -18,7 +19,7 @@ You can also set OPENCLAW_AGENT_ID, OPENCLAW_AGENT, or AGENT_ID.
 EOF
 }
 
-agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-main}}}"
+agent="${OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT:-${AGENT_ID:-jerry}}}"
 print_account=0
 
 while [[ $# -gt 0 ]]; do
@@ -52,7 +53,7 @@ if ! command -v gog >/dev/null 2>&1; then
 fi
 
 case "$agent" in
-  main) account="${GOG_ACCOUNT_MAIN:-aaronclawrsl@gmail.com}" ;;
+  jerry|main) account="${GOG_ACCOUNT_JERRY:-${GOG_ACCOUNT_MAIN:-aaronclawrsl@gmail.com}}" ;;
   resi) account="${GOG_ACCOUNT_RESI:-aaronclawrsl@gmail.com}" ;;
   dwight) account="${GOG_ACCOUNT_DWIGHT:-aaronclawrsl@gmail.com}" ;;
   druck) account="${GOG_ACCOUNT_DRUCK:-aaronclawrsl@gmail.com}" ;;

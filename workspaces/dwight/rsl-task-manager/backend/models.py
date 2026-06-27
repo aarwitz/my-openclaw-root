@@ -31,6 +31,13 @@ class Issue(Base):
     repo_slug = Column(String, nullable=True)
     story_points = Column(Integer, nullable=True)
     blocked_reason = Column(Text, nullable=True)
+    auto_launch_enabled = Column(Boolean, default=False, nullable=False)
+    launch_state = Column(String, nullable=True)
+    launch_error = Column(Text, nullable=True)
+    last_launch_at = Column(DateTime, nullable=True)
+    launch_signature = Column(Text, nullable=True)
+    launch_claim_token = Column(String, nullable=True)
+    launch_claimed_at = Column(DateTime, nullable=True)
     
     comments = relationship("Comment", back_populates="issue", cascade="all, delete-orphan")
     images = relationship("IssueImage", back_populates="issue", cascade="all, delete-orphan")

@@ -2,7 +2,7 @@
 
 Minimal MCP server for RSL Task Manager.
 
-This server wraps the existing Task Manager API at `http://127.0.0.1:8000` and exposes stable MCP tools for orchestration and issue tracking.
+This server wraps the Task Manager API and exposes stable MCP tools for orchestration and issue tracking.
 
 ## Why this exists
 
@@ -20,6 +20,8 @@ This server wraps the existing Task Manager API at `http://127.0.0.1:8000` and e
 - `issue_update`
 - `issue_assign_to_sprint`
 - `issue_add_comment`
+- `issue_upload_image`
+- `issue_delete_image`
 - `sprint_list`
 - `sprint_active`
 - `task_assign`
@@ -53,9 +55,8 @@ Use the shared config in `mcp-client.all-agents.json` to expose Task Manager MCP
 
 Write policy:
 
-- `task-manager-dwight` is the only writable profile (`TM_READ_ONLY=false`)
-- all other profiles are view-only (`TM_READ_ONLY=true`)
-- write attempts from read-only profiles fail fast with an explicit error
+- all agent profiles in `mcp-client.all-agents.json` are writable (`TM_READ_ONLY=false`)
+- write attempts from any intentionally read-only profile fail fast with an explicit error
 
 File:
 
@@ -67,7 +68,7 @@ Note: native OpenClaw chat flows in `openclaw.json` currently run through skills
 
 Environment variables:
 
-- `TM_BASE_URL` (default: `http://127.0.0.1:8000`)
+- `TM_BASE_URL` (default inside the gateway container: `http://taskmanager:8000`)
 - `TM_TIMEOUT_SECONDS` (default: `15`)
 - `TM_DEFAULT_ACTOR` (default: `Dwight`)
 - `TM_READ_ONLY` (`true|false`, default `false`)
@@ -76,6 +77,11 @@ Environment variables:
 ## Maintenance workflow (when Task Manager changes)
 
 Treat MCP as a compatibility layer with explicit checks.
+
+Default runtime note:
+
+- Agents running inside the OpenClaw gateway container should use the internal Docker-network origin `http://taskmanager:8000`.
+- `https://tm.lidisolutions.ai` is the browser-facing public host and may enforce sign-in and edge filtering that do not apply to internal agent traffic.
 
 1. Make Task Manager backend change in `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`.
 2. Run contract check:
@@ -111,6 +117,8 @@ Current required endpoints:
 - `GET /api/issues/search`
 - `POST /api/issues/{issue_id}/assign-to-sprint`
 - `POST /api/issues/{issue_id}/comments`
+- `POST /api/issues/{issue_id}/images`
+- `DELETE /api/issues/{issue_id}/images/{image_id}`
 - `GET /api/sprints`
 - `POST /api/sprints`
 - `GET /api/sprints/active`

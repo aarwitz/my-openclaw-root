@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 import uuid
@@ -47,6 +48,7 @@ DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 from connectors.alpaca import ConnectorError, get_account  # noqa: E402
+from connectors import eventregistry  # noqa: E402
 import risk_model  # noqa: E402  (correlation-cluster cap; degrades gracefully)
 
 # --- risk limits (single source of truth) ----------------------------------
@@ -58,6 +60,42 @@ DAILY_DD_HALT_PCT = 0.03   # halt new risk if day P&L <= -3% of equity
 # corr>=0.70) can't exceed this % of equity combined — the "8 names, 1 bet" guard.
 MAX_CLUSTER_PCT = risk_model.MAX_CLUSTER_PCT  # 0.25
 EXPERIMENT_DEFAULT = "world_model_v1"
+OPPOSITION_LOOKBACK_DAYS = 1
+OPPOSITION_CACHE_H = 0.05
+OPPOSITION_ARTICLE_LIMIT = 12
+COMPANY_STOPWORDS = {
+    "long", "short", "bullish", "bearish", "q1", "q2", "q3", "q4", "fy",
+    "fiscal", "reported", "reports", "results", "earnings", "call", "inc",
+    "corp", "corporation", "company", "co", "plc", "ltd", "sa", "ag",
+}
+ARTICLE_TOKEN_STOPWORDS = COMPANY_STOPWORDS | {
+    "stock", "shares", "analyst", "rating", "target", "price", "revenue",
+    "growth", "concerns", "maintains", "adjusts", "after", "with", "from",
+    "looks", "beaten", "broken", "setup", "cleaner", "noisy", "through",
+}
+ADVERSE_TITLE_PATTERNS = tuple(
+    re.compile(p)
+    for p in (
+        r"\bdowngrad\w*\b",
+        r"\bunderweight\b",
+        r"\bmaintains?\s+underweight\b",
+        r"\bmaintains?\s+sell\b",
+        r"\b(cuts?|lowers?|lowered)\b.{0,30}\b(price target|target|estimates?)\b",
+        r"\b(revenue|growth|margin|guidance)\s+concerns?\b",
+        r"\bslower\s+growth\b",
+        r"\bweak\s+guidance\b",
+        r"\bguidance\s+cut\b",
+        r"\bearnings\s+miss\b",
+        r"\brevenue\s+miss\b",
+        r"\bprobe\b",
+        r"\binvestigation\b",
+        r"\brecall\b",
+        r"\bfraud\b",
+        r"\blawsuit\b",
+        r"\bdelay\b",
+        r"\bwarning\b",
+    )
+)
 
 EXIT_OK = 0
 EXIT_FAIL_LOUD = 2
@@ -77,6 +115,204 @@ def _connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _norm_text(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _title_has_target(title: str, ticker: str, queries: list[str]) -> bool:
+    title_norm = _norm_text(title)
+    if not title_norm:
+        return False
+    if ticker and re.search(rf"\b{re.escape(ticker.lower())}\b", title_norm):
+        return True
+    return any(q and q in title_norm for q in queries if len(q) >= 3)
+
+
+def _extract_company_queries(ticker: str, thesis_summary: str | None, evidence_rows: list[sqlite3.Row]) -> list[str]:
+    queries = [ticker.lower()]
+    patterns = [
+        thesis_summary or "",
+        *[((row["source"] or "") + " " + (row["indicator"] or "")) for row in evidence_rows],
+    ]
+    for text in patterns:
+        for match in re.finditer(r"\b([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,2})\b", text):
+            phrase = match.group(1).strip()
+            norm = _norm_text(phrase)
+            if not norm or norm == ticker.lower():
+                continue
+            words = [w for w in norm.split() if w and w not in COMPANY_STOPWORDS]
+            if not words:
+                continue
+            candidate = " ".join(words[:3])
+            if candidate not in queries:
+                queries.append(candidate)
+            break
+        if len(queries) >= 3:
+            break
+    return queries[:3]
+
+
+def _article_tokens(title: str, ticker: str, queries: list[str]) -> set[str]:
+    ignore = {ticker.lower()}
+    for q in queries:
+        ignore.update(q.split())
+    return {
+        tok for tok in _norm_text(title).split()
+        if len(tok) >= 5 and tok not in ARTICLE_TOKEN_STOPWORDS and tok not in ignore
+    }
+
+
+def _is_materially_adverse_article(article: dict, ticker: str, queries: list[str], same_day: str) -> bool:
+    if article.get("date") != same_day:
+        return False
+    title = article.get("title") or ""
+    if not _title_has_target(title, ticker, queries):
+        return False
+    title_norm = _norm_text(title)
+    return any(p.search(title_norm) for p in ADVERSE_TITLE_PATTERNS)
+
+
+def _load_hypothesis_context(conn, hypothesis_id: str, intent_id: str) -> tuple[sqlite3.Row | None, list[sqlite3.Row], list[sqlite3.Row]]:
+    hypo = conn.execute(
+        "SELECT id, thesis_summary, rationale_concise FROM hypotheses WHERE id=?",
+        (hypothesis_id,),
+    ).fetchone()
+    evidence = conn.execute(
+        "SELECT id, indicator, value, source, source_url, retrieved_at FROM hypothesis_evidence "
+        "WHERE hypothesis_id=? ORDER BY retrieved_at DESC",
+        (hypothesis_id,),
+    ).fetchall()
+    reviews = conn.execute(
+        "SELECT target_type, target_id, reviewed_at, all_challenges_addressed, challenges_json "
+        "FROM critic_reviews WHERE target_id IN (?, ?) ORDER BY reviewed_at DESC",
+        (hypothesis_id, intent_id),
+    ).fetchall()
+    return hypo, evidence, reviews
+
+
+def _article_reflected_in_evidence(article: dict, evidence_rows: list[sqlite3.Row], ticker: str, queries: list[str]) -> bool:
+    url = (article.get("url") or "").strip()
+    source_norm = _norm_text(article.get("source") or "")
+    title_tokens = _article_tokens(article.get("title") or "", ticker, queries)
+    for row in evidence_rows:
+        blob = " ".join(str(row[k] or "") for k in ("indicator", "value", "source", "source_url"))
+        blob_norm = _norm_text(blob)
+        if not blob_norm:
+            continue
+        if url and url == (row["source_url"] or "").strip():
+            return True
+        if any(p.search(blob_norm) for p in ADVERSE_TITLE_PATTERNS):
+            token_hits = len([tok for tok in title_tokens if tok in blob_norm])
+            if (source_norm and source_norm in blob_norm) or token_hits >= 2:
+                return True
+    return False
+
+
+def _article_addressed_in_review(article: dict, review_rows: list[sqlite3.Row], ticker: str, queries: list[str]) -> bool:
+    source_norm = _norm_text(article.get("source") or "")
+    title_tokens = _article_tokens(article.get("title") or "", ticker, queries)
+    article_day = article.get("date")
+    for row in review_rows:
+        if not row["all_challenges_addressed"]:
+            continue
+        reviewed_at = row["reviewed_at"] or ""
+        if article_day and not reviewed_at.startswith(article_day):
+            if reviewed_at[:10] < article_day:
+                continue
+        blob_norm = _norm_text(row["challenges_json"] or "")
+        if not blob_norm or not any(p.search(blob_norm) for p in ADVERSE_TITLE_PATTERNS):
+            continue
+        token_hits = len([tok for tok in title_tokens if tok in blob_norm])
+        if (source_norm and source_norm in blob_norm) or token_hits >= 2:
+            return True
+    return False
+
+
+def _same_day_opposition_block(conn, intent) -> dict | None:
+    action = (intent["action"] or "open").lower()
+    if action in ("exit", "trim"):
+        return None
+
+    hypothesis_id = intent["hypothesis_id"]
+    hypo, evidence_rows, review_rows = _load_hypothesis_context(conn, hypothesis_id, intent["id"])
+    ticker = (intent["ticker"] or "").upper()
+    queries = _extract_company_queries(ticker, hypo["thesis_summary"] if hypo else None, evidence_rows)
+    same_day = datetime.now(timezone.utc).date().isoformat()
+
+    articles: list[dict] = []
+    seen_urls: set[str] = set()
+    try:
+        for query in queries:
+            for article in eventregistry.recent_news(
+                query,
+                days=OPPOSITION_LOOKBACK_DAYS,
+                count=OPPOSITION_ARTICLE_LIMIT,
+                cache_h=OPPOSITION_CACHE_H,
+            ):
+                url = (article.get("url") or "").strip()
+                dedupe_key = url or f"{article.get('date')}|{article.get('title')}"
+                if dedupe_key in seen_urls:
+                    continue
+                seen_urls.add(dedupe_key)
+                articles.append(article)
+    except Exception as exc:
+        return {
+            "breach": "same_day_opposition_unavailable",
+            "reason": f"opposition sweep unavailable for {ticker}: {str(exc)[:140]}",
+            "details": {"ticker": ticker, "queries": queries, "error": str(exc)[:240]},
+        }
+
+    unresolved = []
+    for article in articles:
+        if not _is_materially_adverse_article(article, ticker, queries, same_day):
+            continue
+        if _article_reflected_in_evidence(article, evidence_rows, ticker, queries):
+            continue
+        if _article_addressed_in_review(article, review_rows, ticker, queries):
+            continue
+        unresolved.append(article)
+
+    if not unresolved:
+        return None
+
+    headlines = [
+        (article.get("title") or "")[:120]
+        for article in unresolved[:2]
+        if article.get("title")
+    ]
+    return {
+        "breach": "same_day_opposition",
+        "reason": (
+            f"same-day contradictory flow unresolved for {ticker}: "
+            + "; ".join(headlines)
+        )[:500],
+        "details": {
+            "ticker": ticker,
+            "queries": queries,
+            "same_day": same_day,
+            "unresolved_count": len(unresolved),
+            "unresolved_articles": [
+                {
+                    "date": a.get("date"),
+                    "title": a.get("title"),
+                    "source": a.get("source"),
+                    "url": a.get("url"),
+                }
+                for a in unresolved[:4]
+            ],
+        },
+    }
 
 
 def _regime_current(conn) -> str:
@@ -190,6 +426,16 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
         return {"verdict": "approved", "approved_qty": req_qty,
                 "limits": {"action": action, "requested_qty": req_qty, "equity": round(equity, 2)},
                 "breaches": [], "reason": f"{action} (risk-reducing sell) approved at full size"}
+
+    opposition = _same_day_opposition_block(conn, intent)
+    if opposition is not None:
+        return {
+            "verdict": "blocked",
+            "approved_qty": 0,
+            "limits": {"action": action, "requested_qty": req_qty, "equity": round(equity, 2), **opposition["details"]},
+            "breaches": [opposition["breach"]],
+            "reason": opposition["reason"],
+        }
 
     name_cap = MAX_NAME_PCT * equity
     gross_cap = MAX_GROSS_PCT * equity

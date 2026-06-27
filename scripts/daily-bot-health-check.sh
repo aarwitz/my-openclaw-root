@@ -94,7 +94,7 @@ for acct in default druck dwight resi; do
 done
 
 # 2) Per-bot model handshake
-for agent in main resi druck dwight; do
+for agent in jerry resi druck dwight; do
   AGENT_OUT="$("$OPENCLAW_BIN" agent --agent "$agent" --message "Reply exactly: HEALTH_OK" --json 2>&1 || true)"
   AGENT_TEXT="$(echo "$AGENT_OUT" | jq -r '.result.payloads[0].text // empty' 2>/dev/null || true)"
   if echo "$AGENT_TEXT" | rg -q "HEALTH_OK"; then

@@ -45,7 +45,7 @@ TM_CONTAINER = os.environ.get("TM_CONTAINER_NAME", "dwight-taskmanager")
 TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))
 
 OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN") or shutil.which("openclaw") or "/usr/local/bin/openclaw"
-JERRY_AGENT_ID = os.environ.get("JERRY_AGENT_ID", "main")
+JERRY_AGENT_ID = os.environ.get("JERRY_AGENT_ID", "jerry")
 JERRY_USERNAME = os.environ.get("JERRY_USERNAME", "Jerry")
 AGENT_TIMEOUT_SEC = int(os.environ.get("JERRY_HOST_AGENT_TIMEOUT", "900"))
 MAX_ATTEMPTS = int(os.environ.get("JERRY_HOST_MAX_ATTEMPTS", "3"))

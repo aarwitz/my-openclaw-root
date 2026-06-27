@@ -24,6 +24,7 @@ class IssueCreate(BaseModel):
     acceptance_criteria: Optional[str] = None
     story_points: Optional[int] = None
     blocked_reason: Optional[str] = None
+    auto_launch_enabled: bool = False
 
 class IssueUpdate(BaseModel):
     title: Optional[str] = None
@@ -36,6 +37,7 @@ class IssueUpdate(BaseModel):
     repo_slug: Optional[str] = None
     story_points: Optional[int] = None
     blocked_reason: Optional[str] = None
+    auto_launch_enabled: Optional[bool] = None
     updated_by: Optional[str] = None
 
 class CommentCreate(BaseModel):
@@ -91,6 +93,10 @@ class IssueResponse(BaseModel):
     repo_slug: Optional[str] = None
     story_points: Optional[int] = None
     blocked_reason: Optional[str] = None
+    auto_launch_enabled: bool = False
+    launch_state: Optional[str] = None
+    launch_error: Optional[str] = None
+    last_launch_at: Optional[datetime] = None
     comments: List[CommentResponse] = []
     images: List[IssueImageResponse] = []
     activity_events: List[IssueActivityResponse] = []
@@ -114,6 +120,8 @@ class SprintResponse(BaseModel):
     is_active: bool
     is_archived: bool = False
     allowed_users: List[str] = []
+    human_members: List[str] = []
+    working_agent_members: List[str] = []
     started_at: Optional[datetime]
     ended_at: Optional[datetime]
     
@@ -202,3 +210,24 @@ class LidiActionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class IssueLaunchClaimCreate(BaseModel):
+    claimant: str
+    source: Optional[str] = None
+    expected_signature: str
+
+
+class IssueLaunchClaimResponse(BaseModel):
+    issue_id: int
+    claim_token: str
+    launch_state: str
+    launch_signature: str
+
+
+class IssueLaunchResultCreate(BaseModel):
+    launch_state: str
+    launch_error: Optional[str] = None
+    comment_content: Optional[str] = None
+    username: str
+    claim_token: Optional[str] = None

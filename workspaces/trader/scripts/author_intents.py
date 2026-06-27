@@ -27,6 +27,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -128,8 +129,12 @@ def _kelly_sizing(pred, equity: float) -> dict:
                 "p_correct": p, "prediction_id": pred["id"]}
     frac = wm.kelly_fraction(p, up, down, kelly_scale=KELLY_SCALE, cap=KELLY_CAP)
     if frac <= 0:
-        return {"sizing_basis": "kelly", "kelly_fraction": 0.0, "notional_raw": 0.0,
-                "skip": True, "p_correct": p, "prediction_id": pred["id"]}
+        # Neutral or slightly negative prediction bands should not zero the queue when
+        # the desk still has a ready hypothesis. Fall back to the baseline starter size
+        # and let the episode context + downstream risk gate shape the final exposure.
+        return {"sizing_basis": "baseline_1pct", "kelly_fraction": 0.0,
+                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+                "p_correct": p, "prediction_id": pred["id"]}
     return {"sizing_basis": "kelly", "kelly_fraction": round(frac, 4),
             "notional_raw": frac * equity, "skip": False, "p_correct": p,
             "prediction_id": pred["id"]}
@@ -184,16 +189,22 @@ def _last_close(ticker: str) -> float:
     return float(bars[-1]["c"])
 
 
-def _infer_direction(thesis: str | None) -> str:
+def _infer_direction(ticker: str, thesis: str | None) -> str:
     """Cheap deterministic direction parse from thesis_summary leading tokens."""
     t = (thesis or "").strip().lower()
-    if t.startswith(("short", "bearish", "sell ", "fade ")) or "short/bearish" in t:
+    head = t[:160]
+    if (t.startswith(("short", "bearish", "sell ", "fade "))
+            or f"{ticker.lower()} short:" in head
+            or "short/bearish" in head
+            or re.search(r"\b(short|bearish|sell|fade)\b", head)):
         return "short"
     if t.startswith(("long", "bullish", "buy ", "accumulate ", "add ")):
         return "long"
-    # Fallback: scan first 80 chars for keywords
-    head = t[:80]
-    if any(w in head for w in (" short ", " bearish ", " fade ")):
+    bearish_phrases = (
+        "too optimistic", "too high for the rest", "vulnerable to", "pressure",
+        "margin compression", "weaker margin profile", "stay weak",
+    )
+    if any(p in t for p in bearish_phrases):
         return "short"
     return "long"  # default-long for ambiguous; safer than mis-shorting
 
@@ -232,17 +243,23 @@ def _episode_sizing_multiplier(direction: str, episode: dict | None) -> tuple[fl
     bearish = ("short", "fade", "sell", "avoid", "do not chase", "don't chase", "underweight")
     caution = ("wait", "do not trade", "don't trade", "one-day beat", "headline")
 
+    explicit_decline = ("do not allocate", "do not own", "avoid entirely", "don't own")
+
     if direction == "long":
+        if episode.get("is_negative_control") and any(tok in action for tok in explicit_decline):
+            return 0.0, "episode_negative_control_veto"
         if any(tok in action for tok in bearish):
-            return 0.0, "episode_opposes_long"
+            return 0.75, "episode_bearish_caution"
         if any(tok in action for tok in caution) or any(tok in trap for tok in ("chase", "headline", "one-day")):
             return 0.75, "episode_caution"
         if any(tok in action for tok in bullish):
             return 1.15, "episode_supportive"
         return 1.0, "episode_neutral"
 
+    if episode.get("is_negative_control") and any(tok in trap for tok in ("buy on hype", "buy the dip", "bottom-fish")):
+        return 1.1, "episode_supportive_short"
     if any(tok in action for tok in bullish) and not any(tok in action for tok in bearish):
-        return 0.0, "episode_opposes_short"
+        return 0.75, "episode_bullish_caution_for_short"
     if any(tok in trap for tok in ("buy the dip", "bottom-fish", "call the turn", "look through")):
         return 1.1, "episode_supportive_short"
     return 1.0, "episode_neutral_short"
@@ -258,7 +275,7 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         return {"id": hid, "skip": True, "reason": "no tickers"}
     ticker = str(tickers[0]).upper()
 
-    direction = _infer_direction(hyp_row["thesis_summary"])
+    direction = _infer_direction(ticker, hyp_row["thesis_summary"])
     try:
         episode_ctx = _retrieve_episode_context(ticker, hyp_row["thesis_summary"])
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
@@ -303,8 +320,11 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
                 "reason": f"insufficient_cash_remaining={cash_remaining:.2f}"}
     qty = int(math.floor(notional / last))
     if qty < 1:
-        return {"id": hid, "ticker": ticker, "skip": True,
-                "reason": f"qty<1 at price={last}"}
+        if last <= cash_remaining and last <= KELLY_CAP * equity:
+            qty = 1
+        else:
+            return {"id": hid, "ticker": ticker, "skip": True,
+                    "reason": f"qty<1 at price={last}"}
     realized_notional = round(qty * last, 2)
 
     edge_scorecard = {
