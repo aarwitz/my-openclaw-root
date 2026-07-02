@@ -74,9 +74,19 @@ weekly audit).
 
 ## Phased plan (each phase gated by measured OOS lift)
 
-1. **P1 — GBM ranker evaluation** (offline, running now): walk-forward
-   2020–2026, 600 names, vs single-feature ICs. Decision metric: rank-IC t-stat
-   > 3, positive decile L/S net of costs, and beats the best single feature.
+1. **P1 — GBM ranker evaluation** (offline) — **RUN 2026-07-02, verdict: promising,
+   below the promotion bar, iterate before P2.** 62,053 samples, 600 names,
+   walk-forward 2020–2026, cost-net, embargoed. v1 (raw values): IC 0.012,
+   t=0.57 — broken by the 2023 regime shift (IC −0.098). v2 (per-date rank
+   normalization, GKX-standard): **IC 0.023, t=1.21, ICIR 0.48, decile L/S
+   +4.0%/yr net, top-decile long-only ≈ +8%/yr net, 2023 fixed (−0.009)**.
+   Key insight: 2024–2026 ICs are 0.05–0.10 — the panel is feature-POOR before
+   2024 (X/short-interest/news columns barely exist), so pooled stats understate
+   the model as fielded today. Queued upgrades before promotion: quarterly
+   retrain, feature-coverage-aware sample weighting, evaluation restricted to
+   the full-coverage era, LLM features (P3) as columns. Promotion bar stands:
+   IC t-stat > 3 on the honest window + beats the best single feature.
+   Results: `state/ml_ranker_eval.json`.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
