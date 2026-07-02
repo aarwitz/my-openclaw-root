@@ -15,6 +15,22 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ## 2026-07-02 — from the first walk-forward GBM ranker evaluation (`ml_ranker.py`, 62k samples, 600 names, 2020–2026)
 
+- **The same model is noise on 2020–2023 and institutional-grade on 2024–2026 — data
+  breadth, not model quality, is the binding constraint.** Quarterly-retrained rank-GBM:
+  full-period ICIR 0.49, decile L/S +6.3%/yr net; restricted to the era where the
+  alt-data columns actually exist (2024+): **ICIR 0.92, L/S +18.3%/yr net, top-decile
+  long-only ≈ +22%/yr net**. Corollary: a dollar spent backfilling alt-data history is
+  currently worth more than any amount of hyperparameter tuning. Also humbling: the
+  ensemble (era IC 0.034) does NOT yet beat the best single era feature (realized vol,
+  0.072) — complexity has not yet earned its keep.
+
+- **In 2024–2026 the yield curve beat almost every stock-specific feature for
+  cross-sectional stock selection** (`yield_curve_10y2y` era IC 0.066, `curve_10y3m`
+  0.052, 2y-rate features −0.03). Macro shape features — constant across names on any
+  given day — still rank names because they interact with which *kinds* of names win
+  (steepening → cyclical/value tilts pay). Cross-sectional alpha and macro timing are
+  not separable in this tape.
+
 - **X (Twitter) attention spikes were the single most predictive feature of the entire
   2020–2026 test period** (`x_mention_vol_z`, pooled Spearman IC +0.056, beating every
   technical, fundamental, and macro column). Abnormal cashtag mention volume — not

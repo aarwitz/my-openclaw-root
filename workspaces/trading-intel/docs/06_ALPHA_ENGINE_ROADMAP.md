@@ -82,10 +82,18 @@ weekly audit).
    +4.0%/yr net, top-decile long-only ≈ +8%/yr net, 2023 fixed (−0.009)**.
    Key insight: 2024–2026 ICs are 0.05–0.10 — the panel is feature-POOR before
    2024 (X/short-interest/news columns barely exist), so pooled stats understate
-   the model as fielded today. Queued upgrades before promotion: quarterly
-   retrain, feature-coverage-aware sample weighting, evaluation restricted to
-   the full-coverage era, LLM features (P3) as columns. Promotion bar stands:
-   IC t-stat > 3 on the honest window + beats the best single feature.
+   the model as fielded today.
+   **v3 (quarterly retrain + coverage-era split):** full-period decile L/S
+   improved to +6.3%/yr net; on the **full-coverage era (2024–2026, 29
+   rebalances): IC 0.034, ICIR 0.92, decile L/S +18.3%/yr net, top-decile
+   long-only ≈ +22%/yr net alpha** — institutional-grade where the alt-data
+   columns exist. t=1.43 is sample-limited (29 monthly obs), so the promotion
+   path is BREADTH, not tuning: (a) backfill X counts to all 600 names
+   (currently 32–64), (b) add LLM news features (P3) as columns, then
+   re-evaluate. Note transcripts (FMP) are a paywalled tier — P3 v1 targets
+   news event-typing + EDGAR filings instead. Promotion bar: coverage-era IC
+   t-stat > 3 + the ensemble must beat the best single feature on the era
+   (currently 0.034 vs vol's 0.072 — not yet; complexity must earn its keep).
    Results: `state/ml_ranker_eval.json`.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
