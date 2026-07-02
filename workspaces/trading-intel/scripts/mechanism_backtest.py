@@ -96,7 +96,10 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "x_mention_vol_z",
                 # LLM feature factory (P3, rubric news-v1): frontier-model-typed news events,
                 # cached per batch, point-in-time at article date. Same bar as everything else.
-                "llm_news_dir", "llm_news_material_ct", "llm_news_neg_mat_ct"]
+                "llm_news_dir", "llm_news_material_ct", "llm_news_neg_mat_ct",
+                # "Lazy Prices" (Cohen-Malloy-Nguyen): 10-K/Q language change vs prior same-form
+                # filing (MinHash Jaccard). Paper sign: negative — changers underperform.
+                "filing_delta"]
 
 
 _MACRO: dict = {}

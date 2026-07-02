@@ -48,6 +48,9 @@ step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 # (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
 # articles cost a model call. Best-effort: never blocks the learning chain.
 step "llm-features"        "$PY" "$TI/llm_features.py" daily --top-n 64
+# "Lazy Prices" filing deltas — new 10-K/Qs land any day; the MinHash signature
+# cache makes the daily walk nearly free after the initial backfill.
+step "edgar-deltas"        "$PY" "$TI/edgar_deltas.py" daily --top-n 150
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"

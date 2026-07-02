@@ -108,8 +108,12 @@ weekly audit).
    `llm_news_neg_mat_ct` (point-in-time at article date, `source='llm'`).
    Wired: daily step in `learning-chain.sh`; backfill top-64 × 2025-07→2026-07
    running. Next: re-run `ml_ranker` with the new columns + X-600 panel;
-   rubric v2 candidates: EDGAR risk-factor deltas (free), transcripts if the
-   FMP tier is ever upgraded.
+   transcripts remain a candidate if the FMP tier is ever upgraded.
+   **P3b — "Lazy Prices" filing deltas — BUILT 2026-07-02, backfilling.**
+   `edgar_deltas.py`: `filing_delta` = 1 − MinHash-Jaccard of each 10-K/Q vs
+   the prior same-form filing (language change, numbers stripped; free EDGAR,
+   fair-use paced; per-accession signature cache). Paper-expected sign:
+   negative. Daily step wired; backfill top-150 × 2022→now running.
 4. **P4 — KG economic edges + propagation features**; auto-grown episode
    pipeline.
 5. **P5 — Ensemble meta-calibration**: isotonic calibration of ranker score +
