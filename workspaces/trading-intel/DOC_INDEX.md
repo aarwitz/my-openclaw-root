@@ -26,6 +26,7 @@ Effective: 2026-05-28; updated 2026-06-17.
 - `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
 - `../researcher/skills/reasoning_chain.md` — active 8-question researcher reasoning chain.
 - `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
+- `FINDINGS.md` — the lab notebook: dated, sourced market/dataset factoids from any agent (curated by archivist; operator reading, not app content).
 - `OPERATOR_GUIDE.md` — Telegram command reference and daily workflow for the human operator.
 - `HUMAN_USE_GUIDE.md` — best-practice patterns for humans or external systems interfacing with Druck.
 - `archives/` — date-stamped retirement of superseded docs and prototypes.

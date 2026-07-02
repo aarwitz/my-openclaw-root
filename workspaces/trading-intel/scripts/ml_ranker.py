@@ -135,16 +135,32 @@ def rank_normalize(X, y, meta):
     return Xr, yr
 
 
-def walk_forward(X, y, meta, test_start):
-    """Retrain per test year on all samples whose label window fully closed before that year."""
-    years = sorted({m[0][:4] for m in meta if m[0] >= test_start})
+def walk_forward(X, y, meta, test_start, cadence="annual"):
+    """Retrain per test period (year or quarter) on all samples whose label window fully
+    closed before that period began (+ embargo)."""
     dates_arr = np.array([m[0] for m in meta])
+    if cadence == "quarterly":
+        def period_of(d):
+            return f"{d[:4]}-Q{(int(d[5:7]) - 1) // 3 + 1}"
+        def period_bounds(p):
+            yr, q = int(p[:4]), int(p[-1])
+            m0 = 3 * (q - 1) + 1
+            start = f"{yr}-{m0:02d}-01"
+            end = f"{yr}-{m0+2:02d}-31" if m0 + 2 <= 12 else f"{yr}-12-31"
+            return start, end
+    else:
+        def period_of(d):
+            return d[:4]
+        def period_bounds(p):
+            return f"{p}-01-01", f"{p}-12-31"
+    periods = sorted({period_of(m[0]) for m in meta if m[0] >= test_start})
     preds = np.full(len(y), np.nan)
     from datetime import date, timedelta
-    for yr in years:
-        test_mask = (dates_arr >= f"{yr}-01-01") & (dates_arr <= f"{yr}-12-31") & (dates_arr >= test_start)
-        # train cutoff: label window (H td ≈ 31 cal days) + embargo before the year starts
-        cutoff = (date(int(yr), 1, 1) - timedelta(days=31 + EMBARGO_DAYS)).isoformat()
+    for p in periods:
+        p_start, p_end = period_bounds(p)
+        test_mask = (dates_arr >= p_start) & (dates_arr <= p_end) & (dates_arr >= test_start)
+        # train cutoff: label window (H td ≈ 31 cal days) + embargo before the period starts
+        cutoff = (date.fromisoformat(p_start) - timedelta(days=31 + EMBARGO_DAYS)).isoformat()
         train_mask = dates_arr <= cutoff
         if train_mask.sum() < 2000 or test_mask.sum() == 0:
             continue
@@ -153,16 +169,19 @@ def walk_forward(X, y, meta, test_start):
             min_samples_leaf=50, l2_regularization=1.0, random_state=7)
         model.fit(X[train_mask], y[train_mask])
         preds[test_mask] = model.predict(X[test_mask])
-        print(f"  {yr}: trained on {int(train_mask.sum())} → predicted {int(test_mask.sum())}",
+        print(f"  {p}: trained on {int(train_mask.sum())} → predicted {int(test_mask.sum())}",
               file=sys.stderr, flush=True)
     return preds
 
 
-def evaluate(preds, y, meta):
+def evaluate(preds, y, meta, date_from=None):
     by_date: dict[str, list[int]] = {}
     for i, (D, _t) in enumerate(meta):
-        if not math.isnan(preds[i]):
-            by_date.setdefault(D, []).append(i)
+        if math.isnan(preds[i]):
+            continue
+        if date_from and D < date_from:
+            continue
+        by_date.setdefault(D, []).append(i)
     ics, ls_net, lo_net = [], [], []
     per_year: dict[str, list[float]] = {}
     for D, idx in sorted(by_date.items()):
@@ -218,6 +237,9 @@ def main():
     ap.add_argument("--test-start", default="2020-01-01")
     ap.add_argument("--rank-normalize", action="store_true",
                     help="per-date cross-sectional rank transform of X and y (GKX-style)")
+    ap.add_argument("--retrain", choices=["annual", "quarterly"], default="annual")
+    ap.add_argument("--coverage-start", default="2024-01-01",
+                    help="start of the full-feature-coverage era for the honest secondary metric")
     a = ap.parse_args()
     conn = sqlite3.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
     names = _universe(conn, a.top_n)
@@ -237,13 +259,16 @@ def main():
         Xt, yt = X, y
     # train on (possibly rank-transformed) features/labels; ALWAYS evaluate decile
     # returns and ICs against the raw market-relative labels.
-    preds = walk_forward(Xt, yt, meta, a.test_start)
+    preds = walk_forward(Xt, yt, meta, a.test_start, cadence=a.retrain)
     result = {
         "config": {"top_n": a.top_n, "H": H, "test_start": a.test_start,
-                   "rank_normalize": bool(a.rank_normalize),
+                   "rank_normalize": bool(a.rank_normalize), "retrain": a.retrain,
+                   "coverage_start": a.coverage_start,
                    "cost_rt": mb.COST_RT, "n_samples": len(y), "n_features": len(feats)},
         "gbm_walk_forward": evaluate(preds, y, meta),
+        "gbm_walk_forward_coverage_era": evaluate(preds, y, meta, date_from=a.coverage_start),
         "single_feature_ics_test_period": feature_ics(X, y, meta, feats, a.test_start),
+        "single_feature_ics_coverage_era": feature_ics(X, y, meta, feats, a.coverage_start),
     }
     with open(OUT_JSON, "w") as f:
         json.dump(result, f, indent=2)

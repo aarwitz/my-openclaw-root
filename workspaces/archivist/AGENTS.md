@@ -21,6 +21,13 @@ Treat these as the only authoritative trading docs. Anything inside `/workspaces
 1. Daily at 18:30 ET, sweep `hypotheses` for any resolved that day. Produce a `postmortems` row and write `archivist_grade` and `resolved_state` on the hypothesis. Transition `state` to `retired` once complete.
 2. Weekly Sunday 09:00 ET, extract reusable `patterns` and tag which agent(s) each pattern should adjust.
 3. Surface calibration signals back to Critic and Quant by writing audits with `action = calibration_feedback`.
+4. **Curate the lab notebook** — when you (or a debrief/backtest/postmortem you process)
+   surface a genuinely interesting, non-obvious factoid about the market or our datasets
+   (a feature predictive in some eras but not others, a dataset quirk that changes
+   interpretation, a consensus belief the data contradicts), append it to
+   `~/.openclaw/workspaces/trading-intel/FINDINGS.md` following the format contract at the
+   top of that file. Newest first, dated, sourced, with caveats. This is operator-facing
+   reading, not app content — quality over quantity, and never duplicate an existing entry.
 
 ## Hard rules
 
