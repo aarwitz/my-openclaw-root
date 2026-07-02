@@ -33,6 +33,12 @@ FAILED=""
 if "$PY" "$TI/feature_store.py" refresh-live >>"$LOG" 2>&1; then log "   ok: refresh-live"
 else log "   FAIL: refresh-live"; FAILED="refresh-live"; fi
 
+# 1b) X attention-spike features (x_mention_vol_z) for the most-liquid names.
+# Was orphaned (last manual run 2026-06-23) — the consensus/crowding ingredient.
+# Best-effort: an X API hiccup must not block the signal chain.
+if "$PY" "$TI/x_features.py" --top-n 64 >>"$LOG" 2>&1; then log "   ok: x-features"
+else log "   WARN: x-features failed (non-blocking)"; fi
+
 # 2) fire calibrated mechanisms -> top-conviction RAW hypotheses (extra args pass through).
 # --scan-top-n 600: scan the top-600 liquid names (not just 200) so the 4 picks are
 # selected from the full high-conviction pool; downstream caps/gates are unchanged.

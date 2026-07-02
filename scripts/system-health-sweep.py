@@ -264,9 +264,41 @@ def check_data_freshness():
     return finding("data_freshness", sev, "STALE intake — " + "; ".join(bits))
 
 
+def check_debrief_coverage():
+    """The daily market debrief (market_events row per trading day) is authored by the
+    overseer's 16:30 LLM pass — there is no deterministic fallback, so a failed/skipped
+    pass silently loses the day's lesson (found as gaps 2026-06-22/23/29/30). Flag any
+    missed trading day in the last 5 weekdays so the operator can backfill."""
+    db = f"{ROOT}/state/trading-intel.sqlite"
+    if not os.path.exists(db):
+        return finding("debrief_coverage", "warn", "trading-intel.sqlite not found")
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        have = {r[0] for r in c.execute("SELECT DISTINCT event_date FROM market_events")}
+        c.close()
+    except Exception as e:
+        return finding("debrief_coverage", "warn", f"query failed: {e}")
+    from datetime import timedelta
+    d = datetime.now(timezone.utc).date()
+    missed, checked = [], 0
+    while checked < 5:
+        d -= timedelta(days=1)
+        if d.weekday() >= 5:          # skip weekends (holidays will rarely false-positive)
+            continue
+        checked += 1
+        if d.isoformat() not in have:
+            missed.append(d.isoformat())
+    if missed:
+        return finding("debrief_coverage", "warn",
+                       f"market debrief MISSING for trading day(s): {', '.join(missed)} — "
+                       "the learning loop lost those sessions; backfill via market_debrief.py")
+    return finding("debrief_coverage", "ok", "debrief written for the last 5 trading days")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
+    check_debrief_coverage,
 ]
 
 

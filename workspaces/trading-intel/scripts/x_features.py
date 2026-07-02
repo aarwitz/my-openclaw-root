@@ -46,12 +46,26 @@ def build(names, start, end, win=30):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--names", required=True)
-    ap.add_argument("--start", default="2024-01-01")
-    ap.add_argument("--end", default="2026-06-24")
+    ap.add_argument("--names", help="comma-separated tickers (or use --top-n)")
+    ap.add_argument("--top-n", type=int, help="refresh the N most-liquid active universe names (daily-cron mode)")
+    ap.add_argument("--start", help="default: 45 days ago (30d trailing window + slack)")
+    ap.add_argument("--end", help="default: today")
     ap.add_argument("--win", type=int, default=30)
     a = ap.parse_args()
-    build([s.strip().upper() for s in a.names.split(",") if s.strip()], a.start, a.end, a.win)
+    if not a.names and not a.top_n:
+        ap.error("pass --names or --top-n")
+    from datetime import date, timedelta
+    start = a.start or (date.today() - timedelta(days=45)).isoformat()
+    end = a.end or date.today().isoformat()
+    if a.top_n:
+        conn = sqlite3.connect(FEAT)
+        names = [r[0] for r in conn.execute(
+            "SELECT symbol FROM universe WHERE status='active' AND market_cap IS NOT NULL "
+            "ORDER BY market_cap DESC LIMIT ?", (a.top_n,))]
+        conn.close()
+    else:
+        names = [s.strip().upper() for s in a.names.split(",") if s.strip()]
+    build(names, start, end, a.win)
 
 
 if __name__ == "__main__":
