@@ -90,7 +90,10 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "yield_curve_10y2y", "rate_2y_level", "rate_10y_level", "rate_2y_chg_63d",
                 "real_yield_10y_level", "curve_10y3m", "ig_spread_level", "ig_spread_chg_63d",
                 "hy_spread_level", "vix_chg_21d", "dollar_chg_63d", "oil_chg_63d", "fedfunds_level",
-                "days_to_cover", "short_int_chg_2m"]
+                "days_to_cover", "short_int_chg_2m",
+                # X attention spike (2024+ history, 32-64 liquid names) — the crowding/
+                # consensus signal; earns weight only if it survives OOS+FDR like the rest
+                "x_mention_vol_z"]
 
 
 _MACRO: dict = {}

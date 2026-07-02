@@ -39,7 +39,11 @@ step() { local label="$1"; shift
 
 mkdir -p "$(dirname "$LOG")"
 log "===== learning chain start (pid $$) ====="
-step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live
+# --top-n 600 (not the 150 default): signal_scan scans the top-600 liquid names,
+# so the post-close refresh must cover the full scanned pool or 450 of them trade
+# on stale feature tails (2026-07-02 dataset audit). Post-close has no deadline;
+# the tight 08:52 pre-open refresh stays at 150 (daily bars only change at close).
+step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"

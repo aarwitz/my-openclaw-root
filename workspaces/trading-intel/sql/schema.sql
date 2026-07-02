@@ -136,7 +136,8 @@ CREATE TABLE IF NOT EXISTS trade_intents (
   executed_at              TEXT,
   actual_price             REAL,
   actual_size              REAL,
-  broker_order_id          TEXT
+  broker_order_id          TEXT,
+  direction                TEXT NOT NULL DEFAULT 'long'  -- long|short (migration 0013)
 );
 CREATE INDEX IF NOT EXISTS idx_intent_state ON trade_intents(state);
 CREATE INDEX IF NOT EXISTS idx_intent_hyp   ON trade_intents(hypothesis_id);

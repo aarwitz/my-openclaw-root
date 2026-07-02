@@ -71,27 +71,45 @@ def _recent_daily_vol(ticker):
 def _select_intents(conn, intent_id: str | None):
     if intent_id:
         sql = ("SELECT id, hypothesis_id, ticker, vehicle, action, size, "
-               "entry_price_target, created_at, state FROM trade_intents WHERE id=?")
+               "entry_price_target, created_at, state, direction FROM trade_intents WHERE id=?")
         rows = conn.execute(sql, (intent_id,)).fetchall()
     else:
         rows = conn.execute(
             "SELECT id, hypothesis_id, ticker, vehicle, action, size, "
-            "entry_price_target, created_at, state FROM trade_intents "
+            "entry_price_target, created_at, state, direction FROM trade_intents "
             "WHERE state='approved' ORDER BY created_at ASC"
         ).fetchall()
     return rows
 
 
-def _side_from_action(action: str) -> str:
-    # open/add/rotate-into  → buy
-    # trim/exit             → sell
+def _side_from_action(action: str, direction: str = "long", held_qty: float | None = None) -> str:
+    # Direction-aware (migration 0013):
+    #   open/add  long  → buy            open/add  short → sell (sell-to-open)
+    #   trim/exit of a long → sell       trim/exit of a short → buy (buy-to-cover)
+    # For exits the ACTUAL held position sign wins over the intent's direction
+    # column (self-correcting if the two ever disagree).
+    d = (direction or "long").lower()
     if action in ("open", "add"):
-        return "buy"
+        return "sell" if d == "short" else "buy"
     if action in ("trim", "exit"):
-        return "sell"
+        if held_qty is not None and held_qty != 0:
+            return "buy" if held_qty < 0 else "sell"
+        return "buy" if d == "short" else "sell"
     if action == "rotate":
         return "buy"  # treat rotate as a buy leg; sell leg should be a separate intent
     raise ValueError(f"unknown action: {action}")
+
+
+def _held_qty(conn, ticker: str) -> float | None:
+    """Signed net quantity currently held per the positions table (None if flat/unknown)."""
+    try:
+        row = conn.execute(
+            "SELECT SUM(qty) FROM positions WHERE UPPER(ticker)=? "
+            "AND state IN ('opening','open','scaling','trimming','closing')",
+            ((ticker or "").upper(),)).fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception:
+        return None
 
 
 def _qty_from_size(size: float, vehicle: str) -> int:
@@ -109,7 +127,9 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
     if intent_row["state"] != "approved":
         return {"intent_id": intent_id, "skipped": True, "reason": f"state={intent_row['state']!r} not approved"}
 
-    side = _side_from_action(intent_row["action"])
+    direction = (intent_row["direction"] if "direction" in intent_row.keys() else None) or "long"
+    side = _side_from_action(intent_row["action"], direction,
+                             _held_qty(conn, intent_row["ticker"]))
     qty = _qty_from_size(intent_row["size"], intent_row["vehicle"])
 
     # ---- FRESHNESS GATE: don't act on stale reasoning or a price that moved since the signal priced it ----

@@ -86,6 +86,11 @@ so `risk` rarely has to intervene.
   or open broker position. Skip and log to audits.
 - In `risk_off` regime: notional cap drops to $500 and side must be `long`
   only (no shorts unless quant+critic explicitly green-light).
+- **Shorts are executable as of 2026-07-02** (migration 0013): set
+  `trade_intents.direction='short'` on the intent and the executor submits
+  sell-to-open / buy-to-cover automatically. Do NOT pre-block short intents
+  with "executor is buy-only" — that limitation is gone. Shorts still pass
+  the episode/valuation cross-checks and the full critic + Risk gate stack.
 
 ## Hard rules
 

@@ -162,6 +162,13 @@ explainability, size sanity, slippage modelled, stop-rule present, tranche
 consistency) routes a passing intent to **`risk_review`** — never straight to
 `approved`. Only the **Risk** agent promotes to `approved`.
 
+Two 2026-07-02 refinements (schema v13, D47/D48 in `DECISION_LOG.md`):
+- **Risk-reducing intents (`exit`/`trim`) face only sanity gates** — never
+  idea-quality gates (an exit blocked on stale evidence traps a loser).
+- **Shorts execute end-to-end**: `trade_intents.direction` (`long`|`short`,
+  migration 0013) → executor submits sell-to-open / buy-to-cover; on exits the
+  actual held-position sign wins. All risk caps apply to abs exposure.
+
 ---
 
 ## 6. World Model & Calibration layer (the learning engine)
@@ -312,9 +319,10 @@ The closed loop, three stages:
 The mandatory, final checkpoint before any order. It consumes intents in
 `risk_review` and is the **single source of truth for limits**:
 
-- **Per-name concentration:** ≤ 10% of equity in any one name.
-- **Gross exposure:** ≤ 60% of equity deployed (open positions + pending intents).
-- **Concurrent names:** ≤ 12.
+- **Per-name concentration:** ≤ 10% of equity in any one name (abs — shorts too).
+- **Gross exposure:** ≤ 60% of equity deployed (open positions + pending intents,
+  abs-summed; a short consumes budget like a long, never netted).
+- **Concurrent names:** ≤ 24 (8→12 per D46, 12→24 per rp-e907106afbfb49a4aff1).
 - **Correlation-cluster cap (§7.1):** ≤ 25% of equity across a cluster of names
   correlated ≥ 0.70 — the "eight names, one bet" guard. Best-effort via the risk
   model; on a data gap it is skipped (it can only *tighten*, never loosen).

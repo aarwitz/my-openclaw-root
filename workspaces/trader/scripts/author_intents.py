@@ -286,9 +286,9 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     if episode_mult <= 0:
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": episode_flag}
-    if direction != "long":
-        return {"id": hid, "ticker": ticker, "skip": True,
-                "reason": f"direction={direction} unsupported_after_episode_check"}
+    # direction=short authors a sell-to-open intent (executor maps it via the
+    # trade_intents.direction column, migration 0013). The episode multiplier
+    # above has already vetted the short against the analog library.
 
     if _has_open_exposure(conn, ticker):
         return {"id": hid, "ticker": ticker, "skip": True,
@@ -363,7 +363,7 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         "conviction_weight, quant_rationale, recommended, score_json, created_at) "
         "VALUES (?, ?, 'direct_equity', ?, ?, ?, 1, ?, ?)",
         (ec_id, hid, ticker, conviction,
-         f"trader_baseline: long {ticker} at ${last} (quant_score={hyp_row['quant_score']}, "
+         f"trader_baseline: {direction} {ticker} at ${last} (quant_score={hyp_row['quant_score']}, "
          f"sizing={sizing['sizing_basis']}, kelly={sizing.get('kelly_fraction')})",
          json.dumps(edge_scorecard), _now_iso()),
     )
@@ -373,16 +373,16 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         "id, hypothesis_id, expression_candidate_id, created_by, created_at, "
         "action, tranche_type, ticker, vehicle, size, entry_price_target, stop_rule, "
         "time_horizon, triggered_by, edge_scorecard_json, "
-        "modeled_slippage_bps, state) "
+        "modeled_slippage_bps, state, direction) "
         "VALUES (?, ?, ?, 'trader', ?, 'open', 'starter', ?, 'direct_equity', ?, ?, ?, "
-        "?, 'trader_baseline_v1', ?, ?, 'proposed')",
+        "?, 'trader_baseline_v1', ?, ?, 'proposed', ?)",
         (intent_id, hid, ec_id, _now_iso(), ticker, float(qty), last, STOP_RULE,
          hyp_row["time_horizon"] or "position_1_4w",
-         json.dumps(edge_scorecard), MODELED_SLIPPAGE_BPS),
+         json.dumps(edge_scorecard), MODELED_SLIPPAGE_BPS, direction),
     )
     _audit(conn, entity_id=intent_id, action="author",
            before_state=None, after_state="proposed",
-           rationale=f"author open {ticker} qty={qty} @ ~{last} notional≈${realized_notional}")
+           rationale=f"author open {direction} {ticker} qty={qty} @ ~{last} notional≈${realized_notional}")
     # Mark hypothesis active once an intent rides on it
     conn.execute(
         "UPDATE hypotheses SET state='active' WHERE id=? AND state='ready'", (hid,)

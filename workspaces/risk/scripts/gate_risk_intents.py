@@ -348,7 +348,9 @@ def _open_position_value(conn, exclude_ticker: str | None = None) -> float:
         val = r["current_value"]
         if val is None:
             val = float(r["qty"] or 0) * float(r["cost_basis"] or 0)
-        total += float(val or 0)
+        # GROSS exposure: a short position (negative qty/value) consumes risk
+        # budget exactly like a long — abs(), never netted (migration 0013).
+        total += abs(float(val or 0))
     return total
 
 
@@ -362,7 +364,7 @@ def _pending_intent_value(conn, exclude_id: str | None = None) -> float:
     for r in rows:
         if exclude_id and r["id"] == exclude_id:
             continue
-        total += float(r["size"] or 0) * float(r["entry_price_target"] or 0)
+        total += abs(float(r["size"] or 0) * float(r["entry_price_target"] or 0))
     return total
 
 
@@ -378,14 +380,14 @@ def _name_exposure(conn, ticker: str) -> float:
         val = r["current_value"]
         if val is None:
             val = float(r["qty"] or 0) * float(r["cost_basis"] or 0)
-        total += float(val or 0)
+        total += abs(float(val or 0))   # per-name cap on ABS exposure (shorts too)
     intents = conn.execute(
         "SELECT size, entry_price_target FROM trade_intents "
         f"WHERE UPPER(ticker)=? AND state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
         (sym, *PENDING_INTENT_STATES),
     ).fetchall()
     for r in intents:
-        total += float(r["size"] or 0) * float(r["entry_price_target"] or 0)
+        total += abs(float(r["size"] or 0) * float(r["entry_price_target"] or 0))
     return total
 
 

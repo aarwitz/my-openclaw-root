@@ -144,20 +144,29 @@ def evaluate(conn, intent_id: str) -> dict:
 
     gates: list[dict] = []
 
-    # 1. regime_gate
-    regime = _load_regime(conn)
-    rg_ok = regime["current"] in ("risk_on", "neutral") and not regime["fail_closed"]
-    gates.append({"name": "regime_gate", "pass": rg_ok,
-                  "detail": f"current={regime['current']} fail_closed={regime['fail_closed']}"})
+    # Risk-REDUCING intents (exit/trim of an existing position) face only sanity
+    # gates, never idea-quality gates. The 10-gate stack exists to vet NEW risk;
+    # applying evidence-freshness / counterargument / stop-rule to an exit means
+    # an aging losing position can never be closed (2026-07-02: six WHR exit
+    # intents blocked on stale evidence). Blocking an exit INCREASES risk.
+    risk_reducing = intent["action"] in ("exit", "trim")
 
-    # 2. evidence_freshness
+    # 1. regime_gate — new risk only; a risk_off regime must never trap an exit
+    regime = _load_regime(conn)
+    rg_ok = risk_reducing or (
+        regime["current"] in ("risk_on", "neutral") and not regime["fail_closed"])
+    gates.append({"name": "regime_gate", "pass": rg_ok,
+                  "detail": f"current={regime['current']} fail_closed={regime['fail_closed']}"
+                            + (" (exempt: risk-reducing)" if risk_reducing else "")})
+
+    # 2. evidence_freshness — idea-quality; exempt for risk-reducing intents
     evid = _load_evidence(conn, intent["hypothesis_id"])
     stale = []
     for e in evid:
         h = _hours_since(e["retrieved_at"])
         if h is None or h > FRESHNESS_MAX_HOURS:
             stale.append({"id": e["id"], "hours_old": round(h, 1) if h is not None else None})
-    ef_ok = bool(evid) and not stale
+    ef_ok = risk_reducing or (bool(evid) and not stale)
     gates.append({"name": "evidence_freshness", "pass": ef_ok,
                   "detail": f"evidence={len(evid)} stale={len(stale)} max_h={FRESHNESS_MAX_HOURS}"})
 
@@ -177,7 +186,7 @@ def evaluate(conn, intent_id: str) -> dict:
         prov_pct = round(100.0 * with_url / len(evid), 1)
     else:
         prov_pct = 0.0
-    pc_ok = prov_pct >= MIN_PROVENANCE_PCT
+    pc_ok = risk_reducing or prov_pct >= MIN_PROVENANCE_PCT
     gates.append({"name": "provenance_completeness", "pass": pc_ok,
                   "detail": f"{prov_pct}% (min {MIN_PROVENANCE_PCT}%)"})
 
@@ -193,6 +202,7 @@ def evaluate(conn, intent_id: str) -> dict:
         ca_score = 100.0 if addressed and n >= 1 else (60.0 if addressed else 30.0 if n else 0.0)
         ca_ok = ca_score >= MIN_COUNTERARG_SCORE
         ca_detail = f"challenges={n} addressed={addressed} score={ca_score}"
+    ca_ok = risk_reducing or ca_ok
     gates.append({"name": "counterargument_quality", "pass": ca_ok, "detail": ca_detail})
 
     # 6. explainability
@@ -217,8 +227,8 @@ def evaluate(conn, intent_id: str) -> dict:
     gates.append({"name": "slippage_modeled", "pass": sl_ok,
                   "detail": f"modeled_slippage_bps={intent['modeled_slippage_bps']}"})
 
-    # 9. stop_rule_present
-    sr_ok = bool((intent["stop_rule"] or "").strip())
+    # 9. stop_rule_present — an exit IS the stop being honored; never require one
+    sr_ok = risk_reducing or bool((intent["stop_rule"] or "").strip())
     gates.append({"name": "stop_rule_present", "pass": sr_ok,
                   "detail": f"stop_rule={'set' if sr_ok else 'missing'}"})
 
