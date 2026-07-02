@@ -24,6 +24,16 @@ evidence and caveats in 2-5 sentences. Newest first.
   ensemble (era IC 0.034) does NOT yet beat the best single era feature (realized vol,
   0.072) — complexity has not yet earned its keep.
 
+- **First live ML ranks (2026-07-02, on the record): the model's entire top-10 is
+  semiconductors — and MU is #1.** gbm-rank-v1, trained on 62k samples through
+  mid-May, scored 599 names: MU, TSM, AMD, INTC, ASML, QCOM, KLAC, ARM, LRCX, MRVL.
+  Two things to grade in ~21 trading days: (1) MU at #1 is a direct contrarian call
+  on the operator's "everyone expected up, it went down" week — the model reads the
+  pullback as the top entry in the universe; (2) a one-sector top decile is exactly
+  the "ten names, one bet" concentration the risk model exists to catch — if the
+  ranker is promoted, its output must flow THROUGH the correlation-cluster cap,
+  never around it. Bottom-5 (avoid tilt): CBRS, Q, UNP, NVO, MA.
+
 - **The X attention signal dilutes as its universe widens** — pooled IC fell from
   0.056 (32 mega-caps) to 0.034 when the panel expanded to 83 names (2026-07-02 v4
   interim, backfill to 600 still running). Hypothesis: attention spikes are most
