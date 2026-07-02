@@ -230,6 +230,60 @@ def feature_ics(X, y, meta, feats, test_start):
     return dict(sorted(out.items(), key=lambda kv: -abs(kv[1]))[:15])
 
 
+def score_live(top_n: int, train_start: str):
+    """Nightly ADVISORY scoring: train on the full closed-label history (rank-normalized),
+    score every top-N name on TODAY's features, write to features.sqlite::ml_scores.
+    This builds a live out-of-sample track record — the promotion evidence for P2.
+    Nothing reads this table for trading; wiring into signal_scan is human-gated."""
+    conn = sqlite3.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
+    names = _universe(conn, top_n)
+    conn.close()
+    spy = _spy()
+    from datetime import date, timedelta
+    label_end = (date.today() - timedelta(days=45)).isoformat()
+    dates = _rebalance_dates(spy, train_start, label_end)
+    X, y, meta, feats = build_panel(names, spy, dates)
+    Xt, yt = rank_normalize(X, y, meta)
+    model = HistGradientBoostingRegressor(
+        max_iter=300, max_depth=6, learning_rate=0.05,
+        min_samples_leaf=50, l2_regularization=1.0, random_state=7)
+    model.fit(Xt, yt)
+    # today's cross-section, same point-in-time reads, rank-normalized across names
+    today = date.today().isoformat()
+    conn = sqlite3.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
+    rows, live_names = [], []
+    for t in names:
+        try:
+            td = mb.load_ticker(conn, t)
+        except Exception:
+            continue
+        if not td["dates"] or (_ord(today) - _ord(td["dates"][-1])) > 7:
+            continue
+        rows.append([_f(mb.fval(td, f, today)) for f in feats])
+        live_names.append(t)
+    conn.close()
+    Xl = np.array(rows, dtype=float)
+    for j in range(Xl.shape[1]):
+        col = Xl[:, j]; ok = ~np.isnan(col)
+        if ok.sum() > 1:
+            Xl[ok, j] = sstats.rankdata(col[ok]) / ok.sum() - 0.5
+    scores = model.predict(Xl)
+    order = np.argsort(-scores)
+    out = sqlite3.connect(FEAT_DB)
+    out.execute("""CREATE TABLE IF NOT EXISTS ml_scores(
+        as_of TEXT NOT NULL, ticker TEXT NOT NULL, score REAL NOT NULL,
+        rank INTEGER NOT NULL, n_universe INTEGER, model TEXT,
+        PRIMARY KEY (as_of, ticker))""")
+    for r, i in enumerate(order):
+        out.execute("INSERT OR REPLACE INTO ml_scores VALUES(?,?,?,?,?,?)",
+                    (today, live_names[i], round(float(scores[i]), 5), r + 1,
+                     len(live_names), f"gbm-rank-v1/{len(feats)}f"))
+    out.commit(); out.close()
+    top = [live_names[i] for i in order[:10]]
+    print(json.dumps({"as_of": today, "scored": len(live_names),
+                      "trained_on": len(y), "top10": top}))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--top-n", type=int, default=600)
@@ -240,7 +294,12 @@ def main():
     ap.add_argument("--retrain", choices=["annual", "quarterly"], default="annual")
     ap.add_argument("--coverage-start", default="2024-01-01",
                     help="start of the full-feature-coverage era for the honest secondary metric")
+    ap.add_argument("--score-live", action="store_true",
+                    help="train on full history and write today's advisory scores to ml_scores")
     a = ap.parse_args()
+    if a.score_live:
+        score_live(a.top_n, a.start)
+        return
     conn = sqlite3.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
     names = _universe(conn, a.top_n)
     conn.close()

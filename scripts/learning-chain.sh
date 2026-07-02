@@ -53,6 +53,10 @@ step "llm-features"        "$PY" "$TI/llm_features.py" daily --top-n 64
 step "edgar-deltas"        "$PY" "$TI/edgar_deltas.py" daily --top-n 150
 # Economic-link momentum (peers' relative return propagates with a lag) + KG peer edges
 step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
+# ADVISORY nightly ML rank (P2 prep): builds the live out-of-sample track record
+# in features.sqlite::ml_scores. Nothing trades on this until the human-gated
+# promotion (see docs/06_ALPHA_ENGINE_ROADMAP.md P2).
+step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"

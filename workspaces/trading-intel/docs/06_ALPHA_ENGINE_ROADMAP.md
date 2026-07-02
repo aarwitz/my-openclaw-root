@@ -101,6 +101,11 @@ weekly audit).
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
+   **P2-prep LIVE 2026-07-02:** `ml_ranker.py --score-live` runs nightly in the
+   learning chain, writing ADVISORY ranks to `features.sqlite::ml_scores` —
+   nothing trades on them, but every night from today builds the live
+   out-of-sample track record that decides promotion. Grade it against realized
+   returns after ~4 weeks (live IC vs the backtest's coverage-era 0.042).
 3. **P3 — LLM feature factory v1 — BUILT 2026-07-02, backfilling.**
    FMP transcripts turned out to be a paywalled tier (402), so v1 targets news
    event-typing on Massive article text we already hold: `llm_features.py`,
