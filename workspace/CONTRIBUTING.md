@@ -1,6 +1,6 @@
 # Contributing
 
-> **Scope:** This file applies to the **OpenClaw workspace config repo** (`aarwitz/workspace`), not the iOS app repo (`EWAG-dev/iosApp`). For the iOS app dev workflow, see `EWAG_INFRA.md`.
+> **Scope:** This file applies to the **OpenClaw workspace config repo** (`aarwitz/workspace`), not the iOS app repo (`AutoTap`). For the iOS app dev workflow, see `AutoTap_INFRA.md`.
 
 ## Canonical ownership
 

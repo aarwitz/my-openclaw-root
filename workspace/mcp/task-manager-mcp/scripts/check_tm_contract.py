@@ -28,7 +28,7 @@ def fetch_openapi(tm_base_url: str) -> dict:
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     contract_path = os.path.join(root, "task_manager_contract.json")
-    tm_base_url = os.environ.get("TM_BASE_URL", "http://taskmanager:8000")
+    tm_base_url = os.environ.get("TM_BASE_URL", "https://tm.lidisolutions.ai")
 
     contract = load_json(contract_path)
     try:

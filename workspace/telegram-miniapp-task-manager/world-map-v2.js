@@ -30,7 +30,7 @@ const nodeDetails = {
     icon: '📅',
     eyebrow: 'MEETING INFO',
     title: 'Meetings',
-    summary: '3:00 PM EWAG sync',
+    summary: '3:00 PM Product sync',
     description: 'Upcoming meeting node. Use this for agenda, timing, context, links, and any notes that should be visible from the map without cluttering the scene.',
     link: 'http://localhost:8001',
     linkLabel: 'Open meeting details ↗',

@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 
-TM_BASE_URL = os.environ.get("TM_BASE_URL", "http://taskmanager:8000").rstrip("/")
+TM_BASE_URL = os.environ.get("TM_BASE_URL", "https://tm.lidisolutions.ai").rstrip("/")
 
 
 def get_json(path: str):

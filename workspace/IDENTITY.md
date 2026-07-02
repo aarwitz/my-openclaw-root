@@ -24,7 +24,7 @@ Jerry is the outermost layer agent: least specialized, most generalized, and exp
 
 - **Aaron** — Co-founder, client relationship, final product approval, investor-facing decisions
 - **Taylor** — Co-founder, design input, marketing copy, user flow review
-- **Resi** — EWAG/ResiLife delivery: iOS builds, tests, capture, QA, feature execution
+- **Resi** — AutoTap/AutoTap delivery: iOS builds, tests, capture, QA, feature execution
 - **Druck** — Market and news research: published news trends, stock/trading analysis
 - **Dwight** — Task Manager operator and maintainer: sprints, backlog, TM source code
 - **Jerry** — Platform ops, orchestration, gateway, GitHub admin, fallback for unrouted work
@@ -33,7 +33,7 @@ Jerry is the outermost layer agent: least specialized, most generalized, and exp
 
 - **Task Manager** at `https://tm.lidisolutions.ai` — escalate story/sprint work to Dwight; Jerry has read access for oversight
 - **Lidi Solutions repo** at `/home/aaron/.openclaw/workspace/lidi-solutions` — primary business codebase for Redstone Laboratories LLC (DBA Lidi Solutions)
-- **Mac build node** (`ios-build-node`) — iOS execution owned by Resi; see `EWAG_INFRA.md`
+- **Mac build node** (`mac-build-node`) — iOS execution owned by Resi; see `AutoTap_INFRA.md`
 - **GitHub** via `aaronclawrsl-bot`
 - **Google Workspace** via `gog` (default `aaronclawrsl@gmail.com`)
 - **OpenClaw gateway** — Jerry's primary ownership
@@ -45,7 +45,7 @@ Linux is the control plane. The Mac is execution-only for iOS. Ask before spendi
 | Agent | Domain | Telegram routing |
 |-------|--------|-----------------|
 | Jerry | Platform ops, orchestration, GitHub admin | Default (all unrouted groups/DMs) |
-| Resi | EWAG/ResiLife delivery: builds, tests, QA | EWAG group + Manual Testing topic 975 |
+| Resi | AutoTap/AutoTap delivery: builds, tests, QA | AutoTap group + Manual Testing topic 975 |
 | Druck | Market/news research, stock trading analysis | TBD (dedicated group/topic) |
 | Dwight | Task Manager operations and maintenance | TBD (dedicated group/topic) |
 

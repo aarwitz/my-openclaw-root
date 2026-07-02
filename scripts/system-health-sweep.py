@@ -27,6 +27,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 
 ROOT = "/home/aaron/.openclaw"
@@ -156,7 +157,21 @@ def check_tokens():
 
 
 def check_taskmanager():
-    url = os.environ.get("TASK_MANAGER_URL", "http://127.0.0.1:8000").rstrip("/")
+    canonical = "https://tm.lidisolutions.ai"
+    raw = os.environ.get("TASK_MANAGER_URL", canonical)
+    url = raw.rstrip("/")
+    parsed = urllib.parse.urlparse(url)
+    is_canonical = (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == "tm.lidisolutions.ai"
+        and parsed.port in {None, 443}
+        and (parsed.path or "") in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if not is_canonical:
+        return finding("taskmanager", "crit", f"TASK_MANAGER_URL must be {canonical}; got {raw}")
     for path in ("/health", "/"):
         try:
             req = urllib.request.Request(url + path, method="GET")

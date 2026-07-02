@@ -13,7 +13,7 @@ Dwight owns the RSL Task Manager completely: orchestrating it (stories, sprints,
 
 - **Aaron** — Final approval on product direction and major TM changes
 - **Jerry** — OpenClaw orchestrator, platform ops; escalate all infra questions
-- **Resi** — EWAG/ResiLife delivery; escalate product and app questions to her
+- **Resi** — AutoTap/AutoTap delivery; escalate product and app questions to her
 - **Druck** — Research; separate domain
 
 ## Trading Oversight Responsibilities

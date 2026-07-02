@@ -212,20 +212,7 @@ else
   add_manual "Missing Schwab token file at credentials/schwab-dev-token.json"
 fi
 
-# 5) Taylor's Mac node health (JSON for deterministic parsing)
-NODES_JSON="$("$OPENCLAW_BIN" nodes status --json 2>/dev/null || true)"
-NODE_CONNECTED="$(echo "$NODES_JSON" | jq -r '.nodes[]? | select(.displayName=="ios-build-node") | .connected' 2>/dev/null | head -1)"
-if [[ "$NODE_CONNECTED" == "true" ]]; then
-  add_pass "node/ios-build-node: connected"
-elif [[ "$NODE_CONNECTED" == "false" ]]; then
-  add_fail "node/ios-build-node: disconnected"
-  add_manual "Taylor's Mac (ios-build-node) is disconnected. Ensure node host app is running and network/Tailscale are up."
-else
-  add_fail "node/ios-build-node: not found"
-  add_manual "ios-build-node not found in paired nodes. Re-pair node if needed."
-fi
-
-# 6) GitHub SSH deterministic path
+# 5) GitHub SSH deterministic path
 if [[ -x "$GITHUB_PREFLIGHT" ]]; then
   GH_OUT="$($GITHUB_PREFLIGHT 2>&1 || true)"
   if echo "$GH_OUT" | rg -q "OK"; then

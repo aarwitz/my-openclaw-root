@@ -8,6 +8,7 @@ require_wrapper()
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import urllib.error
@@ -16,8 +17,31 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 
-DEFAULT_REPO = "/home/aaron/repos/EWAG-dev-iosApp"
-DEFAULT_TM_BASE = os.environ.get("TASK_MANAGER_URL", "http://127.0.0.1:8000")
+DEFAULT_REPO = "/home/aaron/repos/AutoTap-iosApp"
+CANONICAL_TM_BASE = "https://tm.lidisolutions.ai"
+
+
+def enforce_hosted_tm_base(raw_base: Optional[str], env_name: str = "TASK_MANAGER_URL") -> str:
+    base = (raw_base or CANONICAL_TM_BASE).strip().rstrip("/")
+    parsed = urllib.parse.urlparse(base)
+    is_canonical = (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == "tm.lidisolutions.ai"
+        and parsed.port in {None, 443}
+        and (parsed.path or "") in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if not is_canonical:
+        raise RuntimeError(
+            f"{env_name} must be {CANONICAL_TM_BASE}; got {raw_base!r}. "
+            "Local or alternate Task Manager endpoints are not allowed."
+        )
+    return CANONICAL_TM_BASE
+
+
+DEFAULT_TM_BASE = enforce_hosted_tm_base(os.environ.get("TASK_MANAGER_URL"))
 
 
 def run_cmd(args: List[str], cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -173,8 +197,8 @@ def reconcile_issue(tm_base: str, issue: Dict[str, Any], apply: bool, add_commen
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Reconcile Task Manager issue status against EWAG git branch merge state.")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help="EWAG repo path")
+    parser = argparse.ArgumentParser(description="Reconcile Task Manager issue status against AutoTap git branch merge state.")
+    parser.add_argument("--repo", default=DEFAULT_REPO, help="AutoTap repo path")
     parser.add_argument("--tm-base", default=DEFAULT_TM_BASE, help="Task Manager base URL")
     parser.add_argument("--assignee", default=None, help="Only reconcile issues assigned to this person")
     parser.add_argument("--apply", action="store_true", help="Patch Task Manager issues to done when their linked branch is merged")

@@ -120,11 +120,34 @@ def apply_repairs(conn, result: dict) -> dict:
         symbol = (d.get("ticker") or "").upper()
         broker_qty = float(d.get("broker_qty", 0) or 0)
         broker = d.get("broker", {})
+        avg_entry = float(broker.get("avg_entry_price", 0) or 0)
         current_price = float(broker.get("current_price", 0) or 0)
         market_value = float(broker.get("market_value", 0) or 0)
+        cost_basis_total = float(broker.get("cost_basis", 0) or 0)
+        unrealized_pl = float(broker.get("unrealized_pl", 0) or 0)
+        unrealized_plpc = float(broker.get("unrealized_plpc", 0) or 0)
+
+        # Keep per-share basis stable after splits by deriving from total
+        # cost basis when present; fall back to broker avg entry otherwise.
+        cost_basis_per_share = (
+            (cost_basis_total / broker_qty)
+            if broker_qty and cost_basis_total
+            else avg_entry
+        )
+
         conn.execute(
-            "UPDATE positions SET qty=?, current_price=?, current_value=? WHERE ticker=? AND state IN ('opening','open','scaling','trimming','closing')",
-            (broker_qty, current_price, market_value, symbol),
+            "UPDATE positions SET qty=?, cost_basis=?, current_price=?, current_value=?, "
+            "unrealized_pnl_pct=?, pnl_slippage_adjusted=? "
+            "WHERE ticker=? AND state IN ('opening','open','scaling','trimming','closing')",
+            (
+                broker_qty,
+                cost_basis_per_share,
+                current_price,
+                market_value,
+                unrealized_plpc * 100.0,
+                unrealized_pl,
+                symbol,
+            ),
         )
         repaired.append({"type": d["type"], "ticker": symbol, "action": "synced_position_qty"})
 

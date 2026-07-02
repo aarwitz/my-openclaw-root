@@ -18,12 +18,36 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-TM_BASE_URL = os.environ.get("TM_BASE_URL", "http://taskmanager:8000").rstrip("/")
+CANONICAL_TM_BASE_URL = "https://tm.lidisolutions.ai"
+
+
+def enforce_hosted_tm_base(raw_base: str | None, env_name: str = "TM_BASE_URL") -> str:
+    base = (raw_base or CANONICAL_TM_BASE_URL).strip().rstrip("/")
+    parsed = urllib.parse.urlparse(base)
+    is_canonical = (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == "tm.lidisolutions.ai"
+        and parsed.port in {None, 443}
+        and (parsed.path or "") in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if not is_canonical:
+        raise RuntimeError(
+            f"{env_name} must be {CANONICAL_TM_BASE_URL}; got {raw_base!r}. "
+            "Local or alternate Task Manager endpoints are not allowed."
+        )
+    return CANONICAL_TM_BASE_URL
+
+
+TM_BASE_URL = enforce_hosted_tm_base(os.environ.get("TM_BASE_URL"))
 TM_TIMEOUT_SECONDS = float(os.environ.get("TM_TIMEOUT_SECONDS", "15"))
 TM_DEFAULT_ACTOR = os.environ.get("TM_DEFAULT_ACTOR", "Dwight")
 TM_READ_ONLY = os.environ.get("TM_READ_ONLY", "false").lower() in {"1", "true", "yes", "on"}
 TM_WRITE_ACTOR = os.environ.get("TM_WRITE_ACTOR", "Dwight")
 TM_INTERNAL_USER_HEADER = os.environ.get("TM_INTERNAL_USER_HEADER", "X-TM-User")
+TM_BEARER_TOKEN = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or os.environ.get("TM_BEARER_TOKEN") or "").strip()
 
 mcp = FastMCP("task-manager-mcp")
 
@@ -43,6 +67,8 @@ def _request_json(
 
     body = None
     headers = {"Accept": "application/json"}
+    if TM_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {TM_BEARER_TOKEN}"
     if TM_DEFAULT_ACTOR:
         headers[TM_INTERNAL_USER_HEADER] = TM_DEFAULT_ACTOR
     if payload is not None:
@@ -115,6 +141,8 @@ def _request_multipart(
         "Accept": "application/json",
         "Content-Type": f"multipart/form-data; boundary={boundary}",
     }
+    if TM_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {TM_BEARER_TOKEN}"
     if TM_DEFAULT_ACTOR:
         headers[TM_INTERNAL_USER_HEADER] = TM_DEFAULT_ACTOR
     req = urllib.request.Request(url=url, method=method, data=body, headers=headers)

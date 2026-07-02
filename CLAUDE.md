@@ -84,17 +84,15 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
 - **Model harness:** every agent uses the bundled Codex app-server harness
   (`models.providers.openai.agentRuntime.id = "codex"`), OAuth-based — **no API keys, no per-agent
   model selection**. ACP is disabled by policy.
-- **Task Manager** (`dwight-taskmanager`) is a *separate* container. The gateway reaches it via the
-  shared docker network DNS alias `taskmanager` — **`TASK_MANAGER_URL=http://taskmanager:8000`**
-  inside the container, `http://127.0.0.1:8000` on the host. All TM client scripts honor
-  `TASK_MANAGER_URL`; never hardcode `127.0.0.1:8000` for in-container code.
+- **Task Manager** runtime is hosted at **`https://tm.lidisolutions.ai`**. All TM client scripts honor
+  `TASK_MANAGER_URL`; local host-port aliases are retired and forbidden.
 - Exposure: localhost-only gateway, fronted by Tailscale serve, controlled over Telegram (paired,
   allowlisted users). See `cli_guide.md`.
 
 ## The agent fleet & workspace convention
 
 Agents are defined in `openclaw.json` (`agents.list`): `main` (Jerry, default assistant), `resi`
-(EWAG, untouched), and the AutoTrade desk — `researcher`, `quant`, `critic`, `risk`, `trader` (PM),
+(AutoTap, untouched), and the AutoTrade desk — `researcher`, `quant`, `critic`, `risk`, `trader` (PM),
 `executor`, `archivist`, `overseer` (CIO/orchestrator), `developer`. `dwight` (general dev/PM + code
 dispatcher) runs in the gateway but was **decoupled from the trading desk 2026-06-17** — it is no
 longer a desk agent. `jerry` host maintainer runs on host cron, not as an in-gateway agent.

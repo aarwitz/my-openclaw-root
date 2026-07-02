@@ -31,7 +31,7 @@ const state = {
   ],
   meetings: [
     {
-      title: 'EWAG Sync',
+      title: 'Product Sync',
       time: 'Today · 3:00 PM',
       duration: '30 min',
       location: 'Telegram / quick standup',

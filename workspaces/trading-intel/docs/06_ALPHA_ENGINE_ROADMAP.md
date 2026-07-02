@@ -95,9 +95,17 @@ weekly audit).
    t-stat > 3 + the ensemble must beat the best single feature on the era.
    **v4 interim (2026-07-02, +peer_mom_21d +filing_delta, X at 83 names):
    coverage-era IC 0.042, ICIR 1.01, t 1.58** — neither new family cracks the
-   top-15 solo ICs, yet the ensemble improved: interaction value is real. Still
-   short of the bar (0.042 vs vol's 0.072 solo); full re-eval when the X-600
-   and LLM-64 backfills land. Results: `state/ml_ranker_eval.json`.
+   top-15 solo ICs, yet the ensemble improved: interaction value is real.
+   **v5 FINAL (2026-07-02 evening, all backfills complete — X-600 139.5k rows,
+   LLM-news 9.2k rows, EDGAR 1.7k, peer 37.5k): coverage-era IC 0.0428,
+   ICIR 1.12, t 1.75, decile L/S +12.5%/yr net, top-decile long-only
+   +1.41%/rebalance, 62% positive months; per-year IC monotonic 0.031→0.048→
+   0.060 (2024→2026).** X-dilution verdict: x_mention_vol_z plateaus at ~0.034
+   beyond the mega-cap core (0.056@32 → 0.034@83 → 0.0338@600) — next
+   construction is attention-per-liquidity-tier. Still below the bar (t>3;
+   vol solo 0.0713 > ensemble on raw era IC): the remaining path is (a) tiered
+   X features, (b) more coverage-era months accruing monthly (t grows ~√n with
+   the live track record), (c) P5 ensemble stacking. Log: `logs/ml-ranker-v5-600.log`.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.

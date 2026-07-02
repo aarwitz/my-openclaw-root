@@ -38,10 +38,33 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 
-TM_BASE = os.environ.get("TASK_MANAGER_URL", "http://127.0.0.1:8000")
-TM_CONTAINER = os.environ.get("TM_CONTAINER_NAME", "dwight-taskmanager")
+CANONICAL_TM_BASE = "https://tm.lidisolutions.ai"
+
+
+def enforce_hosted_tm_base(raw_base: str | None, env_name: str = "TASK_MANAGER_URL") -> str:
+    base = (raw_base or CANONICAL_TM_BASE).strip().rstrip("/")
+    parsed = urllib.parse.urlparse(base)
+    is_canonical = (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == "tm.lidisolutions.ai"
+        and parsed.port in {None, 443}
+        and (parsed.path or "") in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if not is_canonical:
+        raise RuntimeError(
+            f"{env_name} must be {CANONICAL_TM_BASE}; got {raw_base!r}. "
+            "Local or alternate Task Manager endpoints are not allowed."
+        )
+    return CANONICAL_TM_BASE
+
+
+TM_BASE = enforce_hosted_tm_base(os.environ.get("TASK_MANAGER_URL"))
 TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))
 
 OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN") or shutil.which("openclaw") or "/usr/local/bin/openclaw"
@@ -50,6 +73,7 @@ JERRY_USERNAME = os.environ.get("JERRY_USERNAME", "Jerry")
 AGENT_TIMEOUT_SEC = int(os.environ.get("JERRY_HOST_AGENT_TIMEOUT", "900"))
 MAX_ATTEMPTS = int(os.environ.get("JERRY_HOST_MAX_ATTEMPTS", "3"))
 DEFAULT_MAX_LAUNCHES = int(os.environ.get("JERRY_HOST_MAX_LAUNCHES", "1"))
+MAX_COMMENT_REPLY_CHARS = int(os.environ.get("JERRY_HOST_MAX_COMMENT_REPLY_CHARS", "8000"))
 
 # Optional: target Jerry's dedicated host runtime (post-cutover).
 JERRY_GATEWAY_URL = os.environ.get("JERRY_GATEWAY_URL", "").strip()
@@ -63,57 +87,7 @@ FAILURE_HINT_RE = re.compile(r"status=(timeout|error)|state=(failed|error)", re.
 ACTIVE_STATUSES = {"to_do", "in_progress"}
 
 
-# ---------- HTTP layer with docker-exec fallback (mirrors lane bridge) ----------
-
-
-def _docker_exec_request(method: str, path: str, payload: object | None) -> tuple[int, object]:
-    if shutil.which("docker") is None:
-        raise RuntimeError("docker CLI not available for fallback")
-    snippet = (
-        "import json, os, sys, urllib.error, urllib.request\n"
-        "method = os.environ['TM_METHOD']\n"
-        "path = os.environ['TM_PATH']\n"
-        "body = os.environ.get('TM_BODY') or ''\n"
-        "url = 'http://127.0.0.1:8000' + path\n"
-        "headers = {'Accept': 'application/json'}\n"
-        "data = None\n"
-        "if body:\n"
-        "    headers['Content-Type'] = 'application/json'\n"
-        "    data = body.encode('utf-8')\n"
-        "req = urllib.request.Request(url, method=method, data=data, headers=headers)\n"
-        "try:\n"
-        "    with urllib.request.urlopen(req, timeout=20) as resp:\n"
-        "        out = {'status': resp.status, 'body': resp.read().decode('utf-8')}\n"
-        "except urllib.error.HTTPError as exc:\n"
-        "    out = {'status': exc.code, 'body': exc.read().decode('utf-8', errors='replace')}\n"
-        "sys.stdout.write(json.dumps(out))\n"
-    )
-    env = os.environ.copy()
-    env["TM_METHOD"] = method
-    env["TM_PATH"] = path
-    env["TM_BODY"] = json.dumps(payload) if payload is not None else ""
-    proc = subprocess.run(
-        ["docker", "exec", "-i",
-         "-e", "TM_METHOD", "-e", "TM_PATH", "-e", "TM_BODY",
-         TM_CONTAINER, "python", "-"],
-        input=snippet,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=TM_HTTP_TIMEOUT + 10,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"docker exec fallback failed (rc={proc.returncode}): stderr={proc.stderr.strip()[:300]}"
-        )
-    out = json.loads(proc.stdout)
-    status = int(out.get("status", 0))
-    raw = out.get("body") or ""
-    try:
-        parsed = json.loads(raw) if raw else None
-    except json.JSONDecodeError:
-        parsed = raw
-    return status, parsed
+# ---------- HTTP layer ----------
 
 
 def _http(method: str, path: str, payload: object | None = None) -> tuple[int, object]:
@@ -137,17 +111,7 @@ def _http(method: str, path: str, payload: object | None = None) -> tuple[int, o
 
 
 def tm_request(method: str, path: str, payload: object | None = None) -> tuple[int, object]:
-    try:
-        return _http(method, path, payload)
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", exc)
-        if (isinstance(reason, OSError) and reason.errno in {111, 113, -2, -3}) or (
-            "Connection refused" in str(reason) or "Name or service not known" in str(reason)
-        ):
-            return _docker_exec_request(method, path, payload)
-        raise
-    except (ConnectionError, TimeoutError):
-        return _docker_exec_request(method, path, payload)
+    return _http(method, path, payload)
 
 
 def list_issues() -> list[dict]:
@@ -339,7 +303,7 @@ def dispatch(issue: dict, dry_run: bool) -> dict:
     )
     reply = extract_reply(proc.stdout or "") or "(no assistant reply captured)"
     marker_line = f"{MARKER} handled={proc.returncode == 0} rc={proc.returncode}"
-    post_comment(issue_id, f"{marker_line}\n\n{reply[:8000]}")
+    post_comment(issue_id, f"{marker_line}\n\n{reply[:MAX_COMMENT_REPLY_CHARS]}")
     if proc.returncode == 0 and str(issue.get("status") or "").strip().lower() == "to_do":
         try:
             patch_issue(issue_id, {"status": "in_progress", "updated_by": JERRY_USERNAME})

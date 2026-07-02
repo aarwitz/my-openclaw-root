@@ -1,6 +1,6 @@
 ---
 name: task-manager
-description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai for story/sprint visibility and direct issue mutations by authorized agents. Task Manager runtime is hosted; Dwight's local workspace copy remains at /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager for development/reference. Use this skill for Task Manager issues, comments, sprint assignment, and evidence uploads. Do not use it for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (EWAG value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for EWAG business context.
+description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai for story/sprint visibility and direct issue mutations by authorized agents. Use this skill for Task Manager issues, comments, sprint assignment, and evidence uploads. Do not use it for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (AutoTap value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for AutoTap business context.
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
@@ -10,7 +10,7 @@ The Task Manager is RSL's hosted project management system.
 
 Host mapping for Jerry runtime:
 - `https://tm.lidisolutions.ai` = canonical production Task Manager
-- `http://127.0.0.1:8000`, `http://localhost:8000`, `http://rsl:8000` = retired local lane; do not use
+- Localhost/Tailscale host aliases are forbidden.
 
 Dwight owns the Task Manager product/runtime/codebase. Authorized agents may mutate Task Manager issue state directly through the hosted API/MCP for normal execution work: create issues, update status, add comments, assign sprints, and upload evidence.
 
@@ -18,7 +18,7 @@ Boundary:
 - Use this skill for Task Manager data mutations.
 - Use `task-manager-maintainer` for Task Manager code changes.
 
-Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAPI + SQLite + vanilla JS frontend).
+Source code: `/home/aaron/.openclaw/workspaces/dwight/task-manager/` (FastAPI + SQLite + vanilla JS frontend).
 
 ## ⚠️ Story Creation Rules — READ FIRST
 
@@ -26,13 +26,13 @@ Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAP
 
 ### Before creating ANY story, pass ALL five gates:
 
-1. **EWAG value chain test**: Does this directly serve resident engagement → measurable data → owner ROI proof? If the story doesn't trace back to EWAG's core business (turning empty gyms into leasing advantages), do NOT create it.
+1. **AutoTap value chain test**: Does this directly serve resident engagement → measurable data → owner ROI proof? If the story doesn't trace back to AutoTap's core business (turning empty gyms into leasing advantages), do NOT create it.
 
 2. **Executable test**: Can the assignee sit down and complete a concrete deliverable (code change, design, config, doc update) within one sprint? If it's vague ("investigate," "explore," "improve cohesion," "make more consistent"), rewrite it as a specific action or skip it. **Exception**: investigation stories ARE allowed when they are a blocker to an important executable action — in that case, the story title must state what it unblocks (e.g., "[Backend] Investigate booking API response format — blocks: wire booking flow to CoachingView").
 
 3. **Deduplication test**: Search existing issues (`/api/issues/search?q=<keywords>&search_in=all`) BEFORE creating. If a similar story exists — even with different wording — update the existing one instead. Never create a duplicate.
 
-4. **ROI test**: Is this among the highest-impact actions Jerry could take right now? Estimate the effort (small/medium/large) and the impact on EWAG's ability to close deals, retain residents, or prove ROI. Prioritize high-impact/low-effort. Don't create low-impact stories when higher-impact work exists.
+4. **ROI test**: Is this among the highest-impact actions Jerry could take right now? Estimate the effort (small/medium/large) and the impact on AutoTap's ability to close deals, retain residents, or prove ROI. Prioritize high-impact/low-effort. Don't create low-impact stories when higher-impact work exists.
 
 5. **Materiality test**: Is this actually important? Not every screenshot imperfection needs a story. Not every idea deserves a ticket. Ask: "Would Aaron care about this?" If the answer is "probably not," don't create it.
 
@@ -43,7 +43,7 @@ Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAP
 - "Make [screen] more cohesive" — what does that mean concretely? Be specific or skip
 - Duplicate/overlapping stories that cover ground already tracked
 - Polish stories for screens that aren't functionally complete yet
-- Stories for features not in EWAG's actual service offering
+- Stories for features not in AutoTap's actual service offering
 - Low-ROI busywork when higher-impact work exists in the backlog
 
 ### Stories Jerry SHOULD create:
@@ -56,26 +56,24 @@ Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAP
 - Investigation spikes that unblock important work: "[Backend] Investigate booking API response format — blocks: wire booking flow to CoachingView"
 - Product ideas backed by research: "[Product] Add coach availability indicator to Home — competitor analysis shows 40% higher booking rates"
 
-### What EWAG actually delivers (know this before writing stories)
+### What AutoTap actually delivers (know this before writing stories)
 
-EWAG sells **human-led wellness activation** for apartment buildings:
+AutoTap sells **human-led wellness activation** for apartment buildings:
 - On-site personal trainers (5am–8pm), 1-on-1 coaching, group fitness
 - Nutrition coaching & wellness events
 - Resident rewards driving engagement habits
-- ResiLife owner dashboard proving utilization/engagement/retention/NOI
-- Zero CapEx, zero buildouts — EWAG manages everything
+- AutoTap owner dashboard proving utilization/engagement/retention/NOI
+- Zero CapEx, zero buildouts — AutoTap manages everything
 
-**Key metrics EWAG sells on**: $130–$400+ rent premium/unit/month, 20–40% faster lease-up, 3× resident satisfaction, 68% utilization growth, 87% participation rate. Every story should serve these outcomes.
+**Key metrics AutoTap sells on**: $130–$400+ rent premium/unit/month, 20–40% faster lease-up, 3× resident satisfaction, 68% utilization growth, 87% participation rate. Every story should serve these outcomes.
 
 **Target customers**: Class A/B multifamily, 150+ units, existing fitness amenity, property managers / asset managers / REIT decision-makers.
 
-The app exists to make EWAG's human wellness service feel like a **private fitness club** to residents and provide **real-time ROI proof** to owners.
+The app exists to make AutoTap's human wellness service feel like a **private fitness club** to residents and provide **real-time ROI proof** to owners.
 
 ## API Reference
 
 Canonical base URL for Jerry: `https://tm.lidisolutions.ai`
-
-Retired aliases: `http://127.0.0.1:8000`, `http://localhost:8000`, `http://rsl:8000`
 
 Rule: In commands and scripts, always use `https://tm.lidisolutions.ai`.
 
@@ -202,7 +200,7 @@ curl -s -X DELETE https://tm.lidisolutions.ai/api/issues/43/images/9
 ```bash
 curl -s -X POST https://tm.lidisolutions.ai/api/sprints \
   -H "Content-Type: application/json" \
-  -d '{"name": "ResiLife Sprint 3 — Coaching Polish"}'
+  -d '{"name": "AutoTap Sprint 3 — Coaching Polish"}'
 ```
 
 **List sprints:**
@@ -282,7 +280,7 @@ curl -s -X PATCH "https://tm.lidisolutions.ai/api/issues/${ISSUE}" \
   -d "{\"branch\": \"${BRANCH}\"}"
 
 # Create the git branch
-cd /home/aaron/repos/EWAG-dev-iosApp && git checkout -b "$BRANCH"
+cd /home/aaron/repos/AutoTap-iosApp && git checkout -b "$BRANCH"
 ```
 
 **Title format:** `[Area] Short action description`
@@ -291,7 +289,7 @@ cd /home/aaron/repos/EWAG-dev-iosApp && git checkout -b "$BRANCH"
 
 **Description format:**
 ```
-<What needs to change, why it matters to EWAG's value chain, and what "done" looks like>
+<What needs to change, why it matters to AutoTap's value chain, and what "done" looks like>
 
 Acceptance criteria:
 - [ ] Specific, testable condition 1
@@ -302,7 +300,7 @@ Acceptance criteria:
 **Quality checklist before submitting:**
 - [ ] Searched existing issues — no duplicate exists
 - [ ] Title is a concrete action, not an investigation (unless it's a blocker — see gate 2)
-- [ ] Description explains WHY this matters to EWAG/ResiLife
+- [ ] Description explains WHY this matters to AutoTap/AutoTap
 - [ ] Acceptance criteria are binary pass/fail testable
 - [ ] If investigation story, it explicitly states what important action it unblocks
 - [ ] ROI estimate: this is among the highest-impact things Jerry could do right now
@@ -327,7 +325,7 @@ When making progress on a story, Jerry should:
 2. **Run the reconciler first** if the issue already has a branch, so merged work is closed before any new coding starts
 3. **Check recent comments first** (last 3); only post if there is materially new information
 4. **Post comment** in dense format (3 bullets max: changed, evidence, next)
-5. **Upload screenshot** if the change is visual — capture via ewag-visual-qa skill, then upload:
+5. **Upload screenshot** if the change is visual — capture via autotap-visual-qa skill, then upload:
    ```bash
    # After capturing screenshot to /home/aaron/.openclaw/media/inbound/
    # Issue-level image:
@@ -347,7 +345,7 @@ Avoid comments that only restate prior status with no new output.
 
 For making code changes to the Task Manager itself (adding fields, changing endpoints, updating frontend modals), load the `task-manager-maintainer` skill. It covers backend/frontend sync, additive migrations, validation checklists, and the required workflow for safe end-to-end changes.
 
-Source code: `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` (FastAPI + SQLAlchemy + SQLite + vanilla JS)
+Source code: `/home/aaron/.openclaw/workspaces/dwight/task-manager/` (FastAPI + SQLAlchemy + SQLite + vanilla JS)
 Database: `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
 
 **To restart after code changes:**
@@ -363,22 +361,22 @@ Jerry doesn't just execute assigned tasks — Jerry runs a continuous product de
 ### The Loop: Ideate → Research → Prioritize → Execute → Test → Review → Learn → Repeat
 
 **Phase 1: Ideate**
-- After every build review, every screenshot comparison, every client email — ask: "What would make this product more valuable to EWAG's customers?"
-- Compare current app state against EWAG's website messaging and value props (see `ELITE_PROJECT_BRIEF.md`)
+- After every build review, every screenshot comparison, every client email — ask: "What would make this product more valuable to AutoTap's customers?"
+- Compare current app state against AutoTap's website messaging and value props (see `ELITE_PROJECT_BRIEF.md`)
 - Compare current screenshots against previous versions saved in Google Drive to spot regressions and improvements
-- Ideas must be grounded in EWAG's actual business: resident engagement, owner analytics, trainer operations
+- Ideas must be grounded in AutoTap's actual business: resident engagement, owner analytics, trainer operations
 
 **Phase 2: Research & Validate**
 - Before creating a story for a product idea, do lightweight research:
   - Use `web_search` to check competitor apps (Mindbody, ClassPass, building management apps)
   - Look at what similar wellness/fitness platforms charge, what features they highlight
-  - Estimate potential impact: "If we add X, does it help EWAG close more deals or retain more residents?"
+  - Estimate potential impact: "If we add X, does it help AutoTap close more deals or retain more residents?"
 - Spawn a subagent for deeper research when needed (competitive landscape, market sizing, best practices)
 - Document research findings in the story description so the rationale is preserved
 
 **Phase 3: Prioritize by ROI**
 - Before adding any new story to the sprint, rank it against existing backlog items by estimated ROI:
-  - **ROI = Impact on EWAG's deal-closing ability ÷ Engineering effort**
+  - **ROI = Impact on AutoTap's deal-closing ability ÷ Engineering effort**
   - High impact + low effort = do first (quick wins)
   - High impact + high effort = plan carefully, break down
   - Low impact + any effort = backlog or skip
@@ -393,7 +391,7 @@ Jerry doesn't just execute assigned tasks — Jerry runs a continuous product de
 **Phase 5: Test & Review**
 - Build on Mac node, capture screenshots, compare against previous Drive uploads
 - Run automated tests, observe results
-- Ask: "Does this move the needle for EWAG? Would a property owner be impressed seeing this?"
+- Ask: "Does this move the needle for AutoTap? Would a property owner be impressed seeing this?"
 
 **Phase 6: Learn & Feed Back**
 - After completing a story, write lessons learned to `memory/YYYY-MM-DD.md`
@@ -405,7 +403,7 @@ Jerry doesn't just execute assigned tasks — Jerry runs a continuous product de
 ### Making the Case for New Ideas
 
 When Jerry has a product idea that goes beyond existing stories, Jerry should build a case:
-1. **State the hypothesis**: "Adding X will improve Y for EWAG"
+1. **State the hypothesis**: "Adding X will improve Y for AutoTap"
 2. **Research support**: web search results, competitor analysis, market data
 3. **Estimate ROI**: impact vs. effort, with specific reasoning
 4. **Create a story (if it passes the 5 gates)** with the research embedded in the description

@@ -52,6 +52,12 @@ AGENTS = (
     {"id": "overseer", "name": "AutoTrade", "emoji": "🤖"},
 )
 
+# Temporary deterministic corporate-action overrides until a full upstream
+# announcements feed is wired into this builder path.
+SPLIT_OVERRIDES: dict[str, float] = {
+    "CRWD": 4.0,
+}
+
 
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -68,6 +74,112 @@ def _safe_float(value: Any, default: float | None = 0.0) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _rel_err(a: float, b: float) -> float:
+    denom = max(abs(a), abs(b), 1.0)
+    return abs(a - b) / denom
+
+
+def _normalize_broker_positions(
+    raw_positions: list[dict[str, Any]],
+    value_tol: float = 0.02,
+    pnl_tol: float = 0.02,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Normalize broker positions to one consistent basis.
+
+    We keep execution history untouched and only normalize the snapshot view.
+    Canonical arithmetic is:
+      market_value ~= qty * current_price
+      unrealized_pl ~= market_value - cost_basis
+      avg_entry_price ~= cost_basis / qty
+    """
+    normalized: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+
+    for p in raw_positions:
+        row = dict(p)
+        symbol = str(row.get("symbol") or row.get("ticker") or "?").upper()
+
+        qty = _safe_float(row.get("qty"), None)
+        price = _safe_float(row.get("current_price"), None)
+        mv = _safe_float(row.get("market_value"), None)
+        cost_basis = _safe_float(row.get("cost_basis"), None)
+        upl = _safe_float(row.get("unrealized_pl"), None)
+
+        split_ratio = float(SPLIT_OVERRIDES.get(symbol, 1.0) or 1.0)
+        avg_entry = _safe_float(row.get("avg_entry_price"), None)
+
+        # Corporate-action override: if this symbol is configured with a known
+        # split and still looks pre-split, normalize qty/basis/view fields.
+        if (
+            split_ratio > 1.0
+            and qty not in (None, 0.0)
+            and cost_basis is not None
+            and avg_entry is not None
+            and price not in (None, 0.0)
+            and avg_entry > (price * (split_ratio - 0.5))
+        ):
+            qty = qty * split_ratio
+            row["qty"] = qty
+            row["avg_entry_price"] = cost_basis / qty
+            if price is not None:
+                mv = qty * price
+                row["market_value"] = mv
+            if mv is not None:
+                upl = mv - cost_basis
+                row["unrealized_pl"] = upl
+                if cost_basis not in (None, 0.0):
+                    row["unrealized_plpc"] = upl / cost_basis
+            issues.append(
+                {
+                    "type": "corporate_action_split_applied",
+                    "symbol": symbol,
+                    "ratio": split_ratio,
+                }
+            )
+
+        # If qty is stale but value/price are live (typical split mismatch),
+        # infer normalized qty from market value and current price.
+        if mv is not None and price not in (None, 0.0):
+            inferred_qty = mv / price
+            if qty is None or _rel_err((qty or 0.0) * price, mv) > value_tol:
+                if qty is not None:
+                    issues.append(
+                        {
+                            "type": "qty_price_value_mismatch",
+                            "symbol": symbol,
+                            "reported_qty": qty,
+                            "normalized_qty": inferred_qty,
+                            "current_price": price,
+                            "market_value": mv,
+                        }
+                    )
+                qty = inferred_qty
+                row["qty"] = qty
+
+        if cost_basis is not None and qty not in (None, 0.0):
+            row["avg_entry_price"] = cost_basis / qty
+
+        if mv is not None and cost_basis is not None:
+            normalized_upl = mv - cost_basis
+            if upl is None or _rel_err(upl, normalized_upl) > pnl_tol:
+                if upl is not None:
+                    issues.append(
+                        {
+                            "type": "unrealized_pl_mismatch",
+                            "symbol": symbol,
+                            "reported_unrealized_pl": upl,
+                            "normalized_unrealized_pl": normalized_upl,
+                        }
+                    )
+                row["unrealized_pl"] = normalized_upl
+            if cost_basis not in (None, 0.0):
+                row["unrealized_plpc"] = normalized_upl / cost_basis
+
+        normalized.append(row)
+
+    return normalized, issues
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +438,12 @@ def _snapshot_spy_comparison(points: list[dict[str, Any]]) -> dict[str, Any]:
 def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     try:
         acct = get_account()
-        positions = list_positions()
+        raw_positions = list_positions()
         orders = list_orders(status="all", limit=20)
+        positions, norm_issues = _normalize_broker_positions(raw_positions)
+        blocking_norm_issues = [
+            i for i in norm_issues if i.get("type") != "corporate_action_split_applied"
+        ]
         broker = {
             "status": acct.get("status"),
             "account_number": acct.get("account_number"),
@@ -339,6 +455,8 @@ def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[
             - _safe_float(acct.get("last_equity"), 0.0),
             "available": True,
             "name": "alpaca_paper",
+            "pnl_available": len(blocking_norm_issues) == 0,
+            "normalization_issues": norm_issues,
         }
         return broker, positions, orders
     except ConnectorError as exc:

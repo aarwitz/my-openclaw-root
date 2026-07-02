@@ -161,27 +161,6 @@
         }
       },
       {
-        "id": "resi",
-        "workspace": "/home/aaron/.openclaw/workspaces/resi",
-        "model": "openai/gpt-5.4",
-        "tools": {
-          "profile": "full",
-          "allow": [
-            "message",
-            "group:messaging"
-          ]
-        },
-        "groupChat": {
-          "mentionPatterns": [
-            "@resi_rsl_bot\\b"
-          ]
-        },
-        "identity": {
-          "name": "Resi",
-          "emoji": "\ud83c\udfd7\ufe0f"
-        }
-      },
-      {
         "id": "researcher",
         "workspace": "/home/aaron/.openclaw/workspaces/researcher",
         "model": "openai/gpt-5.4",
@@ -362,47 +341,12 @@
         },
         "skills": [
           "task-manager-maintainer",
-          "resilife-product",
-          "ewag-visual-qa",
-          "ewag_build",
-          "ewag_capture",
-          "ewag_test",
-          "ewag_testing_menu",
           "newsapi-ai",
           "cloudflare"
         ],
         "identity": {
           "name": "Dwight",
           "emoji": "\ud83d\udccb"
-        }
-      },
-      {
-        "id": "Montra-PM",
-        "workspace": "/home/aaron/.openclaw/workspaces/montraassistant",
-        "model": "openai/gpt-5.4",
-        "tools": {
-          "profile": "full",
-          "allow": [
-            "message",
-            "group:messaging"
-          ],
-          "exec": {
-            "host": "gateway",
-            "security": "allowlist",
-            "ask": "off"
-          }
-        },
-        "skills": [
-          "github-ssh",
-          "task-manager"
-        ],
-        "subagents": {
-          "delegationMode": "suggest",
-          "allowAgents": []
-        },
-        "identity": {
-          "name": "Montra-PM",
-          "emoji": "\ud83d\udcf1"
         }
       },
       {
@@ -485,13 +429,6 @@
     {
       "match": {
         "channel": "telegram",
-        "accountId": "resi"
-      },
-      "agentId": "resi"
-    },
-    {
-      "match": {
-        "channel": "telegram",
         "accountId": "dwight"
       },
       "agentId": "dwight"
@@ -534,8 +471,7 @@
     },
     "exec": {
       "strictInlineEval": true,
-      "host": "gateway",
-      "node": "ios-build-node"
+      "host": "gateway"
     },
     "media": {
       "models": [
@@ -635,50 +571,16 @@
             "github-ssh",
             "task-manager"
           ],
-          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker \u2014 route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
+          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions."
         },
         "-1003910955362": {
           "requireMention": true,
           "skills": [
             "task-manager",
-            "resilife-product",
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are Dwight for project management and Task Manager execution at http://127.0.0.1:8000.\n\nRules:\n- Apply task-manager quality gates and update existing issues before opening new ones.\n- For code stories, set branch field: issue-<id>-<short-slug>.\n- Assign first blocking owner (Jerry, Resi, Druck, Dwight, Aaron).\n\nRun contract:\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute:\n  /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute\n- Auto-launch actionable coding issues when repo path is known; if missing, ask one follow-up for absolute path.\n- Return lane, ownerAgent, taskId, metadata path, and terminal summary.\n\nSafety:\n- Route EWAG iOS validation through ios-build-node scripts.\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Prefer hot reload for config edits.\n\nRefs: EWAG_INFRA.md, AGENTS.md, HEARTBEAT.md"
-        },
-        "-1003643056525": {
-          "requireMention": true,
-          "skills": [
-            "resilife-product",
-            "ewag-visual-qa",
-            "ewag_build",
-            "ewag_capture",
-            "ewag_test",
-            "ewag_testing_menu",
-            "task-manager",
-            "gog",
-            "github-ssh"
-          ],
-          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution \u2014 requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift \u2014 route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
-          "topics": {
-            "1": {
-              "agentId": "resi",
-              "systemPrompt": "You are Resi in EWAG topic 1. Focus: ResiLife iOS product execution updates, build/test state, blockers, and milestone clarity.\n\n## Cross-bot relay protocol (Dwight in EWAG)\n- Internal relay is the source of truth for bot-to-bot handoff.\n- `@dwight_rsl_bot ...` means Dwight expects a reply.\n- `FYI @dwight_rsl_bot ...` or `cc @dwight_rsl_bot ...` means listen-only: Dwight should absorb silently.\n- When replying to any Dwight-directed request, end your final line with exactly one directive token:\n  - `RESPOND_EXPECTED` or\n  - `LISTEN_ONLY`\n- Keep that directive explicit so Dwight can decide whether to continue dialog or just store context.\n\n## Update format for Dwight\n- build_health: <green|yellow|red + 1 line>\n- top_blocker: <1 line>\n- next_milestone: <1 line + ETA>\n- directive: <RESPOND_EXPECTED|LISTEN_ONLY>\n\nBe concise, factual, and action-oriented."
-            },
-            "975": {
-              "agentId": "resi",
-              "skills": [
-                "ewag_build",
-                "ewag_capture",
-                "ewag_test",
-                "ewag_testing_menu",
-                "gog",
-                "github-ssh"
-              ],
-              "systemPrompt": "EWAG Manual Testing topic: execute capture/build/test commands directly on gateway and return Drive links plus pass/fail.\n\nImmediate command dispatch:\n- /ewag_capture <view> [opts] -> ~/.openclaw/scripts/ewag-capture.sh <view> [opts]\n- /ewag_capture <view> record [opts] or /ewag_record -> same script in recording mode\n- /ewag_build [args] -> ~/.openclaw/scripts/ewag-build.sh [args]\n- /ewag_test [args] -> ~/.openclaw/scripts/ewag-test.sh [args]\n- /bash <cmd> -> raw shell\n\nPipeline for capture requests:\n1. ~/.openclaw/scripts/credential-preflight.sh\n2. ~/.openclaw/scripts/ewag-capture.sh <view>\n3. Return Drive links + pass/fail summary\n\nHard rules:\n- Do not load ewag-visual-qa and do not perform screenshot analysis in this topic.\n- Upload media through scripts to Drive; do not send raw image attachments.\n- Prefer execution over analysis.\n- Keep responses concise and outcome-first."
-            }
-          }
+          "systemPrompt": "You are Dwight for project management and Task Manager execution at https://tm.lidisolutions.ai.\n\nRules:\n- Apply task-manager quality gates and update existing issues before opening new ones.\n- For code stories, set branch field: issue-<id>-<short-slug>.\n- Assign first blocking owner (Jerry, Druck, Dwight, Aaron).\n\nRun contract:\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute:\n  /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute\n- Auto-launch actionable coding issues when repo path is known; if missing, ask one follow-up for absolute path.\n- Return lane, ownerAgent, taskId, metadata path, and terminal summary.\n\nSafety:\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Prefer hot reload for config edits."
         },
         "-5293851949": {
           "requireMention": true,
@@ -727,7 +629,7 @@
                 "financialmodeling-prep-api",
                 "task-manager"
               ],
-              "systemPrompt": "You are AutoTrade (agent id overseer) in Trading Desk topic 641. You are\nthe chat front door + pipeline orchestrator. You do not have a human name.\n\nThe canonical system description lives in /home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md and it wins over local summaries.\nPipeline order is strict: researcher -> quant -> critic -> trader -> risk -> executor.\narchivist runs the learning loop. developer owns scripts/schema/connectors.\ndwight owns rsl-task-manager.\n\nChat behavior:\n- @druck_rsl_bot -> reply expected.\n- FYI/cc -> listen-only.\n- No markdown tables, no pipe-separated rows, no fenced code blocks unless\n  explicitly requested.\n- For trade execution: follow the canonical pipeline and gate ownership from\n  SYSTEM_ARCHITECTURE.md; trader authors intents, risk owns the final\n  intent->order veto, executor places paper orders.\n- For dev/infra changes: spawn developer.\n- For task manager work: spawn dwight.\n- For status: read data.json at\n  /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n- For the priority queue and overseer helper scripts: use\n  ~/.openclaw/scripts/run-with-trace.sh with scripts under\n  /home/aaron/.openclaw/workspaces/overseer/scripts/\n"
+              "systemPrompt": "You are AutoTrade (agent id overseer) in Trading Desk topic 641. You are\nthe chat front door + pipeline orchestrator. You do not have a human name.\n\nThe canonical system description lives in /home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md and it wins over local summaries.\nPipeline order is strict: researcher -> quant -> critic -> trader -> risk -> executor.\narchivist runs the learning loop. developer owns scripts/schema/connectors.\ndwight owns task-manager.\n\nChat behavior:\n- @druck_rsl_bot -> reply expected.\n- FYI/cc -> listen-only.\n- No markdown tables, no pipe-separated rows, no fenced code blocks unless\n  explicitly requested.\n- For trade execution: follow the canonical pipeline and gate ownership from\n  SYSTEM_ARCHITECTURE.md; trader authors intents, risk owns the final\n  intent->order veto, executor places paper orders.\n- For dev/infra changes: spawn developer.\n- For task manager work: spawn dwight.\n- For status: read data.json at\n  /home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json\n- For the priority queue and overseer helper scripts: use\n  ~/.openclaw/scripts/run-with-trace.sh with scripts under\n  /home/aaron/.openclaw/workspaces/overseer/scripts/\n"
             }
           }
         }
@@ -755,20 +657,6 @@
           "enabled": true,
           "dmPolicy": "pairing",
           "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-druck",
-          "allowFrom": [
-            "6043080629",
-            "8337717908"
-          ],
-          "groupAllowFrom": [
-            "6043080629",
-            "8337717908"
-          ],
-          "groupPolicy": "allowlist"
-        },
-        "resi": {
-          "enabled": true,
-          "dmPolicy": "pairing",
-          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-resi",
           "allowFrom": [
             "6043080629",
             "8337717908"

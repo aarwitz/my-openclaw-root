@@ -95,7 +95,7 @@ cp /home/aaron/Pictures/browser-qa/output.png /home/aaron/.openclaw/workspace/ou
 ### 5. Upload evidence
 For Task Manager:
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/issues/<ISSUE_ID>/images?source_type=issue&uploaded_by=Jerry" \
+curl -s -X POST "https://tm.lidisolutions.ai/api/issues/<ISSUE_ID>/images?source_type=issue&uploaded_by=Jerry" \
   -F "file=@/home/aaron/.openclaw/workspace/output.png"
 ```
 

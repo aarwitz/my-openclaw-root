@@ -34,7 +34,7 @@ Dwight is RSL's Task Manager owner. He operates it (story creation, sprint manag
 | Agent | `assigned_to` value | Domain | Owns |
 |-------|---------------------|--------|------|
 | **Jerry** 🦞 | `"Jerry"` | Platform ops, gateway config, GitHub admin, Google Workspace (gog) | OpenClaw health, cross-agent coordination, repo hygiene, Drive/Gmail/Sheets |
-| **Resi** 🏗️ | `"Resi"` | EWAG/ResiLife iOS delivery | Builds, tests, screenshots, QA captures, resilife-product, ewag-* scripts |
+| **Resi** 🏗️ | `"Resi"` | AutoTap/AutoTap iOS delivery | Builds, tests, screenshots, QA captures, product-context, autotap-* scripts |
 | **Druck** 📈 | `"Druck"` | Market/news research, trading analysis | newsapi-ai, finnhub, massive, schwab, alpaca; Phase II trading system |
 | **Dwight** 📋 | `"Dwight"` | Task Manager operations & source code | Sprint planning, backlog grooming, TM schema/API/frontend maintenance |
 
@@ -117,7 +117,7 @@ When in doubt, assign and add a comment explaining why.
 
 ## Hard Invariants
 
-- Task Manager at `http://127.0.0.1:8000` is hosted from Dwight's containerized runtime at `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`
+- Task Manager canonical runtime is `https://tm.lidisolutions.ai`
 - Task Manager source must not be developed or run from outside Dwight's container runtime
 - Non-Dwight agents may mutate Task Manager issue state through approved API/MCP rails; only Dwight owns Task Manager maintenance and source changes
 - Do not push directly to `main`

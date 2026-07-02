@@ -30,8 +30,8 @@
   ],
   "exemptDirs": [
     {
-      "path": "~/.openclaw/workspaces/dwight/rsl-task-manager/scripts",
-      "reason": "Runs inside the dwight-taskmanager container which does NOT mount ~/.openclaw. App control scripts, not OpenClaw ops."
+      "path": "~/.openclaw/workspaces/dwight/task-manager/scripts",
+      "reason": "Runs inside the lidi-task-manager-local container which does NOT mount ~/.openclaw. App control scripts, not OpenClaw ops."
     }
   ],
   "exemptScripts": [
@@ -51,8 +51,8 @@
       "consequence": "Every OpenClaw agent sees one shared scripts/ tree and one shared script-runs.jsonl."
     },
     "isolated": [
-      {"container": "dwight-taskmanager", "scope": "app runtime; out of scope"},
-      {"container": "lidi-task-manager-ewag-agent-*", "scope": "ewag iOS build runners; out of scope"}
+      {"container": "lidi-task-manager-local", "scope": "app runtime; out of scope"},
+      {"container": "lidi-task-manager-autotap-agent-*", "scope": "AutoTap iOS build runners; out of scope"}
     ]
   }
 }

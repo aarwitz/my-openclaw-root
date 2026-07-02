@@ -20,7 +20,7 @@ Canonical base URL: `https://tm.lidisolutions.ai`
 ## Non-Negotiable Story Gates
 
 Before creating any new story, all gates must pass:
-1. EWAG value-chain alignment
+1. AutoTap value-chain alignment
 2. Executable within one sprint
 3. No duplicate (search first)
 4. High ROI versus current backlog
@@ -69,7 +69,7 @@ Return:
 
 ## On-Demand Deep Reference
 
-For full API examples, story-writing standards, EWAG business context details, and autonomous loop guidance, read:
+For full API examples, story-writing standards, AutoTap business context details, and autonomous loop guidance, read:
 - `workspace/skills/task-manager/REFERENCE_FULL.md`
 
 Load that file only when needed; keep normal runs on this lean router.

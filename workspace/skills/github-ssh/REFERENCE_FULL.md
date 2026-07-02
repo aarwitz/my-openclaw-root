@@ -110,7 +110,7 @@ Examples:
 /home/aaron/.openclaw/scripts/gh-account-router.sh --agent main pr create --fill
 
 # Resi -> aaronclawrsl-bot
-/home/aaron/.openclaw/scripts/gh-account-router.sh --agent resi pr list --repo EWAG-dev/iosApp
+/home/aaron/.openclaw/scripts/gh-account-router.sh --agent resi pr list --repo AutoTap
 ```
 
 Never call raw `gh ...` for mutations from bot workflows.

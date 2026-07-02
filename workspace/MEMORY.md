@@ -4,7 +4,7 @@ Durable memory only. Stable preferences, long-term context, recurring constraint
 Use `memory/YYYY-MM-DD.md` for daily logs and short-lived notes.
 Procedures and reference data belong in skills or repo docs (not here).
 
-**Last pruned: 2026-05-06** — consolidated EWAG docs, removed duplicated Drive table and skill list.
+**Last pruned: 2026-05-06** — consolidated AutoTap docs, removed duplicated Drive table and skill list.
 
 ## Owner
 
@@ -31,9 +31,9 @@ Procedures and reference data belong in skills or repo docs (not here).
 - Linux gateway is the control plane (Ubuntu, RTX 3060). All non-iOS work is local.
 - Task Manager primary runtime: https://tm.lidisolutions.ai
 - Hosted Task Manager repo: `aarwitz/lidi-task-manager`
-- Dwight workspace copy remains at `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/` for local development/reference until fully consolidated
-- Before resuming a TM issue or branching in EWAG, run `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
-- iOS work: see `EWAG_INFRA.md` (single source of truth for Mac node, ios-agent, Drive folders, scripts, test catalog)
+- Dwight workspace copy remains at `/home/aaron/.openclaw/workspaces/dwight/task-manager/` for local development/reference until fully consolidated
+- Before resuming a TM issue or branching in AutoTap, run `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
+- iOS work: see `AutoTap_INFRA.md` (single source of truth for Mac node, ios-agent, Drive folders, scripts, test catalog)
 
 ## Google
 

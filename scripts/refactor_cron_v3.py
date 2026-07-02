@@ -107,7 +107,7 @@ def main() -> int:
             "agentId": "dwight",
             "sessionTarget": "isolated",
             "name": POLL_NAME,
-            "description": "Poll ~/.openclaw/state/priority-queue.jsonl every 6h; promote eligible rows into rsl-task-manager issues on sprint 5 via Dwight's queue rail.",
+            "description": "Poll ~/.openclaw/state/priority-queue.jsonl every 6h; promote eligible rows into task-manager issues on sprint 5 via Dwight's queue rail.",
             "createdAtMs": int(time.time() * 1000),
             "wakeMode": "now",
             "enabled": True,

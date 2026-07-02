@@ -68,7 +68,7 @@ Note: native OpenClaw chat flows in `openclaw.json` currently run through skills
 
 Environment variables:
 
-- `TM_BASE_URL` (default inside the gateway container: `http://taskmanager:8000`)
+- `TM_BASE_URL` (default: `https://tm.lidisolutions.ai`)
 - `TM_TIMEOUT_SECONDS` (default: `15`)
 - `TM_DEFAULT_ACTOR` (default: `Dwight`)
 - `TM_READ_ONLY` (`true|false`, default `false`)
@@ -80,10 +80,10 @@ Treat MCP as a compatibility layer with explicit checks.
 
 Default runtime note:
 
-- Agents running inside the OpenClaw gateway container should use the internal Docker-network origin `http://taskmanager:8000`.
-- `https://tm.lidisolutions.ai` is the browser-facing public host and may enforce sign-in and edge filtering that do not apply to internal agent traffic.
+- Agents must use `https://tm.lidisolutions.ai` for Task Manager access.
+- Retired local aliases are not supported and should not be used in any runtime.
 
-1. Make Task Manager backend change in `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`.
+1. Make Task Manager backend change in `/home/aaron/.openclaw/workspaces/dwight/task-manager/`.
 2. Run contract check:
 
 ```bash

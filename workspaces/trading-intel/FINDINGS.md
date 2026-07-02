@@ -13,6 +13,24 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ---
 
+## 2026-07-02 (evening) — v5 ranker on the full 600-name panel (X-600 + LLM-news + EDGAR + peer features complete)
+
+- **X-attention dilution CONFIRMED, and it plateaus rather than collapses**: pooled IC
+  0.056 (32 mega-caps) → 0.034 (83 names) → **0.0338 (600 names)**. The signal loses ~40%
+  of its strength once you leave the mega-cap core and then stabilizes — the mid-cap tail
+  adds noise but not enough to destroy it. Verdict: build attention-per-liquidity-tier
+  (separate z-scores within market-cap buckets) rather than one global column; the
+  mega-cap tier likely still carries ~0.05+.
+
+- **v5 (600 names, all four new feature families live) is the best model yet on
+  risk-adjusted terms but still below the promotion bar**: coverage-era IC 0.0428,
+  **ICIR 1.12** (v4: 1.01), t-stat 1.75 (v4: 1.58), decile L/S +12.5%/yr net, top-decile
+  long-only +1.41%/rebalance, 62% positive months. Per-year IC is monotonically improving
+  (2024: 0.031 → 2025: 0.048 → 2026: 0.060) — exactly the data-breadth story. Still short
+  of promotion (needs t>3) and realized vol alone (0.0713) still beats the ensemble on
+  raw coverage-era IC. The widened universe traded raw spread (18.3%→12.5% L/S) for
+  consistency (ICIR up, t up) — breadth diversifies away the semis-concentration luck.
+
 ## 2026-07-02 — from the first walk-forward GBM ranker evaluation (`ml_ranker.py`, 62k samples, 600 names, 2020–2026)
 
 - **The same model is noise on 2020–2023 and institutional-grade on 2024–2026 — data

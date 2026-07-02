@@ -12,8 +12,8 @@ set -euo pipefail
 
 AGENT_DIR="$HOME/ios-agent"
 PROJECT_DIR="/Users/taylorolsen-vogt/iosApp"
-PROJECT="EWAG.xcodeproj"
-SCHEME="ResiLife"
+PROJECT="AutoTap.xcodeproj"
+SCHEME="AutoTap"
 BUNDLE_ID="com.elitepro.resilife"
 DERIVED_DATA="$PROJECT_DIR/DerivedData"
 ARTIFACTS_DIR="$AGENT_DIR/artifacts"
@@ -26,7 +26,7 @@ RECORDING_OUTPUT_FILE="$AGENT_DIR/.recording.path"
 mkdir -p "$ARTIFACTS_DIR" "$LOGS_DIR"
 
 # --- Single-repo enforcement ---
-# Only one EWAG checkout should exist. Warn if duplicates are found.
+# Only one AutoTap checkout should exist. Warn if duplicates are found.
 _check_duplicate_repos() {
   local dupes=""
   local gitdir repo remote
@@ -34,12 +34,12 @@ _check_duplicate_repos() {
     repo=$(dirname "$gitdir")
     [[ "$repo" == "$PROJECT_DIR" ]] && continue
     remote=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
-    if [[ "$remote" == *"EWAG-dev/iosApp"* || "$remote" == *"aarwitz/iosApp"* ]]; then
+    if [[ "$remote" == *"AutoTap"* || "$remote" == *"aarwitz/iosApp"* ]]; then
       dupes="${dupes}  ${repo} (${remote})"$'\n'
     fi
   done < <(find "$HOME" -maxdepth 3 -name ".git" -type d 2>/dev/null || true)
   if [[ -n "$dupes" ]]; then
-    echo "WARNING: Duplicate EWAG iOS repo checkouts found on this Mac:" >&2
+    echo "WARNING: Duplicate AutoTap iOS repo checkouts found on this Mac:" >&2
     echo "$dupes" >&2
     echo "The canonical repo is: $PROJECT_DIR" >&2
     echo "Remove duplicates to avoid confusion and save disk space." >&2
@@ -569,7 +569,7 @@ except:
       TEST_CASE="OwnerUITests/$TEST_CASE"
     fi
 
-    ONLY_TESTING="ResiLifeUITests/$TEST_CASE"
+    ONLY_TESTING="AutoTapUITests/$TEST_CASE"
     TS=$(timestamp)
     LOG="$LOGS_DIR/record-test-$TS.log"
     RECORDING="$ARTIFACTS_DIR/recording-$TS.mp4"
@@ -586,9 +586,9 @@ except:
     cd "$PROJECT_DIR"
     PREBUILD_EXIT=0
     if [[ "$LIVE_DEMO_AUTH" == "1" ]]; then
-      UI_TEST_USE_LIVE_DEMO_AUTH=1 xcodebuild build-for-testing         -project "$PROJECT"         -scheme "$SCHEME"         -destination "$DESTINATION"         -derivedDataPath "$DERIVED_DATA"         -parallel-testing-enabled NO         -only-testing:"$ONLY_TESTING"         -skip-testing:ResiLifeTests         2>&1 | tee "$LOG" || PREBUILD_EXIT=$?
+      UI_TEST_USE_LIVE_DEMO_AUTH=1 xcodebuild build-for-testing         -project "$PROJECT"         -scheme "$SCHEME"         -destination "$DESTINATION"         -derivedDataPath "$DERIVED_DATA"         -parallel-testing-enabled NO         -only-testing:"$ONLY_TESTING"         -skip-testing:AutoTapTests         2>&1 | tee "$LOG" || PREBUILD_EXIT=$?
     else
-      xcodebuild build-for-testing         -project "$PROJECT"         -scheme "$SCHEME"         -destination "$DESTINATION"         -derivedDataPath "$DERIVED_DATA"         -parallel-testing-enabled NO         -only-testing:"$ONLY_TESTING"         -skip-testing:ResiLifeTests         2>&1 | tee "$LOG" || PREBUILD_EXIT=$?
+      xcodebuild build-for-testing         -project "$PROJECT"         -scheme "$SCHEME"         -destination "$DESTINATION"         -derivedDataPath "$DERIVED_DATA"         -parallel-testing-enabled NO         -only-testing:"$ONLY_TESTING"         -skip-testing:AutoTapTests         2>&1 | tee "$LOG" || PREBUILD_EXIT=$?
     fi
 
     if [[ $PREBUILD_EXIT -ne 0 ]]; then
@@ -610,7 +610,7 @@ except:
         -derivedDataPath "$DERIVED_DATA" \
         -parallel-testing-enabled NO \
         -only-testing:"$ONLY_TESTING" \
-        -skip-testing:ResiLifeTests \
+        -skip-testing:AutoTapTests \
         -resultBundlePath "$RESULT_BUNDLE" \
         >>"$LOG" 2>&1 &
     else
@@ -621,7 +621,7 @@ except:
         -derivedDataPath "$DERIVED_DATA" \
         -parallel-testing-enabled NO \
         -only-testing:"$ONLY_TESTING" \
-        -skip-testing:ResiLifeTests \
+        -skip-testing:AutoTapTests \
         -resultBundlePath "$RESULT_BUNDLE" \
         >>"$LOG" 2>&1 &
     fi
@@ -862,7 +862,7 @@ CONFEOF
     ;;
 
   test-list)
-    echo "Listing UI tests in ResiLifeUITests..."
+    echo "Listing UI tests in AutoTapUITests..."
     cd "$PROJECT_DIR"
     TEST_OUTPUT=$(xcodebuild test \
       -project "$PROJECT" \
@@ -870,8 +870,8 @@ CONFEOF
       -destination "$DESTINATION" \
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
-      -only-testing:ResiLifeUITests \
-      -skip-testing:ResiLifeTests \
+      -only-testing:AutoTapUITests \
+      -skip-testing:AutoTapTests \
       -enumerate-tests \
       2>&1) || true
 
@@ -903,7 +903,7 @@ CONFEOF
       TEST_CASE="OwnerUITests/$TEST_CASE"
     fi
 
-    ONLY_TESTING="ResiLifeUITests/$TEST_CASE"
+    ONLY_TESTING="AutoTapUITests/$TEST_CASE"
     TS=$(timestamp)
     LOG="$LOGS_DIR/test-$TS.log"
     RESULT_BUNDLE="$ARTIFACTS_DIR/test-$TS.xcresult"
@@ -921,7 +921,7 @@ CONFEOF
         -derivedDataPath "$DERIVED_DATA" \
         -parallel-testing-enabled NO \
         -only-testing:"$ONLY_TESTING" \
-        -skip-testing:ResiLifeTests \
+        -skip-testing:AutoTapTests \
         -resultBundlePath "$RESULT_BUNDLE" \
         2>&1 | tee "$LOG" || TEST_EXIT=$?
     else
@@ -932,7 +932,7 @@ CONFEOF
         -derivedDataPath "$DERIVED_DATA" \
         -parallel-testing-enabled NO \
         -only-testing:"$ONLY_TESTING" \
-        -skip-testing:ResiLifeTests \
+        -skip-testing:AutoTapTests \
         -resultBundlePath "$RESULT_BUNDLE" \
         2>&1 | tee "$LOG" || TEST_EXIT=$?
     fi
@@ -960,7 +960,7 @@ CONFEOF
     LOG="$LOGS_DIR/test-all-$TS.log"
     RESULT_BUNDLE="$ARTIFACTS_DIR/test-all-$TS.xcresult"
 
-    echo "Running full UI test suite (ResiLifeUITests)..."
+    echo "Running full UI test suite (AutoTapUITests)..."
     cd "$PROJECT_DIR"
 
     TEST_EXIT=0
@@ -970,8 +970,8 @@ CONFEOF
       -destination "$DESTINATION" \
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
-      -only-testing:ResiLifeUITests \
-      -skip-testing:ResiLifeTests \
+      -only-testing:AutoTapUITests \
+      -skip-testing:AutoTapTests \
       -resultBundlePath "$RESULT_BUNDLE" \
       2>&1 | tee "$LOG" || TEST_EXIT=$?
 

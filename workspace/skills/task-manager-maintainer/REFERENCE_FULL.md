@@ -9,7 +9,7 @@ metadata: {"clawdbot":{"emoji":"🔧"}}
 ## Purpose
 Apply safe, end-to-end changes to the Task Manager repo where backend API, DB model/migrations, and frontend issue workflows must stay in sync.
 
-**Source code:** `/home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/`
+**Source code:** `/home/aaron/.openclaw/workspaces/dwight/task-manager/`
 **Database:** `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db` (SQLite, persists across restarts)
 **Tech stack:** FastAPI + SQLAlchemy + SQLite + vanilla JS
 
@@ -94,7 +94,7 @@ Read the full request and identify all affected layers before touching code:
 - Restart server and verify:
   ```bash
   pkill -f "uvicorn main:app" || true
-  cd /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager && ./scripts/tmctl.sh start
+  cd /home/aaron/.openclaw/workspaces/dwight/task-manager && ./scripts/tmctl.sh start
   ```
 - Smoke test API endpoints with curl
 

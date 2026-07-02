@@ -6,7 +6,7 @@
         "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
       ],
       "env": {
-        "TM_BASE_URL": "http://taskmanager:8000",
+        "TM_BASE_URL": "https://tm.lidisolutions.ai",
         "TM_DEFAULT_ACTOR": "Jerry",
         "TM_READ_ONLY": "false",
         "TM_WRITE_ACTOR": "Dwight"
@@ -18,7 +18,7 @@
         "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
       ],
       "env": {
-        "TM_BASE_URL": "http://taskmanager:8000",
+        "TM_BASE_URL": "https://tm.lidisolutions.ai",
         "TM_DEFAULT_ACTOR": "Resi",
         "TM_READ_ONLY": "false",
         "TM_WRITE_ACTOR": "Dwight"
@@ -30,7 +30,7 @@
         "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
       ],
       "env": {
-        "TM_BASE_URL": "http://taskmanager:8000",
+        "TM_BASE_URL": "https://tm.lidisolutions.ai",
         "TM_DEFAULT_ACTOR": "Dwight",
         "TM_READ_ONLY": "false",
         "TM_WRITE_ACTOR": "Dwight"
@@ -42,7 +42,7 @@
         "/home/aaron/.openclaw/workspace/mcp/task-manager-mcp/server.py"
       ],
       "env": {
-        "TM_BASE_URL": "http://taskmanager:8000",
+        "TM_BASE_URL": "https://tm.lidisolutions.ai",
         "TM_DEFAULT_ACTOR": "Druck",
         "TM_READ_ONLY": "false",
         "TM_WRITE_ACTOR": "Dwight"

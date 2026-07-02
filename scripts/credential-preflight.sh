@@ -4,12 +4,8 @@ set -euo pipefail
 
 # credential-preflight.sh
 # Fast-fail health checks for auth-backed dependencies Jerry relies on.
-# Catches: auth drift, gateway misconfiguration, node unreachability, SSH key issues.
+# Catches: auth drift, gateway misconfiguration, SSH key issues.
 
-NODE_NAME="ios-build-node"
-MAC_USER="${EWAG_MAC_USER:-taylorolsen-vogt}"
-SSH_HOST="${EWAG_MAC_SSH_HOST:-${MAC_USER}@100.125.133.123}"
-IOS_AGENT_BIN="${EWAG_IOS_AGENT_BIN:-/Users/${MAC_USER}/ios-agent/ios-agent}"
 PREFLIGHT_CACHE_DIR="${HOME}/.openclaw/tmp/preflight-cache"
 GOOGLE_CHECK_TTL_SEC="${GOOGLE_CHECK_TTL_SEC:-14400}"
 GH_ROUTER_BIN="/home/aaron/.openclaw/scripts/gh-account-router.sh"
@@ -101,14 +97,6 @@ check "model auth" "$OPENCLAW_BIN" models status --check
 
 # --- Gateway bind verification (prevents loopback/tailnet drift) ---
 check_output "gateway bind (listening on 0.0.0.0)" "(0\.0\.0\.0|\[::\]|:::?)?\s*:18789" ss -ltnp
-
-# --- Node connectivity ---
-echo "      checking ios-build-node..."
-check "node reachable" ssh -o BatchMode=yes -o ConnectTimeout=10 "${MAC_USER}@100.125.133.123" \
-  "$IOS_AGENT_BIN branch"
-
-# --- SSH to Mac (BatchMode — no password prompts) ---
-check "mac ssh (BatchMode)" ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" 'echo OK'
 
 # --- GitHub ---
 check "github auth" gh auth status

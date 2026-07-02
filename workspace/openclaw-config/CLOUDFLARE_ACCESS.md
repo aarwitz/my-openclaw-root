@@ -5,7 +5,7 @@ This file is a lightweight legacy pointer only.
 ## Current Setup (2026-05-10)
 
 - Cloudflare Tunnel (`vision-app.redstonelabs.us`) is decommissioned.
-- The mini app is served via Tailscale VPN at `http://rsl:8000`.
+- The mini app is served from `https://tm.lidisolutions.ai`.
 - Mini app path: `/static/miniapp.html?group=telegram:-4995650408`.
 
 ## Official Source Of Truth

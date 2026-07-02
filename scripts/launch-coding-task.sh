@@ -32,9 +32,7 @@ fallback_applied="false"
 fallback_reason=""
 acp_preflight_status="not-run"
 acp_preflight_detail=""
-is_ewag_owner="false"
 effective_repo_path=""
-ewag_container_name="${OPENCLAW_EWAG_CONTAINER_NAME:-ewag-bot-sandbox}"
 
 should_retry_codex_timeout() {
   local output="$1"
@@ -102,11 +100,8 @@ Execution options:
   --help
 
 Policy:
-  Boundary checks are fail-closed. EWAG owner agents may target only EWAG repos,
-  and RSL owner agents are blocked from EWAG repos.
-  EWAG execute prefers the EWAG sandbox container when available. If docker or
-  the sandbox container is unavailable in this runtime, launch falls back to
-  direct OpenClaw execution.
+  Boundary checks are fail-closed. Only allowed owner agents may launch coding
+  tasks through this wrapper.
 
 Examples:
   launch-coding-task.sh \
@@ -224,14 +219,6 @@ fi
 enforce_repo_owner_policy "$owner_agent" "$repo_path"
 
 effective_repo_path="$repo_path"
-if is_ewag_owner_agent "$owner_agent"; then
-  is_ewag_owner="true"
-  if ! effective_repo_path="$(resolve_ewag_container_repo_path "$repo_path")"; then
-    echo "EWAG container repo mapping missing for: $repo_path" >&2
-    echo "Set OPENCLAW_EWAG_CONTAINER_REPO_MAP to include this repo root mapping." >&2
-    exit 2
-  fi
-fi
 
 if ! [[ "$scope" =~ ^(low|medium|high)$ ]]; then
   echo "Invalid --scope: $scope" >&2
@@ -591,19 +578,6 @@ else
     exit 2
   fi
   cmd=("$OPENCLAW_BIN" agent --agent "$codex_target_agent" --message "$prompt" --timeout "$agent_timeout" --json)
-fi
-
-if [[ "$is_ewag_owner" == "true" && "$execute" == "true" ]]; then
-  container_openclaw_bin="${OPENCLAW_EWAG_CONTAINER_OPENCLAW_BIN:-openclaw}"
-  if command -v docker >/dev/null 2>&1 \
-    && docker inspect "$ewag_container_name" >/dev/null 2>&1 \
-    && [[ "$(docker inspect -f '{{.State.Running}}' "$ewag_container_name" 2>/dev/null)" == "true" ]]; then
-    cmd[0]="$container_openclaw_bin"
-    cmd=(docker exec -i "$ewag_container_name" "${cmd[@]}")
-  else
-    echo "EWAG container unavailable from this runtime; falling back to direct OpenClaw execution." >&2
-    echo "To force sandboxed execution, run: docker compose -f /home/aaron/.openclaw/docker-compose.ewag-bots.yml up -d --build" >&2
-  fi
 fi
 
 printf 'Routing decision: requested=%s selected=%s (%s), fallback=%s applied=%s\n' "$requested_lane" "$selected_lane" "$reason" "$fallback_lane" "$fallback_applied"

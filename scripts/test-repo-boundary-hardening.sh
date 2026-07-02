@@ -5,8 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/repo-boundary-policy.sh"
 
-export OPENCLAW_EWAG_OWNER_AGENTS="ewag-pm"
-
 assert_ok() {
   local name="$1"
   shift
@@ -29,32 +27,18 @@ assert_fail() {
   fi
 }
 
-assert_ok "EWAG owner detection" is_ewag_owner_agent "ewag-pm"
-assert_fail "RSL owner is not EWAG" is_ewag_owner_agent "dwight"
-
-assert_ok "EWAG allow list accepts lidi" \
-  enforce_repo_owner_policy "ewag-pm" "/home/aaron/repos/lidi-task-manager"
-
-assert_fail "EWAG owner blocked from RSL repo" \
-  enforce_repo_owner_policy "ewag-pm" "/home/aaron/repos/Task-Manager"
-
-assert_fail "RSL owner blocked from EWAG repo" \
+assert_ok "Allowed owner accepted" \
   enforce_repo_owner_policy "dwight" "/home/aaron/repos/lidi-task-manager"
 
-mapped_repo="$(resolve_ewag_container_repo_path "/home/aaron/repos/lidi-task-manager")"
-if [[ "$mapped_repo" != "/work/lidi-task-manager" ]]; then
-  echo "FAIL: mapping for lidi-task-manager expected /work/lidi-task-manager, got $mapped_repo" >&2
+assert_fail "Unknown owner blocked" \
+  enforce_repo_owner_policy "unknown-owner" "/home/aaron/repos/lidi-task-manager"
+
+resolved_repo="$(realpath -m "/home/aaron/repos/lidi-task-manager")"
+if [[ "$resolved_repo" != "/home/aaron/repos/lidi-task-manager" ]]; then
+  echo "FAIL: repo path resolution mismatch: $resolved_repo" >&2
   exit 1
 fi
 
-echo "PASS: mapping for lidi-task-manager"
-
-mapped_subpath="$(resolve_ewag_container_repo_path "/home/aaron/repos/EWAG-dev-iosApp/src")"
-if [[ "$mapped_subpath" != "/work/ewagios-dev/src" ]]; then
-  echo "FAIL: mapping for EWAG-dev-iosApp/src expected /work/ewagios-dev/src, got $mapped_subpath" >&2
-  exit 1
-fi
-
-echo "PASS: mapping for EWAG-dev-iosApp/src"
+echo "PASS: host repo path resolution"
 
 echo "All repo boundary hardening checks passed."

@@ -36,7 +36,7 @@ deterministic pass-driving contract.
   resolves predictions to Brier, updates mechanism Beta posteriors, drafts
   gated `rule_proposals`; plus postmortems and patterns).
 - `developer` owns scripts, schema, connectors, watchdog jobs, snapshot.
-- `dwight` owns rsl-task-manager (sprint 5: ATS v6 Trading Intel).
+- `dwight` owns task-manager (sprint 5: ATS v6 Trading Intel).
 - You **only orchestrate**. You never write to execution-state tables and you
   never edit scripts/schema/connectors.
 
@@ -73,7 +73,7 @@ Append-only JSONL. Schema per row:
   "priority": 1-5,                  // 1 = highest
   "status": "open|claimed|done|rejected",
   "claimed_by": null | "<agent_id>",
-  "task_id": null | "<dwight rsl-task-manager issue id>"
+  "task_id": null | "<dwight task-manager issue id>"
 }
 ```
 

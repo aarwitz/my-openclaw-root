@@ -20,7 +20,7 @@ Yes:
 No:
 - General web search → use the web search tool, not this skill.
 - Real-time stock quotes, weather, sports scores → wrong tool.
-- Internal product/company knowledge → use `resilife-product` or repo docs.
+- Internal product/company knowledge → use `product-context` or repo docs.
 - Anything not actually about *published news articles*.
 
 ## Auth & config

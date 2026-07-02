@@ -2,7 +2,7 @@
 
 A lightweight issue, sprint, and execution queue for the RSL workflow. It tracks planning data, branch/repo context, comments, evidence, and autonomous launcher readiness in one place.
 
-Runtime note: the canonical SQLite database for this workspace lives at `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`. Any repo-local `rsl-task-manager/taskmanager.db` file is non-canonical and should not be treated as the live runtime state.
+Runtime note: the canonical SQLite database for this workspace lives at `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`. Any repo-local `task-manager/taskmanager.db` file is non-canonical and should not be treated as the live runtime state.
 
 ## Features
 
@@ -43,7 +43,7 @@ chmod +x start.sh
 ```
 
 2. Access the application:
-   - Local host access: http://127.0.0.1:8000
+   - Hosted access: https://tm.lidisolutions.ai
 
 3. Login with an allowed Task Manager username
 
@@ -67,8 +67,8 @@ Key notes:
 - Non-Dwight agents are read-only observers; only Dwight mutates Task Manager state
 - Canonical runtime DB: `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
 - `tmctl verify` checks service reachability, API/list integrity, DB readability, and the continuity of issue IDs 120-125
-- Set `TM_BASE_URL` if the service is not on `http://127.0.0.1:8000`
-- LAN exposure is controlled by `TM_PUBLISH_HOST` (default `0.0.0.0`); set to `127.0.0.1` for localhost-only
+- Set `TM_BASE_URL` if the service is not on `https://tm.lidisolutions.ai`
+- LAN exposure is controlled by `TM_PUBLISH_HOST` (default `0.0.0.0`) for Dwight-maintained local validation only.
 
 ## Stopping and Restarting After Changes
 
@@ -180,9 +180,9 @@ Task-Manager/
 
 ## Network Access
 
-The container binds Task Manager to `127.0.0.1:8000` on the host.
+Canonical Task Manager URL: `https://tm.lidisolutions.ai`.
 
-- Other agents can view through localhost access and read-only MCP profiles
+- Other agents should use `https://tm.lidisolutions.ai` and read-only MCP profiles where applicable
 - Mutating API operations are reserved for Dwight workflows
 
 ## Notes

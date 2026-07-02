@@ -3,12 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
-BASE_URL="${TM_BASE_URL:-http://127.0.0.1:8000}"
+BASE_URL="${TM_BASE_URL:-https://tm.lidisolutions.ai}"
 COMPOSE_FILE="${TM_COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
 COMPOSE_PROJECT="${TM_COMPOSE_PROJECT:-dwight-taskmanager}"
 CONTAINER_NAME="${TM_CONTAINER_NAME:-dwight-taskmanager}"
 TM_DB_PATH="${TM_DB_PATH:-/home/aaron/.openclaw/workspaces/dwight/taskmanager.db}"
 TM_PUBLISH_HOST="${TM_PUBLISH_HOST:-0.0.0.0}"
+TM_PORT="${TM_PORT:-8787}"
 REPO_LOCAL_DB_PATH="$ROOT_DIR/taskmanager.db"
 
 usage() {
@@ -30,12 +31,13 @@ Commands:
   help                           Show this help
 
 Environment:
-  TM_BASE_URL                    API base URL (default: http://127.0.0.1:8000)
+  TM_BASE_URL                    API base URL (default: https://tm.lidisolutions.ai)
   TM_COMPOSE_FILE                Compose file path
   TM_COMPOSE_PROJECT             Compose project name
   TM_CONTAINER_NAME              Task Manager container name
   TM_DB_PATH                     Canonical Task Manager SQLite file
   TM_PUBLISH_HOST                Host bind for published TM port (default: 0.0.0.0)
+  TM_PORT                        Port for local TM runtime (default: 8787)
 EOF
 }
 
@@ -78,9 +80,9 @@ docker_direct_up() {
     -e TASKMANAGER_DB_PATH=/workspace/taskmanager.db \
     -v "$ROOT_DIR":/workspace:rw \
     -v "$TM_DB_PATH":/workspace/taskmanager.db:rw \
-    -p "$TM_PUBLISH_HOST":8000:8000 \
+    -p "$TM_PUBLISH_HOST":"$TM_PORT":"$TM_PORT" \
     dwight-taskmanager:local \
-    python -m uvicorn main:app --host 0.0.0.0 --port 8000 >/dev/null
+    python -m uvicorn main:app --host 0.0.0.0 --port "$TM_PORT" >/dev/null
 }
 
 docker_direct_stop() {
@@ -109,10 +111,11 @@ api_get() {
     return
   fi
   if container_running; then
-    docker exec -i "$CONTAINER_NAME" python - <<PY
+    docker exec -i -e TM_BASE_URL="$BASE_URL" "$CONTAINER_NAME" python - <<PY
+import os
 import urllib.request
 path = "$path"
-url = "http://127.0.0.1:8000" + path
+url = os.environ["TM_BASE_URL"] + path
 print(urllib.request.urlopen(url, timeout=20).read().decode("utf-8"))
 PY
     return
@@ -139,6 +142,7 @@ api_request() {
 
   if container_running; then
     docker exec -i \
+      -e TM_BASE_URL="$BASE_URL" \
       -e TM_METHOD="$method" \
       -e TM_PATH="$path" \
       -e TM_BODY="$body" \
@@ -150,7 +154,7 @@ import urllib.request
 method = os.environ.get("TM_METHOD", "GET")
 path = os.environ.get("TM_PATH", "/")
 body = os.environ.get("TM_BODY", "")
-url = "http://127.0.0.1:8000" + path
+url = os.environ["TM_BASE_URL"] + path
 headers = {"Accept": "application/json"}
 data = None
 if body:
@@ -186,9 +190,10 @@ http_ok() {
     return 0
   fi
   if container_running; then
-    docker exec -i "$CONTAINER_NAME" python - <<'PY' >/dev/null
+    docker exec -i -e TM_BASE_URL="$BASE_URL" "$CONTAINER_NAME" python - <<'PY' >/dev/null
+import os
 import urllib.request
-urllib.request.urlopen('http://127.0.0.1:8000/', timeout=10).read()
+urllib.request.urlopen(os.environ["TM_BASE_URL"] + '/', timeout=10).read()
 PY
     return
   fi
@@ -209,9 +214,9 @@ wait_for_health() {
 
 listener_grep() {
   if command -v rg >/dev/null 2>&1; then
-    rg ':8000'
+    rg ":${TM_PORT}\\b"
   else
-    grep ':8000'
+    grep -E ":${TM_PORT}([^0-9]|$)"
   fi
 }
 

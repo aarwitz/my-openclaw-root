@@ -10,8 +10,8 @@ Long-term durable facts, stable decisions, and persistent constraints for the Dw
 
 ## Task Manager
 
-- Live at: http://127.0.0.1:8000
-- Source: /home/aaron/.openclaw/workspaces/dwight/rsl-task-manager/
+- Live at: https://tm.lidisolutions.ai
+- Source: /home/aaron/.openclaw/workspaces/dwight/task-manager/
 - Runtime: container-only under Dwight control (no host/systemd runtime)
 - Non-Dwight agents: read-only visibility; Dwight is sole mutator/maintainer
 - GitHub bot: aaronclawrsl-bot

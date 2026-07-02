@@ -44,16 +44,16 @@ Examples:
   - durable memory + daily logs
 - `CONTRIBUTING.md`
   - bot contribution model and branch conventions
-- `ELITE_KANBAN.md`, `ELITE_PROJECT_BRIEF.md`, `EWAG_DEV_BUILD_INFRA_GUIDE.md`
-  - active EWAG project docs
+- `ELITE_KANBAN.md`
+  - active project docs
 - `GOOGLE_SETUP.md`
   - Google Workspace / gog OAuth setup reference
-- `people/`
-  - person-specific routing / delegation context
 - `skills/`
   - local custom skills
 - `openclaw-config/`
   - sanitized snapshots of higher-level OpenClaw config
+- `archive/`
+  - archived, non-runtime workspace material (includes `archive/people-2026-07-02/`)
 
 ## Safe config snapshots
 

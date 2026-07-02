@@ -2,7 +2,7 @@
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -euo pipefail
 
-TM_BASE="${TM_BASE:-http://127.0.0.1:8000}"
+TM_BASE="${TM_BASE:-https://tm.lidisolutions.ai}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="${TM_READY_WATCHER_LAUNCHER:-${SCRIPT_DIR}/dwight-launch-from-issue.py}"
 STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw/state}"

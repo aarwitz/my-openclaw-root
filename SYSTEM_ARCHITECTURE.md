@@ -96,7 +96,7 @@ decision) are separate and individually visible.
 > queue → `poll_priority_queue.py`); the `developer` agent does the desk's code work.
 >
 > `main` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
-> desk (`main` = default assistant; `resi`/EWAG untouched).
+> desk (`main` = default assistant; `resi`/AutoTap untouched).
 
 ---
 

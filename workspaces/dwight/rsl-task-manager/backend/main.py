@@ -41,7 +41,8 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 LIDI_TM_BASE_URL = os.getenv("LIDI_TM_BASE_URL", "https://tm.lidisolutions.ai").strip().rstrip('/')
 PUBLIC_SESSION_TTL_HOURS = int(os.getenv("PUBLIC_SESSION_TTL_HOURS", "336"))
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "72"))
-TASK_MANAGER_INTERNAL_BASE_URL = os.getenv("TASK_MANAGER_INTERNAL_BASE_URL", "http://127.0.0.1:8000").strip().rstrip('/')
+AGENT_SESSION_TTL_HOURS = int(os.getenv("AGENT_SESSION_TTL_HOURS", "720"))
+TASK_MANAGER_INTERNAL_BASE_URL = os.getenv("TASK_MANAGER_INTERNAL_BASE_URL", LIDI_TM_BASE_URL).strip().rstrip('/')
 DWIGHT_LAUNCH_WRAPPER = os.path.expanduser(os.getenv("DWIGHT_LAUNCH_WRAPPER", "~/.openclaw/scripts/run-with-trace.sh"))
 DWIGHT_LAUNCH_SCRIPT = os.path.expanduser(os.getenv("DWIGHT_LAUNCH_SCRIPT", "~/.openclaw/scripts/dwight-launch-from-issue.py"))
 DWIGHT_WORKSPACE_ROOT = os.path.expanduser(os.getenv("DWIGHT_WORKSPACE_ROOT", "~/.openclaw/workspaces/dwight"))
@@ -229,6 +230,21 @@ def run_safe_migrations():
             """))
             conn.execute(sql_text("CREATE INDEX IF NOT EXISTS ix_public_sessions_user_id ON public_sessions (user_id)"))
             conn.execute(sql_text("CREATE INDEX IF NOT EXISTS ix_public_sessions_token_hash ON public_sessions (token_hash)"))
+        if "agent_sessions" not in table_names:
+            conn.execute(sql_text("""
+                CREATE TABLE agent_sessions (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR NOT NULL,
+                    token_hash VARCHAR NOT NULL UNIQUE,
+                    approved_by VARCHAR,
+                    expires_at DATETIME NOT NULL,
+                    revoked_at DATETIME,
+                    last_used_at DATETIME,
+                    created_at DATETIME
+                )
+            """))
+            conn.execute(sql_text("CREATE INDEX IF NOT EXISTS ix_agent_sessions_username ON agent_sessions (username)"))
+            conn.execute(sql_text("CREATE INDEX IF NOT EXISTS ix_agent_sessions_token_hash ON agent_sessions (token_hash)"))
 
         if "lidi_action_requests" not in table_names:
             conn.execute(sql_text("""
@@ -306,6 +322,10 @@ CANONICAL_TM_USERS = ["Dwight", "Jerry", "Resi", "Druck", "Aaron", "Taylor"]
 LOGIN_ALLOWED_USERS = CANONICAL_TM_USERS.copy()
 INTERNAL_HUMAN_USERS = ["Aaron", "Taylor"]
 EXECUTING_AGENT_USERS = ["Dwight", "Jerry", "Resi", "Druck"]
+ALL_AGENT_USERS = []
+for value in [*EXECUTING_AGENT_USERS, *EWAG_AGENT_USERS]:
+    if value and value not in ALL_AGENT_USERS:
+        ALL_AGENT_USERS.append(value)
 USERNAME_ALIASES = {
     "claw": "Jerry",
     "aaron": "Aaron",
@@ -411,7 +431,7 @@ def rewrite_historical_usernames(db: Session):
         db.query(models.IssueActivity).filter(models.IssueActivity.actor == old).update({models.IssueActivity.actor: new}, synchronize_session=False)
 
     existing_users = {user.username: user for user in db.query(models.User).all()}
-    keep = set(CANONICAL_TM_USERS)
+    keep = set(CANONICAL_TM_USERS + ALL_AGENT_USERS)
     for username in keep:
         if username not in existing_users:
             db.add(models.User(username=username, created_at=datetime.now()))
@@ -452,11 +472,7 @@ def parse_allowed_users_json(raw_value: Optional[str]) -> List[str]:
 
 
 def all_agent_users() -> List[str]:
-    ordered: List[str] = []
-    for value in [*EXECUTING_AGENT_USERS, *EWAG_AGENT_USERS]:
-        if value and value not in ordered:
-            ordered.append(value)
-    return ordered
+    return ALL_AGENT_USERS.copy()
 
 
 def is_admin_viewer(viewer: Optional[str]) -> bool:
@@ -856,6 +872,10 @@ def hash_public_session_token(token: str) -> str:
     return hashlib.sha256(f"{SESSION_SECRET}:{token}".encode('utf-8')).hexdigest()
 
 
+def hash_agent_session_token(token: str) -> str:
+    return hashlib.sha256(f"{SESSION_SECRET}:agent:{token}".encode('utf-8')).hexdigest()
+
+
 def is_auto_approved_email(email: str) -> bool:
     return normalize_email(email) in AUTO_APPROVE_EMAILS
 
@@ -986,6 +1006,30 @@ def create_public_session(db: Session, user: models.PublicUser) -> str:
     return raw_token
 
 
+def create_agent_session(db: Session, username: str, *, approved_by: str) -> tuple[str, datetime]:
+    raw_token = secrets.token_urlsafe(32)
+    now = datetime.now()
+    expires_at = now + timedelta(hours=AGENT_SESSION_TTL_HOURS)
+    db.query(models.AgentSession).filter(
+        models.AgentSession.username == username,
+        models.AgentSession.revoked_at.is_(None),
+    ).update(
+        {models.AgentSession.revoked_at: now},
+        synchronize_session=False,
+    )
+    session = models.AgentSession(
+        username=username,
+        token_hash=hash_agent_session_token(raw_token),
+        approved_by=approved_by,
+        expires_at=expires_at,
+        last_used_at=now,
+        created_at=now,
+    )
+    db.add(session)
+    db.commit()
+    return raw_token, expires_at
+
+
 def get_bearer_token(request: Request) -> Optional[str]:
     header = request.headers.get("authorization", "").strip()
     if header.lower().startswith("bearer "):
@@ -1017,6 +1061,26 @@ def require_public_session(request: Request, db: Session, *, owner_only: bool = 
     return user
 
 
+def require_agent_session(request: Request, db: Session) -> str:
+    token = get_bearer_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    token_hash = hash_agent_session_token(token)
+    session = (
+        db.query(models.AgentSession)
+        .filter(models.AgentSession.token_hash == token_hash)
+        .first()
+    )
+    if not session or session.revoked_at is not None or session.expires_at < datetime.now():
+        raise HTTPException(status_code=401, detail="Agent session expired. Rotate a new token.")
+    username = validate_actor_identity(db, session.username, field_name="agent_username")
+    if username not in ALL_AGENT_USERS:
+        raise HTTPException(status_code=403, detail="Agent access required")
+    session.last_used_at = datetime.now()
+    db.commit()
+    return username
+
+
 def assignable_usernames(db: Session) -> List[str]:
     approved_public_users = (
         db.query(models.PublicUser)
@@ -1024,7 +1088,10 @@ def assignable_usernames(db: Session) -> List[str]:
         .order_by(models.PublicUser.created_at.asc())
         .all()
     )
-    usernames = CANONICAL_TM_USERS.copy()
+    usernames = []
+    for username in CANONICAL_TM_USERS + [name for name in ALL_AGENT_USERS if name not in CANONICAL_TM_USERS]:
+        if username not in usernames:
+            usernames.append(username)
     for user in approved_public_users:
         if user.email not in usernames:
             usernames.append(user.email)
@@ -1045,7 +1112,10 @@ def resolve_request_viewer(request: Request, db: Session) -> Optional[str]:
         try:
             return require_public_session(request, db).email
         except HTTPException:
-            return None
+            try:
+                return require_agent_session(request, db)
+            except HTTPException:
+                return None
     internal_user = normalize_optional_text(request.headers.get("x-tm-user"))
     if internal_user:
         return validate_actor_identity(db, internal_user, field_name="x-tm-user")
@@ -1069,7 +1139,7 @@ def viewer_can_access_sprint(viewer: Optional[str], sprint: models.Sprint) -> bo
         return True
     allowed_users = parse_allowed_users_json(getattr(sprint, "allowed_users_json", None))
     if not allowed_users:
-        return True
+        return False
     if viewer is None:
         return False
     viewer_lower = viewer.lower()
@@ -1363,6 +1433,41 @@ def list_public_users_for_admin(request: Request, db: Session = Depends(get_db))
     )
 
 
+@app.get("/api/public/admin/agent-accounts", response_model=List[schemas.AgentAccountResponse])
+def list_agent_accounts_for_admin(request: Request, db: Session = Depends(get_db)):
+    require_public_session(request, db, owner_only=True)
+    rewrite_historical_usernames(db)
+    db.commit()
+    users = {
+        user.username: user
+        for user in db.query(models.User).filter(models.User.username.in_(ALL_AGENT_USERS + INTERNAL_HUMAN_USERS)).all()
+    }
+    results = []
+    for username in [*INTERNAL_HUMAN_USERS, *ALL_AGENT_USERS]:
+        user = users.get(username)
+        if user:
+            results.append(
+                schemas.AgentAccountResponse(
+                    username=user.username,
+                    is_human=user.username in INTERNAL_HUMAN_USERS,
+                    created_at=user.created_at,
+                )
+            )
+    return results
+
+
+@app.post("/api/public/admin/agent-accounts/token", response_model=schemas.AgentSessionResponse)
+def rotate_agent_account_token(payload: schemas.AgentSessionCreate, request: Request, db: Session = Depends(get_db)):
+    approver = require_public_session(request, db, owner_only=True)
+    username = validate_actor_identity(db, payload.username, field_name="username")
+    if username not in ALL_AGENT_USERS:
+        raise HTTPException(status_code=400, detail="username must be a TM agent account")
+    rewrite_historical_usernames(db)
+    db.commit()
+    token, expires_at = create_agent_session(db, username, approved_by=approver.email)
+    return schemas.AgentSessionResponse(username=username, session_token=token, expires_at=expires_at)
+
+
 @app.post("/api/public/users/{user_id}/approve", response_model=schemas.PublicUserResponse)
 def approve_public_user(user_id: int, action: schemas.ApprovalAction, request: Request, db: Session = Depends(get_db)):
     approver = require_public_session(request, db, owner_only=True)
@@ -1537,10 +1642,10 @@ def list_users(db: Session = Depends(get_db)):
     db.commit()
     canonical_users = {
         user.username: user
-        for user in db.query(models.User).filter(models.User.username.in_(CANONICAL_TM_USERS)).all()
+        for user in db.query(models.User).filter(models.User.username.in_(CANONICAL_TM_USERS + ALL_AGENT_USERS)).all()
     }
     ordered = []
-    for username in CANONICAL_TM_USERS:
+    for username in CANONICAL_TM_USERS + [name for name in ALL_AGENT_USERS if name not in CANONICAL_TM_USERS]:
         user = canonical_users.get(username)
         if user:
             ordered.append(user)
@@ -1559,15 +1664,7 @@ def list_users(db: Session = Depends(get_db)):
         }
         for user in approved_public_users
     ]
-    ewag_agent_users = [
-        {
-            "id": -(100000 + idx),
-            "username": username,
-            "created_at": datetime.now(),
-        }
-        for idx, username in enumerate(EWAG_AGENT_USERS, start=1)
-    ]
-    return ordered + ewag_agent_users + synthetic_users
+    return ordered + synthetic_users
 
 
 @app.get("/api/ewag/config")
@@ -2782,4 +2879,4 @@ def serve_named_frontend_routes(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("TM_PORT", "8787")))
