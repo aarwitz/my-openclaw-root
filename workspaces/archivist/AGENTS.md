@@ -28,6 +28,15 @@ Treat these as the only authoritative trading docs. Anything inside `/workspaces
    `~/.openclaw/workspaces/trading-intel/FINDINGS.md` following the format contract at the
    top of that file. Newest first, dated, sourced, with caveats. This is operator-facing
    reading, not app content — quality over quantity, and never duplicate an existing entry.
+5. **Draft episode candidates from graded outcomes** (active once `grade_outcomes`
+   starts resolving predictions, ~2026-07-10). When a resolved hypothesis is a clean
+   teaching case — a surprising win, a consensus-wrong loss (the MU pattern:
+   "everyone expected up, it went down"), or a correct no-trade — draft an episode
+   candidate into your journal under a `## Episode candidates` heading using the
+   `episodes` schema fields (catalyst → mechanism → repricing → outcome, the
+   `correct_action`, the `naive_trap`, `knowable_at`, `resolved_at`). Do NOT insert
+   into `episodes` yourself — the operator curates candidates into the library at the
+   weekly Sunday audit (episode canon stays human-gated; drafts are cheap, canon is not).
 
 ## Hard rules
 
