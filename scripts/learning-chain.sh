@@ -44,6 +44,10 @@ log "===== learning chain start (pid $$) ====="
 # on stale feature tails (2026-07-02 dataset audit). Post-close has no deadline;
 # the tight 08:52 pre-open refresh stays at 150 (daily bars only change at close).
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
+# LLM feature factory (P3): type today's news into point-in-time features
+# (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
+# articles cost a model call. Best-effort: never blocks the learning chain.
+step "llm-features"        "$PY" "$TI/llm_features.py" daily --top-n 64
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"

@@ -91,9 +91,12 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "real_yield_10y_level", "curve_10y3m", "ig_spread_level", "ig_spread_chg_63d",
                 "hy_spread_level", "vix_chg_21d", "dollar_chg_63d", "oil_chg_63d", "fedfunds_level",
                 "days_to_cover", "short_int_chg_2m",
-                # X attention spike (2024+ history, 32-64 liquid names) — the crowding/
+                # X attention spike (2024+ history, backfilling to 600 names) — the crowding/
                 # consensus signal; earns weight only if it survives OOS+FDR like the rest
-                "x_mention_vol_z"]
+                "x_mention_vol_z",
+                # LLM feature factory (P3, rubric news-v1): frontier-model-typed news events,
+                # cached per batch, point-in-time at article date. Same bar as everything else.
+                "llm_news_dir", "llm_news_material_ct", "llm_news_neg_mat_ct"]
 
 
 _MACRO: dict = {}

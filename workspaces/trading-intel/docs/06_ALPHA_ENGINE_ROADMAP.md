@@ -98,9 +98,18 @@ weekly audit).
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
-3. **P3 — LLM feature factory v1**: earnings-call rubric on the top-150 names
-   (backfill 2–3yr from FMP transcripts, then per-event). Validate columns in
-   the same harness; promote what survives.
+3. **P3 — LLM feature factory v1 — BUILT 2026-07-02, backfilling.**
+   FMP transcripts turned out to be a paywalled tier (402), so v1 targets news
+   event-typing on Massive article text we already hold: `llm_features.py`,
+   rubric `news-v1` (catalyst class / direction −2..+2 / materiality 0–1),
+   scored by headless `claude -p` (Haiku), **cached per batch in
+   `state/llm-scores.sqlite`** so features are reproducible and only new text
+   costs a model call. Columns: `llm_news_dir`, `llm_news_material_ct`,
+   `llm_news_neg_mat_ct` (point-in-time at article date, `source='llm'`).
+   Wired: daily step in `learning-chain.sh`; backfill top-64 × 2025-07→2026-07
+   running. Next: re-run `ml_ranker` with the new columns + X-600 panel;
+   rubric v2 candidates: EDGAR risk-factor deltas (free), transcripts if the
+   FMP tier is ever upgraded.
 4. **P4 — KG economic edges + propagation features**; auto-grown episode
    pipeline.
 5. **P5 — Ensemble meta-calibration**: isotonic calibration of ranker score +
