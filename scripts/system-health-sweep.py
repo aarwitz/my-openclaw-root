@@ -295,10 +295,35 @@ def check_debrief_coverage():
     return finding("debrief_coverage", "ok", "debrief written for the last 5 trading days")
 
 
+def check_intent_flow():
+    """A crashing risk gate fails CLOSED — intents pile up in risk_review while every
+    dashboard stays green (2026-06-25..07-02: zero approvals for a week, found only by
+    manual forensics). Flag any intent stuck in risk_review or approved for > 24h."""
+    db = f"{ROOT}/state/trading-intel.sqlite"
+    if not os.path.exists(db):
+        return finding("intent_flow", "warn", "trading-intel.sqlite not found")
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = c.execute(
+            "SELECT state, COUNT(*), MIN(created_at) FROM trade_intents "
+            "WHERE state IN ('risk_review','approved') "
+            "AND created_at < datetime('now','-24 hours') GROUP BY state").fetchall()
+        last_review = c.execute("SELECT MAX(reviewed_at) FROM risk_reviews").fetchone()[0]
+        c.close()
+    except Exception as e:
+        return finding("intent_flow", "warn", f"query failed: {e}")
+    if rows:
+        bits = [f"{n} in '{s}' since {oldest}" for s, n, oldest in rows]
+        return finding("intent_flow", "crit",
+                       "STUCK intents (risk gate dead?): " + "; ".join(bits)
+                       + f" — last successful risk review {last_review}")
+    return finding("intent_flow", "ok", f"no stuck intents; last risk review {last_review}")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
-    check_debrief_coverage,
+    check_debrief_coverage, check_intent_flow,
 ]
 
 

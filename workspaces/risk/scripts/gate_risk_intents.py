@@ -606,9 +606,12 @@ def main(argv=None) -> int:
     regime = _regime_current(conn)
     results = []
     for iid in ids:
+        # hypothesis_id + direction are required by _same_day_opposition_block — their
+        # absence crashed every gating run 2026-06-25..07-02 (fail-closed: nothing
+        # approved for a week). Keep this SELECT in sync with what gate() reads.
         intent = conn.execute(
-            "SELECT id, ticker, size, entry_price_target, state, action FROM trade_intents "
-            "WHERE id=?", (iid,)).fetchone()
+            "SELECT id, hypothesis_id, ticker, size, entry_price_target, state, action, "
+            "direction FROM trade_intents WHERE id=?", (iid,)).fetchone()
         if not intent:
             results.append({"intent_id": iid, "error": "not_found"})
             continue
