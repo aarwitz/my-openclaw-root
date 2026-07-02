@@ -100,4 +100,3 @@ workspaces/**/.tm-restore/
 *.tmp
 *.swp
 *.swo
-workspaces/montraassistant/mirror/

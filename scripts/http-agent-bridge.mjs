@@ -23,7 +23,7 @@ const PORT   = Number(process.env.PORT || 18790)
 const TOKEN  = (process.env.BRIDGE_TOKEN || readFileSync('/home/aaron/.openclaw/credentials/gateway-token', 'utf8')).trim()
 const OPENCLAW = process.env.OPENCLAW_BIN || 'openclaw'
 
-const AGENTS = ['overseer','researcher','quant','critic','trader','risk','executor','archivist','developer','dwight','montra-pm']
+const AGENTS = ['overseer','researcher','quant','critic','trader','risk','executor','archivist','developer','dwight']
 
 // --- auth ---
 function authed(req) {

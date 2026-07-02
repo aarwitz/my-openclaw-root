@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Transparent stdio wrapper for OpenClaw iMessage channel.
-# Override with IMSG_REMOTE_HOST env var if needed.
-REMOTE_HOST="${IMSG_REMOTE_HOST:-taylorolsen-vogt@100.125.133.123}"
-
-exec ssh -T "$REMOTE_HOST" /opt/homebrew/bin/imsg "$@"
