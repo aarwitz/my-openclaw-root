@@ -386,15 +386,17 @@ def _build_one(conn, sym, days):
             _emit(rows, sym, d, d, "fmp", f)
         for d, f in _earnings_surprise(sym):
             _emit(rows, sym, d, d, "fmp", f)
-    except Exception:
-        pass
+    except Exception as e:
+        # best-effort (delisted names lack fundamentals) but never silent: a
+        # systematic failure here starved the desk invisibly once already
+        print(f"  {sym} fundamentals SKIP {type(e).__name__}: {str(e)[:60]}", file=sys.stderr)
     for fn, src in ((_insider, "fmp"), (_revisions, "fmp"), (_sector, "sector"), (_news, "news"),
                     (_short_interest, "massive")):
         try:
             for d, f in fn(sym):
                 _emit(rows, sym, d, d, src, f)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  {sym} {src}/{fn.__name__} SKIP {type(e).__name__}: {str(e)[:60]}", file=sys.stderr)
     conn.executemany("INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)", rows)
     conn.commit()
     return len(rows)
@@ -521,10 +523,15 @@ def refresh_live(top_n, extra, days):
         "SELECT symbol FROM universe WHERE status='active' AND market_cap IS NOT NULL "
         "ORDER BY market_cap DESC LIMIT ?", (top_n,))]
     syms = list(dict.fromkeys(syms + [s.strip().upper() for s in extra if s.strip()]))
-    # bust the FMP price cache so prices are current
+    # bust the FMP price cache so prices are current — including the sector ETFs
+    # + SPY that _etf_rel_series reads, or sector_rel_63d silently freezes at the
+    # cache's last write (root cause of the 2026-07-02 "sector 7d stale" finding)
     import glob
-    for s in syms:
-        for f in glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/fmp_historical-price-eod_full_*symbol-{s.lower()}*")) \
+    etf_syms = sorted({e for _, e in _SECTOR_ETF} | {"SPY"})
+    for s in syms + etf_syms:
+        # cache keys preserve symbol case: fmp files are UPPER (symbol-SPY),
+        # alpaca files lower — a lowercase-only glob busts nothing (2026-07-02 fix)
+        for f in glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/fmp_historical-price-eod_full_*symbol-{s.upper()}*")) \
                  + glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/alpaca_{s.lower()}_*")):
             try:
                 os.remove(f)

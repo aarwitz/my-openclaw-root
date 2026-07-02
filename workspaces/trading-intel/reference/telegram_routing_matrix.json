@@ -4,7 +4,7 @@
   "dmRoutes": [
     {
       "accountId": "jerry",
-      "agentId": "main",
+      "agentId": "jerry",
       "persona": "Jerry",
       "botHandle": "@jerry_rsl_bot",
       "surface": "dm",
@@ -28,11 +28,11 @@
     },
     {
       "accountId": "druck",
-      "agentId": "trader",
+      "agentId": "overseer",
       "persona": "Druck",
       "botHandle": "@druck_rsl_bot",
       "surface": "dm",
-      "description": "Druck chat front door and orchestration"
+      "description": "Druck chat front door (overseer orchestrates the desk)"
     }
   ],
   "groupRoutes": [
@@ -52,7 +52,7 @@
         {
           "topicId": "641",
           "topicName": "Ask Druck",
-          "agentId": "trader",
+          "agentId": "overseer",
           "botHandle": "@druck_rsl_bot",
           "surface": "group_topic",
           "requiresMention": true

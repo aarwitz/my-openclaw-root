@@ -12,7 +12,7 @@ Effective: 2026-05-28; updated 2026-06-17.
 ## Reference docs (historical — superseded by SYSTEM_ARCHITECTURE.md on conflict)
 
 1. `docs/01_OPERATING_AUTHORITY.md` — what we trade, why, with what limits.
-2. `docs/02_ARCHITECTURE.md` — workspaces, routing, shared state, hot/cold paths.
+2. ~~`docs/02_ARCHITECTURE.md`~~ — **archived 2026-07-02** to `~/.openclaw/archive/docs-retired-20260702/` (superseded by SYSTEM_ARCHITECTURE.md).
 3. `docs/03_EXECUTION_STATE_MACHINE.md` — hypothesis, trade intent, order, position lifecycles and gates.
 4. `docs/04_SHARED_STATE_SCHEMA.md` — canonical entity model and SQLite contract.
 5. `docs/05_IMPLEMENTATION_POLICY.md` — schedules, runtime controls, build phases, validation gates.

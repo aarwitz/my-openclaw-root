@@ -67,14 +67,16 @@ def main() -> int:
     if missing_agents:
         fail(f"telegram binding agent ids missing in agents.list: {missing_agents}")
 
-    # Jerry contract: 'jerry' account should route to main agent.
+    # Jerry contract: 'jerry' account should route to the jerry agent (the
+    # default assistant, formerly agent id 'main' — renamed; updated 2026-07-02).
     jerry_route = [
         b
         for b in bindings
-        if b.get("match", {}).get("accountId") == "jerry" and b.get("agentId") == "main"
+        if b.get("match", {}).get("accountId") == "jerry"
+        and b.get("agentId") in ("jerry", "main")
     ]
     if not jerry_route:
-        fail("missing explicit telegram binding: accountId 'jerry' -> agentId 'main'")
+        fail("missing explicit telegram binding: accountId 'jerry' -> agentId 'jerry'")
 
     # Matrix DM routes must exist in bindings and accounts.
     matrix_dm_routes = matrix.get("dmRoutes", [])

@@ -19,13 +19,14 @@ a Task Manager integration.
 
 1. **`SYSTEM_ARCHITECTURE.md`** — the single source of truth for AutoTrade (topology v4, DB schema
    v11/v12). **When any other doc disagrees, this one wins.**
-2. **`ARCHITECTURE.md`** — control-plane / coding-lane routing spec. **Superseded** by the above
-   (banner at top); several sections are flagged stale. Use only for coding-lane/launcher history.
-3. **`TELEGRAM_EXECUTION_GUIDE.md`** — operator (human-over-Telegram) interface and the `run issue`
+2. **`TELEGRAM_EXECUTION_GUIDE.md`** — operator (human-over-Telegram) interface and the `run issue`
    coding command contract.
-4. **`cli_guide.md`** — bring the gateway up/down, Tailscale exposure, pairing.
-5. Per-desk deep docs live under `workspaces/trading-intel/` (`DOC_INDEX.md`, `docs/`, `sql/`,
+3. **`cli_guide.md`** — bring the gateway up/down, Tailscale exposure, pairing.
+4. Per-desk deep docs live under `workspaces/trading-intel/` (`DOC_INDEX.md`, `docs/`, `sql/`,
    `OPERATOR_GUIDE.md`, `HUMAN_USE_GUIDE.md`, `DECISION_LOG.md`).
+
+(Superseded docs — `ARCHITECTURE.md`, `FULL_DESIGN_ASCII.md`, `02_ARCHITECTURE.md` — were archived
+2026-07-02 to `archive/docs-retired-20260702/`.)
 
 ## Non-negotiable safety invariants
 

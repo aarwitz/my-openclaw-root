@@ -800,7 +800,7 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "loopback",
+    "bind": "lan",
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:18789",

@@ -62,7 +62,7 @@ def daily_bars(symbol: str, frm: str = "2015-01-01", to: str | None = None,
     return out
 
 
-def short_interest(ticker: str, cache_h: float = 168.0) -> list[dict]:
+def short_interest(ticker: str, cache_h: float = 24.0) -> list[dict]:
     """Point-in-time short-interest history (FINRA, bi-monthly settlement dates).
 
     Returns oldest-first [{date, short_interest, avg_daily_volume, days_to_cover}] where

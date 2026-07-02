@@ -88,12 +88,13 @@ def profile(symbol: str) -> list[dict]:
 def insider_trading(symbol: str, limit: int = 200) -> list[dict]:
     """Form-4 insider transactions (filingDate, transactionDate, transactionType, owner). The
     Thiel-sold-NVDA signal. Point-in-time = stamp features at filingDate (when it became public)."""
-    return _get("insider-trading/search", {"symbol": symbol, "limit": limit})
+    # 24h TTL: the live desk reads this daily; the 168h default left features a week stale.
+    return _get("insider-trading/search", {"symbol": symbol, "limit": limit}, cache_h=24.0)
 
 
 def upgrades_downgrades(symbol: str, limit: int = 400) -> list[dict]:
     """Dated analyst rating actions (gradingCompany, previousGrade, newGrade, action) — revision breadth."""
-    return _get("grades", {"symbol": symbol, "limit": limit})
+    return _get("grades", {"symbol": symbol, "limit": limit}, cache_h=24.0)
 
 
 def grades_historical(symbol: str, limit: int = 1000) -> list[dict]:

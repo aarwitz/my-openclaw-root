@@ -235,7 +235,12 @@ def check_data_freshness():
     except Exception as e:
         return finding("data_freshness", "warn", f"features query failed: {e}")
     today = datetime.now(timezone.utc).date()
-    WATCH = {"price", "fmp", "massive", "sector", "news"}
+    # per-source staleness threshold (days), matched to each source's NATURAL
+    # publication cadence: massive = FINRA short interest, published bi-monthly
+    # and disseminated ~8 business days after settlement, so up to ~18 calendar
+    # days between fresh points is normal. Everything else is daily-cadence
+    # (4d tolerates a long holiday weekend).
+    WATCH = {"price": 4, "fmp": 4, "massive": 20, "sector": 4, "news": 4}
     seen, stale = {}, []
     for src, maxd in rows:
         if src not in WATCH or not maxd:
@@ -245,14 +250,14 @@ def check_data_freshness():
         except Exception:
             continue
         seen[src] = (maxd[:10], age)
-        if age > 4:  # tolerant of a long holiday weekend
+        if age > WATCH[src]:
             stale.append((src, maxd[:10], age))
-    missing = WATCH - set(seen)
+    missing = set(WATCH) - set(seen)
     if not stale and not missing:
         return finding("data_freshness", "ok",
                        "intake fresh: " + ", ".join(f"{s}={d}" for s, (d, _) in sorted(seen.items())))
-    worst = max([a for _, _, a in stale], default=99)
-    sev = "crit" if (worst > 7 or missing) else "warn"
+    worst_over = max([a - WATCH[s] for s, _, a in stale], default=99)
+    sev = "crit" if (worst_over > 3 or missing) else "warn"
     bits = [f"{s}: {a}d stale (latest {d})" for s, d, a in stale]
     if missing:
         bits.append("MISSING: " + ",".join(sorted(missing)))

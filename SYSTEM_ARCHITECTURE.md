@@ -2,10 +2,10 @@
 
 > **Status:** AUTHORITATIVE. This is the single source of truth for the AutoTrade
 > agentic trading platform that runs on the OpenClaw gateway. Where any other
-> document disagrees with this one, **this document wins**. Stale docs
-> (`ARCHITECTURE.md`, `workspaces/trading-intel/FULL_DESIGN_ASCII.md`,
-> `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) are superseded and carry a
-> pointer banner back here.
+> document disagrees with this one, **this document wins**. The formerly stale
+> docs (`ARCHITECTURE.md`, `workspaces/trading-intel/FULL_DESIGN_ASCII.md`,
+> `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
+> to `archive/docs-retired-20260702/`.
 >
 > **Topology:** v4 · **DB schema:** v11 · **Last reconciled:** 2026-06-17
 
@@ -40,7 +40,13 @@ Two design commitments shape everything below:
 
 - **One containerised gateway** (`openclaw-gateway`, port 18789) hosts **all**
   agents natively (no container-per-agent). Health-checked,
-  `restart: unless-stopped`.
+  `restart: unless-stopped`. `openclaw.json` **`gateway.bind` must stay `"lan"`**:
+  the compose mapping `127.0.0.1:18789:18789` needs the in-container server on
+  0.0.0.0 (host exposure stays loopback-only). With `"loopback"` every host CLI
+  call fails (WS 1006) after the next restart. The legacy host systemd unit
+  `~/.config/systemd/user/openclaw-gateway.service` must stay **disabled** — if it
+  starts, it steals port 18789 and the container crash-loops without networking
+  (see incident 2026-07-02).
 - **Config hot-reloads** (hybrid mode). Editing `openclaw.json` or
   `cron/jobs.json` is applied within seconds; an **invalid** config is safely
   skipped and the last-good retained. **Never** `systemctl restart` — that can
@@ -413,8 +419,9 @@ cron→SQLite migration in this build). The overseer drives the desk:
 - **Software** improves through human-gated Developer changes; the deterministic TM
   mirror provides the visible backlog. Self-improvement uses **OpenClaw-native delegation**
   (overseer/developer), **not** an auto-dispatch rail. The legacy
-  `dwight-lane-bridge` auto-dispatch is **retired** (cron disabled); the
-  scripts remain on disk but are not scheduled.
+  `dwight-lane-bridge` auto-dispatch is **retired**: its cron entries were
+  deleted and its scripts archived to `archive/scripts-retired-20260702/`
+  (2026-07-02 prune).
 
 ---
 
