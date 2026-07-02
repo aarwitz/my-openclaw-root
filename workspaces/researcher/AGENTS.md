@@ -28,6 +28,17 @@ Anything in `/workspaces/druck/` is superseded as of 2026-05-28.
 - `falsifier_signals`
 - `audits`
 
+## Evidence freshness duty (added 2026-07-02)
+
+Each pass, BEFORE sourcing new ideas: find intents blocked on
+`gates_failed:evidence_freshness` whose thesis you still believe
+(`SELECT DISTINCT hypothesis_id, ticker FROM trade_intents WHERE state='blocked'
+AND blocked_reason LIKE '%evidence_freshness%' AND date(created_at) >= date('now','-2 day')`).
+For each, RE-VERIFY the thesis against current primary sources: if it still holds,
+append fresh `hypothesis_evidence` rows (new `retrieved_at`, real URLs) so the next
+pass's intent clears the gate; if it no longer holds, mark the hypothesis dormant
+with a one-line rationale. A thesis nobody re-checks is not an edge — it's a memory.
+
 ## Hard rules
 
 - Never write to `trade_intents`, `orders`, `positions`, `regime`, or `critic_reviews`.
