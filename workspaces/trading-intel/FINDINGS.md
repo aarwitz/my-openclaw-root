@@ -24,6 +24,19 @@ evidence and caveats in 2-5 sentences. Newest first.
   ensemble (era IC 0.034) does NOT yet beat the best single era feature (realized vol,
   0.072) — complexity has not yet earned its keep.
 
+- **The X attention signal dilutes as its universe widens** — pooled IC fell from
+  0.056 (32 mega-caps) to 0.034 when the panel expanded to 83 names (2026-07-02 v4
+  interim, backfill to 600 still running). Hypothesis: attention spikes are most
+  informative where the crowd actually is — mega-caps and meme-adjacent names — and
+  noisier in the mid-cap tail. If the 600-name run confirms, the right construction is
+  attention-signal-per-liquidity-tier, not one global column.
+
+- **Feature families that add nothing as single features can still lift the ensemble**
+  — adding `peer_mom_21d` + `filing_delta` (neither cracks the top-15 solo ICs) took
+  the coverage-era model from IC 0.034/ICIR 0.92 to **IC 0.042/ICIR 1.01** (v4 interim).
+  Interaction value is real: economic-link momentum and filing-language change matter
+  *conditionally*, which is precisely what the rule-based mechanism layer cannot see.
+
 - **In 2024–2026 the yield curve beat almost every stock-specific feature for
   cross-sectional stock selection** (`yield_curve_10y2y` era IC 0.066, `curve_10y3m`
   0.052, 2y-rate features −0.03). Macro shape features — constant across names on any

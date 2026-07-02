@@ -92,9 +92,12 @@ weekly audit).
    (currently 32–64), (b) add LLM news features (P3) as columns, then
    re-evaluate. Note transcripts (FMP) are a paywalled tier — P3 v1 targets
    news event-typing + EDGAR filings instead. Promotion bar: coverage-era IC
-   t-stat > 3 + the ensemble must beat the best single feature on the era
-   (currently 0.034 vs vol's 0.072 — not yet; complexity must earn its keep).
-   Results: `state/ml_ranker_eval.json`.
+   t-stat > 3 + the ensemble must beat the best single feature on the era.
+   **v4 interim (2026-07-02, +peer_mom_21d +filing_delta, X at 83 names):
+   coverage-era IC 0.042, ICIR 1.01, t 1.58** — neither new family cracks the
+   top-15 solo ICs, yet the ensemble improved: interaction value is real. Still
+   short of the bar (0.042 vs vol's 0.072 solo); full re-eval when the X-600
+   and LLM-64 backfills land. Results: `state/ml_ranker_eval.json`.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
