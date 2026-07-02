@@ -51,6 +51,8 @@ step "llm-features"        "$PY" "$TI/llm_features.py" daily --top-n 64
 # "Lazy Prices" filing deltas — new 10-K/Qs land any day; the MinHash signature
 # cache makes the daily walk nearly free after the initial backfill.
 step "edgar-deltas"        "$PY" "$TI/edgar_deltas.py" daily --top-n 150
+# Economic-link momentum (peers' relative return propagates with a lag) + KG peer edges
+step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"

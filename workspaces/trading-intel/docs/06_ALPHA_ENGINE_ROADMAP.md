@@ -114,8 +114,13 @@ weekly audit).
    the prior same-form filing (language change, numbers stripped; free EDGAR,
    fair-use paced; per-accession signature cache). Paper-expected sign:
    negative. Daily step wired; backfill top-150 × 2022→now running.
-4. **P4 — KG economic edges + propagation features**; auto-grown episode
-   pipeline.
+4. **P4 — KG economic edges + propagation features** — **v1 BUILT 2026-07-02.**
+   `peer_features.py`: `peer_mom_21d` (Cohen–Frazzini economic-link momentum,
+   peers proxied by FMP stock-peers; expected sign positive) + `peer_of` edges
+   into `kg_edges` for researcher/why-engine traversal. Daily step wired;
+   backfill top-300 × 2024→now (weekly grid) running. v2 candidates: true
+   supply-chain links, propagation of LLM-typed news events across edges.
+   Auto-grown episode pipeline still open.
 5. **P5 — Ensemble meta-calibration**: isotonic calibration of ranker score +
    mechanism posterior + LLM catalyst judgment → one calibrated p that feeds
    Kelly (replaces hand-tuned log-odds blending).

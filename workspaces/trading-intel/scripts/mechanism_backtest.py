@@ -99,7 +99,10 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "llm_news_dir", "llm_news_material_ct", "llm_news_neg_mat_ct",
                 # "Lazy Prices" (Cohen-Malloy-Nguyen): 10-K/Q language change vs prior same-form
                 # filing (MinHash Jaccard). Paper sign: negative — changers underperform.
-                "filing_delta"]
+                "filing_delta",
+                # Economic-link momentum (Cohen-Frazzini): peers' trailing 21d SPY-relative
+                # return propagates to the name with a lag. Paper sign: positive.
+                "peer_mom_21d"]
 
 
 _MACRO: dict = {}
