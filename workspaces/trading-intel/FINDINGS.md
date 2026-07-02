@@ -92,6 +92,15 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ## 2026-07-02 — from the day's pipeline forensics
 
+- **Fail-closed without a stuck-state alarm is silent paralysis: the desk approved ZERO
+  trades for a week and every dashboard stayed green.** A crashing risk gate (missing
+  SELECT column, 06-25→07-02) left every intent frozen in `risk_review` — which is
+  exactly what fail-closed is supposed to do, and exactly why it needs its own alarm.
+  The 1-month scoreboard alpha (+2.8%) was earned by POSITIONS COASTING, not decisions:
+  for a week the "self-improving trading desk" was a buy-and-hold portfolio with
+  elaborate paperwork. Monitor throughput (state-transition recency), never just exit
+  codes. Same lesson as the cache-TTL finding, one layer up.
+
 - **The desk was authoring alpha it could not express: 13 of 21 blocked intents in one
   day were short theses** (STZ, KMX, SHAK, FND, DHI, APP, DAL) self-blocked because the
   executor was buy-only. If a strategy layer can only act on half its signal
