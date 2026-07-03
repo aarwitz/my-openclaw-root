@@ -119,16 +119,25 @@ def _http(method: str, path: str, payload: object | None = None) -> tuple[int, o
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=TM_HTTP_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8")
-            return resp.status, (json.loads(raw) if raw else None)
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
+    # One retry on network timeout/error for idempotent reads: the hosted TM is a
+    # CF Worker whose cold start + large /api/issues payload can brush the timeout,
+    # and a single blip shouldn't fail a whole 10-minute poll cycle.
+    attempts = 2 if method.upper() == "GET" and payload is None else 1
+    last_exc: Exception | None = None
+    for _ in range(attempts):
         try:
-            return exc.code, (json.loads(raw) if raw else None)
-        except json.JSONDecodeError:
-            return exc.code, raw
+            with urllib.request.urlopen(req, timeout=TM_HTTP_TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8")
+                return resp.status, (json.loads(raw) if raw else None)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                return exc.code, (json.loads(raw) if raw else None)
+            except json.JSONDecodeError:
+                return exc.code, raw
+        except Exception as exc:  # timeout / connection reset — retry once for GETs
+            last_exc = exc
+    raise last_exc if last_exc else RuntimeError("unreachable")
 
 
 def tm_request(method: str, path: str, payload: object | None = None) -> tuple[int, object]:
