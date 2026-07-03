@@ -13,6 +13,19 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ---
 
+## 2026-07-03 (evening) — v7: analyst price targets are the biggest single-family lift yet
+
+- **Adding three price-target features (`pt_upside`, `pt_rev_60d`, `pt_count_90d` from
+  FMP's dated target actions) improved EVERY coverage-era metric at once**: IC 0.0428→
+  0.0481, t 1.75→1.93, ICIR 1.12→1.24, decile L/S +12.5→+21.7%/yr net, top-decile
+  long-only +1.41→+1.65%/rebalance (~+21%/yr), 2026 IC 0.060→0.072. Unlike the v6
+  size-axis trap, the LONG side improved as much as the spread — this is signal, not a
+  cost-model artifact. `pt_upside` alone: pooled test IC 0.0318. Brav-Lehavy target-
+  revision drift is alive in this tape, and it was sitting inside an FMP subscription
+  we already pay for, unwired. The promotion bar (t>3) is now within sight of the live
+  track record accrual. On the record: the nightly scorer trains with 43 features from
+  tonight (2026-07-03) — v7's first live ranks land in ml_scores tomorrow pre-market.
+
 ## 2026-07-03 — the size-axis experiment (v6): a feature can fatten the backtest while making the model worse
 
 - **Giving the ranker a liquidity/size feature (`dollar_vol_63d_log`) inflated decile

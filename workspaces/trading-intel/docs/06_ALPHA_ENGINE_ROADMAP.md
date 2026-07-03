@@ -111,6 +111,11 @@ weekly audit).
    IC/t/ICIR all fell and the top-decile long side was unchanged. The size-column
    shortcut to the X-tier hypothesis is dead — a real per-tier z construction is
    the remaining path (open). Log: `logs/ml-ranker-v6-size.log`; see FINDINGS.
+   **v7 (2026-07-03 evening, +pt_upside/pt_rev_60d/pt_count_90d from FMP dated
+   price-target actions): the best model on every axis — coverage-era IC 0.0481,
+   t 1.93, ICIR 1.24, decile L/S +21.7%/yr net, top-decile long-only ~+21%/yr,
+   2026 IC 0.0716.** Long side and consistency improved together (contrast v6).
+   Nightly scorer trains 43f from 2026-07-03. Log: `logs/ml-ranker-v7-pt.log`.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
