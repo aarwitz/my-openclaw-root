@@ -381,9 +381,20 @@ cron→SQLite migration in this build). The overseer drives the desk:
 
 ## 9. Visibility & chat
 
-- **AutoTrade web app** (lidi-solutions) reads the snapshot `data.json` written
-  each pass: per-agent headline/last-output, hypotheses, intents, orders,
-  regime, pipeline health. The decision process is the product.
+- **AutoTrade web app** (lidi-solutions) reads the trader-intel snapshot:
+  per-agent headline/last-output, hypotheses, intents, orders, regime,
+  pipeline health. The decision process is the product.
+- **Snapshot publishing is two-tier (2026-07-02):** data freshness is decoupled
+  from code deploys.
+  - **Data-only (fast, primary):** `scripts/push-trader-data.sh` regenerates
+    `data.json` and pushes it to the Cloudflare KV namespace `TRADER_DATA`
+    (id `bc7ab40d…`); the Pages Function `/api/trader-data` (session-gated)
+    serves it. Host cron cadence: every 10 min during market hours, hourly
+    off-hours. A KV put takes seconds and has no deploy-count cost.
+  - **Full deploy (code changes):** `scripts/publish-trader-intel.sh`
+    (vite build + `wrangler pages deploy`), still run by each trader pass.
+    The `data.json` baked into the deploy is the app's fallback when
+    `/api/trader-data` is unavailable.
 - **Live market bridge (same-origin Pages Functions):**
   - `/api/trader-live` returns Alpaca-backed live equity/positions/history for
     intraday charting. The browser may poll this endpoint; it must never call
