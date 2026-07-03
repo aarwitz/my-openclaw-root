@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
 
-from connectors.alpaca import ConnectorError, daily_bars, latest_trade, place_order  # noqa: E402
+from connectors.alpaca import ConnectorError, daily_bars, latest_trade, market_clock, place_order  # noqa: E402
 
 # ---- freshness gate: never execute on stale reasoning or a price that moved since the signal priced it.
 # Tunable via env; defaults are conservative for a swing/position desk (cadence ~minutes-to-hours).
@@ -237,6 +237,27 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = connect()
     rows = _select_intents(conn, args.intent_id)
+
+    # Market-calendar gate (fail-closed, like everything on the order path):
+    # never queue orders on a closed market — they'd execute at the next open's
+    # gap on reasoning that is hours-to-days stale (2026-07-03 FDX incident:
+    # order submitted 07:18 ET on the Jul-4-observed holiday, queued into a
+    # 3-day weekend). Approved intents are left untouched; the staleness gate
+    # purges them and the desk re-authors fresh next session. An unreadable
+    # clock is treated as closed.
+    if rows and not args.dry_run:
+        try:
+            clock = market_clock()
+            market_open = bool(clock.get("is_open"))
+            next_open = clock.get("next_open")
+        except Exception as exc:
+            market_open, next_open = False, f"clock unreadable: {exc}"
+        if not market_open:
+            print(json.dumps({"processed": 0, "deferred": len(rows),
+                              "reason": "market closed — not submitting orders",
+                              "next_open": str(next_open)}, indent=2))
+            return 0
+
     results = []
     for r in rows[: args.max]:
         try:

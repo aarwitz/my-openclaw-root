@@ -61,15 +61,41 @@ run_step() {
 
 printf '{\n  "started_at": "%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Market-calendar gate: cron only knows Mon-Fri; the exchange calendar knows
+# holidays (2026-07-03: five passes ran on the Jul-4-observed holiday and one
+# queued an order into a 3-day weekend gap). On a non-trading day the pass
+# still refreshes data/scoreboard/snapshot but skips authoring and execution.
+# Fail-open on calendar errors (a dead calendar API must not halt the desk on
+# a real trading day — the executor has its own fail-closed clock gate).
+TRADING_DAY=$(timeout 20 python3 -c "
+import sys
+sys.path.insert(0, 'workspaces/trading-intel/scripts')
+from datetime import datetime
+from zoneinfo import ZoneInfo
+try:
+    from connectors.alpaca import is_trading_day
+    today = datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d')
+    print('1' if is_trading_day(today) else '0')
+except Exception:
+    print('1')" 2>/dev/null)
+[[ "$TRADING_DAY" == "0" ]] || TRADING_DAY=1
+printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]] && echo true || echo false)"
+
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
 run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
 run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses.py
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
 run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
-run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
-run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
-run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
-if [[ "$SKIP_EXECUTE" -eq 0 ]]; then
+if [[ "$TRADING_DAY" == "1" ]]; then
+  run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
+  run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
+  run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
+else
+  printf ',\n  "author_intents": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "gate_evaluator": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "risk_gate": {"rc": 0, "skipped": "non-trading day"}'
+fi
+if [[ "$SKIP_EXECUTE" -eq 0 && "$TRADING_DAY" == "1" ]]; then
   run_step "execute_intent" 60 python3 workspaces/executor/scripts/execute_intent.py
 else
   printf ',\n  "execute_intent": {"rc": 0, "skipped": true}'

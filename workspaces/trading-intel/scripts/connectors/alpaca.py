@@ -48,6 +48,21 @@ def _get(base: str, path: str, params: dict[str, Any] | None = None) -> Any:
         raise ConnectorError(f"alpaca non-json response from {url}: {exc}") from exc
 
 
+# ----- market calendar / clock -----
+
+def market_clock() -> dict[str, Any]:
+    """Live market clock: {is_open, next_open, next_close, timestamp}."""
+    return _get(PAPER_API, "/v2/clock")
+
+
+def is_trading_day(date_iso: str) -> bool:
+    """True if `date_iso` (YYYY-MM-DD, ET) is an exchange session. Weekday
+    holidays (e.g. Jul 4 observed on Fri 2026-07-03) return False — a Mon-Fri
+    cron schedule alone cannot know this."""
+    cal = _get(PAPER_API, "/v2/calendar", {"start": date_iso, "end": date_iso}) or []
+    return any(str(c.get("date")) == date_iso for c in cal)
+
+
 # ----- account / positions / orders -----
 
 def get_account() -> dict[str, Any]:

@@ -117,6 +117,18 @@ below has fired and produced concrete output.
   error, report the exact error text, append a P1 priority-queue row, and
   stop the pipeline. Do not fall back to `sessions_send`.
 
+### Non-trading days (check FIRST, before any drive rule)
+
+The deterministic pass JSON begins with `"market_today": {"trading_day": false}`
+on exchange holidays (the cron schedule only knows Mon-Fri; the calendar knows
+July 4th). When `trading_day` is false: do NOT spawn researcher/quant/critic/
+trader/risk/executor — the pass already refreshed data and skipped authoring
+(orders queued on a closed market execute into the next open's gap on stale
+reasoning; that happened with FDX on 2026-07-03). Allowed on holidays:
+archivist learning work, and one short Telegram note ("market holiday —
+standing down until <next session>"). The forbidden-output list below does not
+apply to that holiday note.
+
 ### Cold-start + every-pass drive rules
 
 Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to
