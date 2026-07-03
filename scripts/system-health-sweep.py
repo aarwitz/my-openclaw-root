@@ -367,10 +367,46 @@ def check_kv_push():
     return finding("kv_push", "ok", f"last KV data push {age_h * 60:.0f}m ago")
 
 
+def check_jerry_poll():
+    """Jerry is the host repair agent — if its 10-min poll is crash-looping the
+    fleet loses its repairman silently (2026-07-03: env drift killed it with
+    rc=1 for hours, nothing paged). Flag consecutive non-zero exits."""
+    script = "jerry-host-poll.py"
+    runs = []
+    try:
+        with open(f"{ROOT}/logs/script-runs.jsonl", "rb") as fh:
+            try:
+                fh.seek(-120000, 2)
+            except OSError:
+                fh.seek(0)
+            tail = fh.read().decode("utf-8", "replace")
+    except FileNotFoundError:
+        return finding("jerry_poll", "warn", "script-runs.jsonl missing")
+    for line in tail.splitlines():
+        if script not in line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if script in str(r.get("script", "")):
+            runs.append(r)
+    if not runs:
+        return finding("jerry_poll", "warn", "no recent jerry-host-poll runs recorded")
+    recent = runs[-6:]
+    fails = [r for r in recent if r.get("exit_code") not in (0, None)]
+    if len(fails) == len(recent) and len(recent) >= 3:
+        return finding("jerry_poll", "crit",
+                       f"last {len(recent)} jerry-host-poll runs all failed (exit {recent[-1].get('exit_code')}) — host repair agent is down")
+    if len(fails) >= 3:
+        return finding("jerry_poll", "warn", f"{len(fails)}/{len(recent)} recent jerry-host-poll runs failed")
+    return finding("jerry_poll", "ok", f"last {len(recent)} runs: {len(recent) - len(fails)} ok")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
-    check_debrief_coverage, check_intent_flow, check_kv_push,
+    check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
 ]
 
 

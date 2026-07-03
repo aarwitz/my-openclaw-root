@@ -93,9 +93,27 @@ ACTIVE_STATUSES = {"to_do", "in_progress"}
 TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-Agent/1.0)")
 
 
+def _tm_bearer_token() -> str:
+    """Hosted TM requires auth. Prefer env; fall back to the shared credential
+    file so a token rotation there propagates to every host client."""
+    tok = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or os.environ.get("TM_BEARER_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        with open(os.path.expanduser("~/.openclaw/credentials/task-manager-agent.json")) as fh:
+            return str(json.load(fh).get("session_token") or "").strip()
+    except Exception:
+        return ""
+
+
+TM_BEARER_TOKEN = _tm_bearer_token()
+
+
 def _http(method: str, path: str, payload: object | None = None) -> tuple[int, object]:
     url = f"{TM_BASE}{path}"
     headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
+    if TM_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {TM_BEARER_TOKEN}"
     data = None
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
