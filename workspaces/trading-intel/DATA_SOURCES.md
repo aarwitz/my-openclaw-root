@@ -27,7 +27,7 @@ entries append to the Scout log at the bottom.
 
 | Candidate | Verdict | Why / expected value |
 |---|---|---|
-| **Options flow / OI (Massive tier upgrade or ORATS ~$1-3k/yr)** | **ADD — highest priority** | IV skew, put/call, unusual activity = positioning data orthogonal to everything we hold; strong published 1-4w cross-sectional evidence; we already saw 403 on the current Massive plan |
+| **Options positioning (evaluated 2026-07-03)** | **AUDITION FREE, then Massive Options** | Target features: put/call vol + OI ratios, IV rank, 25Δ skew, net premium flow (daily, per underlying). Plan: (1) ThetaData FREE tier (1yr EOD hist, 20req/min — needs operator signup) → IC screen on ~100 names; (2) if any \|IC\|≥0.03 → Massive Options Developer $79/mo (4yr hist, flat files, same vendor/connector) → full FDR backtest 2022-26; (3) permanent slot only if it passes the standard bar. REJECTED: Unusual Whales (vendor-precomputed, not point-in-time reproducible, priciest), Databento OPRA (pay-per-volume institutional overkill for EOD aggregates) |
 | **Reddit retail sentiment (apewisdom/free or SocialGrep)** | ADD (cheap) | complements X attention; WSB mention velocity had real 2021-24 signal in meme/mid-caps — exactly where X dilutes; forward-collect + backtest what history exists |
 | **Congressional trading (QuiverQuant ~$500/yr, or free STOCK Act scrapes)** | TRIAL (cheap) | 30-45d disclosure lag blunts it; published alpha modest at our horizon. Worth one backtest column, not a subscription commitment until it passes FDR |
 | **Google Trends (free)** | ADD (free) | search attention per name; free history via pytrends; cheap experiment alongside X |
