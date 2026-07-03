@@ -13,6 +13,20 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ---
 
+## 2026-07-03 — the size-axis experiment (v6): a feature can fatten the backtest while making the model worse
+
+- **Giving the ranker a liquidity/size feature (`dollar_vol_63d_log`) inflated decile
+  L/S from +12.5% to +19.1%/yr net — and it's (mostly) fake.** The gain comes from
+  shorting small/illiquid names (size solo IC is negative, −0.02/−0.03), a spread that a
+  flat 20bps round-trip cost model understates badly in exactly those names. Meanwhile
+  every consistency metric got WORSE (rank IC 0.0428→0.039, t 1.75→1.57, ICIR 1.12→1.01,
+  positive months 62%→52%) and the top-decile long side — what the desk actually uses —
+  was unchanged (+1.411 vs +1.414/rebalance). Verdict: reverted from the live feature
+  set; the finding kills the "let the tree learn the attention×size interaction" shortcut.
+  The X-tier hypothesis now needs the honest construction (per-tier z-scores), not a
+  size column. Lesson for every future feature: judge on rank-IC consistency and the
+  long side, never on decile L/S alone — L/S rewards cost-model blind spots.
+
 ## 2026-07-02 (evening) — v5 ranker on the full 600-name panel (X-600 + LLM-news + EDGAR + peer features complete)
 
 - **X-attention dilution CONFIRMED, and it plateaus rather than collapses**: pooled IC

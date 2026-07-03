@@ -103,6 +103,11 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 # Economic-link momentum (Cohen-Frazzini): peers' trailing 21d SPY-relative
                 # return propagates to the name with a lag. Paper sign: positive.
                 "peer_mom_21d"]
+# dollar_vol_63d_log (computed in load_ticker) is deliberately NOT in GEN_FEATURES:
+# the 2026-07-03 v6 eval showed it fattens decile L/S (+12.5→+19.1%/yr net) purely
+# via a short-small-illiquid tilt while WORSENING rank IC/t/ICIR (0.0428/1.75/1.12
+# → 0.039/1.57/1.01) and leaving the top-decile long side unchanged — a cost-
+# understated spread, not signal. Keep the series for future tier experiments.
 
 
 _MACRO: dict = {}
@@ -172,6 +177,24 @@ def load_ticker(conn, ticker):
                 pe.append((d, close[d] / eps[j][1]))
         if pe:
             feats["pe_ttm"] = pe
+    # trailing-63d average dollar volume, log10 — the liquidity/size characteristic.
+    # Point-in-time by construction (price bars only). Lets the ranker condition
+    # signals on tier: X attention is worth ~0.056 IC in mega-caps but ~0.034
+    # pooled across 600 names (2026-07-02 finding) — the tree needs a size axis
+    # to exploit that instead of averaging it away.
+    if dates:
+        vals = [dvol.get(d) or 0.0 for d in dates]
+        prefix = [0.0]
+        for v in vals:
+            prefix.append(prefix[-1] + v)
+        dv_series = []
+        for i, d in enumerate(dates):
+            j = max(0, i - 62)
+            avg = (prefix[i + 1] - prefix[j]) / (i - j + 1)
+            if avg > 0:
+                dv_series.append((d, math.log10(avg)))
+        if dv_series:
+            feats["dollar_vol_63d_log"] = dv_series
     # pre-sort feature as_of lists for bisect
     fkeys = {n: [a for a, _ in v] for n, v in feats.items()}
     for k, series in _macro_series().items():     # merge global macro features (same series for all tickers)

@@ -58,6 +58,7 @@ Recommended one-shot preflight:
 - `openclaw status --deep`
 - `openclaw health`
 - `ss -ltnp | grep 18789`
+- Local `workspace/ios-agent-v2.sh` is retired; canonical iOS execution remains on the Mac node via `/Users/taylorolsen-vogt/ios-agent/ios-agent` over SSH.
 - `ssh -o BatchMode=yes -o ConnectTimeout=10 taylorolsen-vogt@100.125.133.123 'timeout 15 /Users/taylorolsen-vogt/ios-agent/ios-agent branch'`
 - `ssh -o BatchMode=yes -o ConnectTimeout=10 taylorolsen-vogt@100.125.133.123 'echo OK'`
 - `openclaw plugins inspect brave`

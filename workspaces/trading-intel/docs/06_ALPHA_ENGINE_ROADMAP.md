@@ -106,6 +106,11 @@ weekly audit).
    vol solo 0.0713 > ensemble on raw era IC): the remaining path is (a) tiered
    X features, (b) more coverage-era months accruing monthly (t grows ~√n with
    the live track record), (c) P5 ensemble stacking. Log: `logs/ml-ranker-v5-600.log`.
+   **v6 (2026-07-03, +dollar_vol_63d_log size axis): REJECTED & reverted.** Decile
+   L/S inflated to +19.1%/yr but via a cost-blind short-small-illiquid tilt; rank
+   IC/t/ICIR all fell and the top-decile long side was unchanged. The size-column
+   shortcut to the X-tier hypothesis is dead — a real per-tier z construction is
+   the remaining path (open). Log: `logs/ml-ranker-v6-size.log`; see FINDINGS.
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.

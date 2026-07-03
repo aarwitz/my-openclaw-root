@@ -172,17 +172,20 @@ def check_taskmanager():
     )
     if not is_canonical:
         return finding("taskmanager", "crit", f"TASK_MANAGER_URL must be {canonical}; got {raw}")
-    for path in ("/health", "/"):
+    # Prefer "/" (serves the app, 200); "/health" doesn't exist on the CF Worker.
+    # A 5xx means the edge is up but the Worker is erroring — warn, not ok.
+    for path in ("/", "/health"):
         try:
             req = urllib.request.Request(
                 url + path, method="GET",
                 headers={"User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)"},
             )
             with urllib.request.urlopen(req, timeout=6) as r:
-                return finding("taskmanager", "ok", f"reachable at {url} (HTTP {r.status})")
+                return finding("taskmanager", "ok", f"reachable at {url}{path} (HTTP {r.status})")
         except urllib.error.HTTPError as e:
-            # server answered → it's up
-            return finding("taskmanager", "ok", f"reachable at {url} (HTTP {e.code})")
+            if e.code >= 500:
+                return finding("taskmanager", "warn", f"{url}{path} answered HTTP {e.code} — edge up, app erroring")
+            continue  # 4xx on this path: try the next one
         except Exception:
             continue
     return finding("taskmanager", "crit", f"task manager unreachable at {url}")
@@ -338,10 +341,36 @@ def check_intent_flow():
     return finding("intent_flow", "ok", f"no stuck intents; last risk review {last_review}")
 
 
+def check_kv_push():
+    """The app serves data from Cloudflare KV (pushed by push-trader-data.sh on
+    host cron). If pushes stop, users silently see stale data even though every
+    local pipeline stays green — so watch the push log's last success directly."""
+    log = f"{ROOT}/logs/push-trader-data-cron.log"
+    try:
+        raw = open(log, "rb").read()[-20000:].decode("utf-8", "replace")
+    except FileNotFoundError:
+        return finding("kv_push", "warn", "push-trader-data-cron.log missing — KV data push never ran")
+    last_ok = None
+    for line in raw.splitlines():
+        if "[push-data] ok" in line:
+            last_ok = line.strip()
+    if not last_ok:
+        return finding("kv_push", "warn", "no successful KV push in recent log window")
+    # timestamp is the token after "[push-data] ok", e.g. 2026-07-03T02:05:06Z
+    try:
+        ts = last_ok.split("[push-data] ok", 1)[1].strip().split()[0]
+        age_h = (datetime.now(timezone.utc) - datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds() / 3600
+    except Exception as e:
+        return finding("kv_push", "warn", f"could not parse last push time: {e}")
+    if age_h > 3:
+        return finding("kv_push", "warn", f"last successful KV data push {age_h:.1f}h ago — app data going stale")
+    return finding("kv_push", "ok", f"last KV data push {age_h * 60:.0f}m ago")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
-    check_debrief_coverage, check_intent_flow,
+    check_debrief_coverage, check_intent_flow, check_kv_push,
 ]
 
 

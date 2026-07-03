@@ -106,7 +106,10 @@ run_step "pipeline_health" 30 python3 workspaces/developer/scripts/audit_pipelin
 run_step "app_snapshot" 20 python3 workspaces/developer/scripts/audit_app_snapshot.py --path "$APP_DATA_JSON"
 
 if [[ "$PUBLISH" -eq 1 && "$SKIP_SNAPSHOT" -eq 0 ]]; then
-  run_step "publish" 240 bash "$OPENCLAW/scripts/publish-trader-intel.sh"
+  # Data-only publish (KV put via /api/trader-data, seconds) — since 2026-07-02 the
+  # app reads data from KV, so passes no longer need a full vite build + Pages
+  # deploy. Code changes still ship via publish-trader-intel.sh (manual / on merge).
+  run_step "publish" 120 bash "$OPENCLAW/scripts/push-trader-data.sh"
 fi
 
 printf ',\n  "finished_at": "%s"\n}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
