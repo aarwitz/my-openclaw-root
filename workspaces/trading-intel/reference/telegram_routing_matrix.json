@@ -19,14 +19,6 @@
       "description": "Oversight and task execution status"
     },
     {
-      "accountId": "resi",
-      "agentId": "resi",
-      "persona": "Resi",
-      "botHandle": "@resi_rsl_bot",
-      "surface": "dm",
-      "description": "Resi workspace direct execution"
-    },
-    {
       "accountId": "druck",
       "agentId": "overseer",
       "persona": "Druck",

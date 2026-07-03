@@ -3,55 +3,49 @@
 **Discipline:** a source only feeds *sized trading* after its features pass the FDR-corrected,
 cost-net backtest gate (`mechanism_backtest.py`). Free live-only sources (no history) can be
 **advisory** (shown in UI) or **forward-collected** (build history → validate later), never
-sized un-validated. Status as of 2026-06-25.
+sized un-validated. Status as of **2026-07-03** (full dependency audit; see git history for
+the audit detail). The monthly `data-scout-monthly` cron keeps this file honest — scout
+entries append to the Scout log at the bottom.
 
-## Legend
-`LIVE` = featurized + trading · `KEYED` = credential works, not yet wired · `EXPAND` = paying for it, using a fraction · `BLOCKED` = needs key/refresh/paid tier · `ADVISORY` = no history, can't backtest
-
----
+> **Operator action wanted:** fill in the *Cost/yr* column below so add/remove decisions can
+> be made on ROI. FMP is known-expensive; whether it stays depends on what only-FMP data
+> actually earns.
 
 ## Tier 1 — wired & trading (the current brain)
-| Source | Cred | Cost | Features (live) | Notes |
+
+| Source | Cost/yr (fill in) | What we use | Features fed | Only-from-this-source? |
 |---|---|---|---|---|
-| **Alpaca / FMP prices** | alpaca, fmp | paid | 7 technicals (rsi, mom, drawdown, vol, dist-sma…) | 37M price rows back to 2004 |
-| **FMP fundamentals** | fmp | **paid (a lot)** | 8 (rev/eps ttm, margins, growth, surprise, insider, ratings) | **EXPAND — see Tier 3** |
-| **Massive (Polygon)** | massive | **paid (a lot)** | news_sent_7d/30d, news_vol_z, days_to_cover, short_int_chg | **EXPAND — options/aggs unused** |
-| **FRED macro** | (keyless) | free | 17 (rates curve, credit spreads, real yields, VIX, dollar, oil, fed funds) | **just expanded + validated; 16 live macro mechanisms** |
-| **Sector ETF** | fmp | paid | sector_rel_63d | |
+| **FMP** | $___ (expensive) | fundamentals ttm, insider tx, analyst grades, EOD prices (20yr incl. delisted), profiles, S&P constituents, stock-peers, screener | 8 fundamentals + insider_net_180d, rating_net_90d, sector_rel_63d, peer_mom_21d, valuation, KG edges | **peers, grades, insider, delisted-history are FMP-only today.** Prices/fundamentals have free substitutes (Alpaca/EDGAR) at engineering cost |
+| **Massive (Polygon)** | $___ (expensive) | daily bars, biweekly short interest, ticker news + article text | news_sent_7d/30d, news_vol_z, days_to_cover, short_int_chg_2m, LLM news features (article text!) | **article TEXT is the LLM-feature fuel — only source we hold.** Options endpoints exist on higher tier (403 today) |
+| **X (Twitter)** | $___ (paid, confirmed working) | full-archive cashtag mention counts | x_mention_vol_z — top single feature 2024-26 (IC 0.056 mega-caps / 0.034 broad) | yes — no substitute archive |
+| **Alpaca** | free | paper broker (orders/positions/history) + IEX bars/quotes + clock/calendar | execution, reconcile, scoreboard, spy_trend, freshness gates | broker layer being replaced by the internal engine (docs/07); **data layer stays** |
+| **FRED/Treasury/Cboe** | free | rates curve, credit spreads, VIX term, macro series | 17 macro features; 16 validated macro mechanisms; regime signals | irreplaceable & free |
+| **SEC EDGAR** | free | company facts (XBRL), 10-K/Q full text | valuation cross-check, filing_delta (Lazy-Prices MinHash) | free forever; underused (8-K event timing still open) |
+| **Event Registry** | free tier | entity-tagged recent news + sentiment | catalyst_scan brief (advisory) | replaceable |
 
-## Tier 2 — KEYED, unlock now (highest ROI)
-| Source | Cred | Cost | What it adds | Backtestable? | Priority |
-|---|---|---|---|---|---|
-| **X / Twitter** | x-api | paid (have it) | cashtag **mention-volume** (counts API) + **sentiment** (tweets); social buzz, attention spikes | **YES — full-archive access confirmed** | **#1** |
-| **Event Registry** | news-api-ai | free tier | entity-tagged news (precise ticker tagging vs lexical); richer than Massive lexicon | recent only (pair w/ Massive/GDELT for history) | #2 |
+## Tier 2 — decided candidates (my recommendation, pending operator cost check)
 
-## Tier 3 — paying for it, under-utilized (expand)
-| Source | Have | Currently | Unused high-value endpoints |
-|---|---|---|---|
-| **FMP** | ✅ paid | 8 fundamentals | analyst **price targets**, estimates & revisions, **institutional ownership** Δ, earnings-call transcripts, economic calendar, ETF holdings |
-| **Massive/Polygon** | ✅ paid | news + short int | **options flow / open interest**, trade-level aggregates, intraday, technical indicators |
-| **Finnhub** | ✅ key | UI risk_checks only | insider tx + analyst recs (free, overlaps FMP); social/news-sentiment are **premium (403)** |
-
-## Tier 4 — supplementary / blocked
-| Source | Status | Note |
+| Candidate | Verdict | Why / expected value |
 |---|---|---|
-| **Schwab** | BLOCKED (token expired) | OAuth refresh_token present; market data overlaps Alpaca/Massive — low priority |
-| **EDGAR** | KEYLESS | SEC filings; overlaps FMP fundamentals; unique value = 8-K event timing |
-| **AlphaVantage** | BLOCKED (no key) | connector exists, no credential |
-| **GDELT** | ADVISORY | free global news tone, but **too rate-limited** for live |
-| **StockTwits / Reddit** | ADVISORY | free crowd sentiment, **no history** — superseded by X full-archive |
+| **Options flow / OI (Massive tier upgrade or ORATS ~$1-3k/yr)** | **ADD — highest priority** | IV skew, put/call, unusual activity = positioning data orthogonal to everything we hold; strong published 1-4w cross-sectional evidence; we already saw 403 on the current Massive plan |
+| **Reddit retail sentiment (apewisdom/free or SocialGrep)** | ADD (cheap) | complements X attention; WSB mention velocity had real 2021-24 signal in meme/mid-caps — exactly where X dilutes; forward-collect + backtest what history exists |
+| **Congressional trading (QuiverQuant ~$500/yr, or free STOCK Act scrapes)** | TRIAL (cheap) | 30-45d disclosure lag blunts it; published alpha modest at our horizon. Worth one backtest column, not a subscription commitment until it passes FDR |
+| **Google Trends (free)** | ADD (free) | search attention per name; free history via pytrends; cheap experiment alongside X |
+| **Daily short interest (Ortex $$$/S3)** | HOLD | our biweekly Massive SI already earns a slot; daily adds most in squeeze regimes — revisit if a squeeze-mechanism proposal passes |
+| **Earnings-call transcripts + LLM tone (FMP higher tier $___, or free EDGAR 8-K/press)** | HOLD until FMP cost decision | llm_features.py is ready for it; value real but paywalled — bundle with the FMP keep/kill decision |
+| **Satellite (RS Metrics/SpaceKnow, $10k+/yr)** | **SKIP for now** | value concentrates in specific retail/energy names at quarterly horizon with long validation cycles; poor ROI at our book size ($100k paper). Revisit at real capital |
+| **Credit-card panels (Second Measure etc., $50k+/yr)** | SKIP | gold standard but priced for funds; not at this scale |
+| **Web/app traffic (Similarweb), job postings (LinkUp)** | WATCH | quarterly-horizon fundamentals nowcasts; scout re-checks pricing monthly |
 
----
+## Housekeeping (from the 2026-07-03 audit)
 
-## Recommended integration order
-1. **X mention-volume + sentiment** (Tier 2 #1) — the validatable social signal you wanted. Smart path:
-   start with the **counts endpoint** (cheap, full-history mention-volume + abnormal-spike features → backtest),
-   then add **sentiment** from sampled archive tweets. Same loop as FRED: add → FDR-validate → wire live.
-2. **Expand FMP** (price targets, estimates revisions, institutional ownership) — already paid, high signal.
-3. **Expand Massive** (options flow / OI) — already paid; options positioning is strong edge.
-4. **Activate Event Registry** for entity-precise news (improve the news features).
-5. (later) Schwab refresh, EDGAR 8-K event timing.
+- **gdelt.py** — orphaned in the Python pipeline (only lidi's intel-pack.ts uses GDELT independently). Candidate for deletion from connectors.
+- **alphavantage.py** — silent no-op (no credential). Either provision a key (free tier) for its NEWS_SENTIMENT history or delete the branch.
+- **yahoo.py** — fallback-only (valuation VIX/yield backup). Keep; it's the free failover.
+- **finnhub-api.json, schwab-dev-*.json** — credentials exist, nothing calls them. Schwab token expired. Candidates for the shredder unless Finnhub's free insider/recs become a cross-check column.
+- **FMP endpoints paid-for but unused:** analyst price targets, estimates & revisions, institutional ownership Δ — wire before renewing, or don't renew.
+- The web layer (`trader-live.ts`) hits Alpaca directly — must be re-pointed when the internal paper engine (docs/07) cuts over.
 
-Build scripts: connectors live in `workspaces/trading-intel/scripts/connectors/`; features are emitted by
-`feature_store.py` (per-ticker) and `mechanism_backtest.py::_macro_series` (market-wide). Live firing reads
-`signal_scan.py` (now merges macro via `latest_macro()` — mirror that pattern for any market-wide source).
+## Scout log (appended monthly by `data-scout-monthly`)
+
+*(empty — first run 2026-08-01)*
