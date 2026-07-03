@@ -83,7 +83,7 @@ Default runtime note:
 - Agents must use `https://tm.lidisolutions.ai` for Task Manager access.
 - Retired local aliases are not supported and should not be used in any runtime.
 
-1. Make Task Manager backend change in `/home/aaron/.openclaw/workspaces/dwight/task-manager/`.
+1. Make Task Manager backend change in `/home/aaron/repos/lidi-task-manager/` (live API = `worker/index.js`; deploy per its docs/deploy-cloudflare.md).
 2. Run contract check:
 
 ```bash

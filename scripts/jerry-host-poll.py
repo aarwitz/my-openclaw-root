@@ -90,9 +90,12 @@ ACTIVE_STATUSES = {"to_do", "in_progress"}
 # ---------- HTTP layer ----------
 
 
+TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-Agent/1.0)")
+
+
 def _http(method: str, path: str, payload: object | None = None) -> tuple[int, object]:
     url = f"{TM_BASE}{path}"
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
     data = None
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")

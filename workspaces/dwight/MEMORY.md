@@ -11,7 +11,7 @@ Long-term durable facts, stable decisions, and persistent constraints for the Dw
 ## Task Manager
 
 - Live at: https://tm.lidisolutions.ai
-- Source: /home/aaron/.openclaw/workspaces/dwight/task-manager/
+- Source: /home/aaron/repos/lidi-task-manager/ (Cloudflare Worker + D1; live API is worker/index.js). The old workspace fork was archived 2026-07-02 to ~/.openclaw/archive/task-manager-workspace-fork-retired-20260702.
 - Runtime: container-only under Dwight control (no host/systemd runtime)
 - Non-Dwight agents: read-only visibility; Dwight is sole mutator/maintainer
 - GitHub bot: aaronclawrsl-bot

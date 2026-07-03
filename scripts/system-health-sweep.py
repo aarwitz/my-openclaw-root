@@ -174,7 +174,10 @@ def check_taskmanager():
         return finding("taskmanager", "crit", f"TASK_MANAGER_URL must be {canonical}; got {raw}")
     for path in ("/health", "/"):
         try:
-            req = urllib.request.Request(url + path, method="GET")
+            req = urllib.request.Request(
+                url + path, method="GET",
+                headers={"User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)"},
+            )
             with urllib.request.urlopen(req, timeout=6) as r:
                 return finding("taskmanager", "ok", f"reachable at {url} (HTTP {r.status})")
         except urllib.error.HTTPError as e:

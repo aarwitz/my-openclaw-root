@@ -18,7 +18,7 @@ Boundary:
 - Use this skill for Task Manager data mutations.
 - Use `task-manager-maintainer` for Task Manager code changes.
 
-Source code: `/home/aaron/.openclaw/workspaces/dwight/task-manager/` (FastAPI + SQLite + vanilla JS frontend).
+Source code: `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1; deploys to tm.lidisolutions.ai — see its docs/deploy-cloudflare.md).
 
 ## ⚠️ Story Creation Rules — READ FIRST
 
@@ -345,8 +345,8 @@ Avoid comments that only restate prior status with no new output.
 
 For making code changes to the Task Manager itself (adding fields, changing endpoints, updating frontend modals), load the `task-manager-maintainer` skill. It covers backend/frontend sync, additive migrations, validation checklists, and the required workflow for safe end-to-end changes.
 
-Source code: `/home/aaron/.openclaw/workspaces/dwight/task-manager/` (FastAPI + SQLAlchemy + SQLite + vanilla JS)
-Database: `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db`
+Source code: `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1 production; Python backend in repo is dev-only)
+Database: production D1 `lidi-task-manager` (access via `npx wrangler d1 execute lidi-task-manager --remote`)
 
 **To restart after code changes:**
 ```bash

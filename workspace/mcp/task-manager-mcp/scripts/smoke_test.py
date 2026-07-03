@@ -18,7 +18,7 @@ TM_BASE_URL = os.environ.get("TM_BASE_URL", "https://tm.lidisolutions.ai").rstri
 
 def get_json(path: str):
     url = f"{TM_BASE_URL}{path}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
 

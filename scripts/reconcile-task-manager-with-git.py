@@ -60,9 +60,12 @@ def run_cmd(args: List[str], cwd: Optional[str] = None, check: bool = True) -> s
     return completed
 
 
+TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-Agent/1.0)")
+
+
 def http_json(url: str, method: str = "GET", payload: Optional[Dict[str, Any]] = None) -> Any:
     body = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"

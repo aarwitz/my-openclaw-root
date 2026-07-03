@@ -9,8 +9,8 @@ metadata: {"clawdbot":{"emoji":"🔧"}}
 ## Purpose
 Apply safe, end-to-end changes to the Task Manager repo where backend API, DB model/migrations, and frontend issue workflows must stay in sync.
 
-**Source code:** `/home/aaron/.openclaw/workspaces/dwight/task-manager/`
-**Database:** `/home/aaron/.openclaw/workspaces/dwight/taskmanager.db` (SQLite, persists across restarts)
+**Source code:** `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1; the live API is `worker/index.js`, NOT the Python backend)
+**Database:** production D1 `lidi-task-manager` — query with `cd /home/aaron/repos/lidi-task-manager && npx wrangler d1 execute lidi-task-manager --remote --json --command "..."`
 **Tech stack:** FastAPI + SQLAlchemy + SQLite + vanilla JS
 
 ## Use When
@@ -94,7 +94,7 @@ Read the full request and identify all affected layers before touching code:
 - Restart server and verify:
   ```bash
   pkill -f "uvicorn main:app" || true
-  cd /home/aaron/.openclaw/workspaces/dwight/task-manager && ./scripts/tmctl.sh start
+  cd /home/aaron/repos/lidi-task-manager && npm run deploy  # see docs/deploy-cloudflare.md checklist first
   ```
 - Smoke test API endpoints with curl
 

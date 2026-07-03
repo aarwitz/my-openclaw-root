@@ -48,6 +48,7 @@ TM_READ_ONLY = os.environ.get("TM_READ_ONLY", "false").lower() in {"1", "true", 
 TM_WRITE_ACTOR = os.environ.get("TM_WRITE_ACTOR", "Dwight")
 TM_INTERNAL_USER_HEADER = os.environ.get("TM_INTERNAL_USER_HEADER", "X-TM-User")
 TM_BEARER_TOKEN = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or os.environ.get("TM_BEARER_TOKEN") or "").strip()
+TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-Agent/1.0)")
 
 mcp = FastMCP("task-manager-mcp")
 
@@ -66,7 +67,7 @@ def _request_json(
             url = f"{url}?{encoded}"
 
     body = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
     if TM_BEARER_TOKEN:
         headers["Authorization"] = f"Bearer {TM_BEARER_TOKEN}"
     if TM_DEFAULT_ACTOR:

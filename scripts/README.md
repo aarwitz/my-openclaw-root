@@ -9,7 +9,7 @@ retired in `~/.openclaw`. Every agent and every human should follow it.
   (main, druck, dwight, resi, trader, …) run inside the **single
   `openclaw-gateway` container**, which bind-mounts the entire `~/.openclaw`
   tree. There is **no per-agent copy**.
-- Other containers (`lidi-task-manager-local`, `lidi-task-manager-autotap-agent-*`) do
+- Other containers (`lidi-task-manager-autotap-agent-*`) do
   **not** mount `~/.openclaw`. They run app code, not OpenClaw ops scripts,
   and are explicitly **exempt** from this policy.
 - Result: edits to a script in `~/.openclaw/scripts/` take effect for every

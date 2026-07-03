@@ -20,7 +20,7 @@ def load_json(path: str) -> dict:
 
 def fetch_openapi(tm_base_url: str) -> dict:
     url = f"{tm_base_url.rstrip('/')}/openapi.json"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
 

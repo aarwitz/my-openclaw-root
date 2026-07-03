@@ -89,8 +89,11 @@ TITLE_RULES = [
 ]
 
 
+TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-Agent/1.0)")
+
+
 def tm_headers(*, with_json: bool = False) -> dict[str, str]:
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
     if with_json:
         headers["Content-Type"] = "application/json"
     if TM_BEARER_TOKEN:
