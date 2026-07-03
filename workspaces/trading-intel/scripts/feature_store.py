@@ -207,12 +207,8 @@ def _news(symbol):
                 return _news_features(rows)
     except Exception:
         pass
-    try:
-        from connectors import alphavantage
-        if alphavantage.available():
-            return _news_features(alphavantage.news_sentiment(symbol))
-    except Exception:
-        pass
+    # (alphavantage fallback removed 2026-07-03 — connector was a credential-less
+    # no-op since inception; Massive + Event Registry cover news sentiment.)
     return []
 
 

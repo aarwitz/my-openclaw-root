@@ -4,6 +4,10 @@
                           Earnings dates are announced ahead -> knowable; capped at 63.
   - analyst_rating_score: weighted consensus from grades-historical (latest row <= D), range ~[-2,2].
   - analyst_rating_chg_63d : 3-mo change in the rating score (revision momentum).
+  - pt_upside           : median analyst price target (trailing 90d of dated target
+                          actions) vs current close - 1. PIT by publishedDate.
+  - pt_rev_60d          : target momentum — median target last 30d vs 30-90d ago - 1.
+  - pt_count_90d        : analyst target-action count in 90d (attention/coverage).
 
 All stamped as_of = knowable_at = the trading date D, using only data dated <= D (no look-ahead).
 Validation-first: populates only the names you pass; a feature reaches sizing only after the FDR
@@ -46,6 +50,36 @@ def build(names):
         except Exception:
             grades = []
         gd = [d for d, _ in grades]
+        try:
+            pt = []
+            for pg in range(0, 4):
+                page = fmp._get("price-target-news", {"symbol": sym, "limit": 100, "page": pg}, cache_h=24.0) or []
+                pt.extend(page)
+                if len(page) < 100:
+                    break
+            targets = sorted((p["publishedDate"][:10], float(p["priceTarget"]))
+                             for p in pt if p.get("publishedDate") and p.get("priceTarget"))
+        except Exception:
+            targets = []
+        tdates = [d for d, _ in targets]
+        try:
+            import feature_store as fs
+            closes = {b["t"]: b["c"] for b in fs._prices(sym, 4000)}
+        except Exception:
+            closes = {}
+
+        def med(vals):
+            if not vals:
+                return None
+            s = sorted(vals); n = len(s)
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+        def targets_in(D, days_back_hi, days_back_lo=0):
+            from datetime import timedelta
+            d0 = (date.fromisoformat(D) - timedelta(days=days_back_hi)).isoformat()
+            d1 = (date.fromisoformat(D) - timedelta(days=days_back_lo)).isoformat()
+            i, j = bisect.bisect_left(tdates, d0), bisect.bisect_right(tdates, d1)
+            return [v for _, v in targets[i:j]]
 
         def rating_at(D):
             j = bisect.bisect_right(gd, D) - 1
@@ -58,6 +92,16 @@ def build(names):
                 dte = (date.fromisoformat(earn[i]) - date.fromisoformat(D)).days
                 if dte >= 0:
                     rows.append((sym, D, "days_to_earnings", float(min(dte, 63)), D, "fmp"))
+            t90 = targets_in(D, 90)
+            if len(t90) >= 3:
+                c = closes.get(D)
+                m90 = med(t90)
+                if c and m90:
+                    rows.append((sym, D, "pt_upside", round(m90 / c - 1, 4), D, "fmp"))
+                rows.append((sym, D, "pt_count_90d", float(len(t90)), D, "fmp"))
+                m_new, m_old = med(targets_in(D, 30)), med(targets_in(D, 90, 30))
+                if m_new and m_old:
+                    rows.append((sym, D, "pt_rev_60d", round(m_new / m_old - 1, 4), D, "fmp"))
             sc = rating_at(D)
             if sc is not None:
                 rows.append((sym, D, "analyst_rating_score", round(sc, 4), D, "fmp"))
@@ -68,7 +112,7 @@ def build(names):
         conn.executemany(
             "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
         conn.commit(); total += len(rows)
-        print(f"  {sym}: earnings={len(earn)} grades={len(grades)} -> {len(rows)} rows", flush=True)
+        print(f"  {sym}: earnings={len(earn)} grades={len(grades)} targets={len(targets)} -> {len(rows)} rows", flush=True)
     print(f"done: {total} fmp-signal rows across {len(names)} names")
 
 

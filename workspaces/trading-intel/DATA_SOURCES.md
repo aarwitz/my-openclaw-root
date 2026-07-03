@@ -43,7 +43,9 @@ entries append to the Scout log at the bottom.
 - **alphavantage.py** — silent no-op (no credential). Either provision a key (free tier) for its NEWS_SENTIMENT history or delete the branch.
 - **yahoo.py** — fallback-only (valuation VIX/yield backup). Keep; it's the free failover.
 - **finnhub-api.json, schwab-dev-*.json** — credentials exist, nothing calls them. Schwab token expired. Candidates for the shredder unless Finnhub's free insider/recs become a cross-check column.
-- **FMP endpoints paid-for but unused:** analyst price targets, estimates & revisions, institutional ownership Δ — wire before renewing, or don't renew.
+- **FMP price targets WIRED 2026-07-03** (`price-target-news`, PIT by publishedDate): pt_upside, pt_rev_60d, pt_count_90d — in GEN_FEATURES, 600-name backfill running. **Institutional ownership: NOT on our tier** (all /stable paths 40x) — factor into the renewal decision. Estimate *revisions* have no PIT history endpoint; target revisions serve as the proxy.
+- **ThetaData audition RUNNING 2026-07-03**: free-tier terminal live (tools/thetadata/, v2 REST :25510), `options_audit.py` pulling 1yr bulk EOD for top-64 names → options_daily table → IC screen (opt_pcr_vol / opt_vol_z / opt_net_prem). Decision rule per Tier 2.
+- **Deleted 2026-07-03**: gdelt.py + alphavantage.py connectors and the feature_store alphavantage branch (credential-less no-ops).
 - The web layer (`trader-live.ts`) hits Alpaca directly — must be re-pointed when the internal paper engine (docs/07) cuts over.
 
 ## Scout log (appended monthly by `data-scout-monthly`)

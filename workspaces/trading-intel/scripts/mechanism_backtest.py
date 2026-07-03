@@ -102,7 +102,11 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
                 "filing_delta",
                 # Economic-link momentum (Cohen-Frazzini): peers' trailing 21d SPY-relative
                 # return propagates to the name with a lag. Paper sign: positive.
-                "peer_mom_21d"]
+                "peer_mom_21d",
+                # Analyst price targets (FMP price-target-news, PIT by publishedDate,
+                # added 2026-07-03): consensus upside, target revision momentum, and
+                # coverage attention. Brav-Lehavy: target revisions carry drift.
+                "pt_upside", "pt_rev_60d", "pt_count_90d"]
 # dollar_vol_63d_log (computed in load_ticker) is deliberately NOT in GEN_FEATURES:
 # the 2026-07-03 v6 eval showed it fattens decile L/S (+12.5→+19.1%/yr net) purely
 # via a short-small-illiquid tilt while WORSENING rank IC/t/ICIR (0.0428/1.75/1.12

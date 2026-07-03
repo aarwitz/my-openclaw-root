@@ -81,6 +81,12 @@ def earnings(symbol: str, limit: int = 120) -> list[dict]:
     return _get("earnings", {"symbol": symbol, "limit": limit}, cache_h=24.0)
 
 
+def price_target_news(symbol: str, limit: int = 1000) -> list[dict]:
+    """Dated individual analyst price-target actions (publishedDate, priceTarget,
+    priceWhenPosted, analystCompany). Point-in-time by publishedDate."""
+    return _get("price-target-news", {"symbol": symbol, "limit": limit}, cache_h=24.0) or []
+
+
 def profile(symbol: str) -> list[dict]:
     return _get("profile", {"symbol": symbol}, cache_h=24.0)
 
