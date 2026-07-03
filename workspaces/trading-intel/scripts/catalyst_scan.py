@@ -77,12 +77,42 @@ def _latest(conn, ticker, name):
     return r[0] if r else None
 
 
+def _ml_ranks(conn):
+    """Latest nightly cross-sectional GBM ranks (ml_ranker.py --score-live).
+    ADVISORY — a conviction/discovery input for the research agents, never a
+    sizing input. Returns ({ticker: {rank, score, n}}, as_of) or ({}, None)."""
+    try:
+        r = conn.execute("SELECT MAX(as_of) FROM ml_scores").fetchone()
+        as_of = r[0] if r else None
+        if not as_of:
+            return {}, None
+        rows = conn.execute(
+            "SELECT ticker, rank, score, n_universe FROM ml_scores WHERE as_of=?", (as_of,)).fetchall()
+        return {t: {"rank": rk, "score": sc, "n": n} for t, rk, sc, n in rows}, as_of
+    except Exception:
+        return {}, None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--watchlist", default=",".join(signal_scan.DEFAULT_WATCHLIST))
     ap.add_argument("--days", type=int, default=14)
+    ap.add_argument("--model-top-n", type=int, default=10,
+                    help="pull the model's top-N ranked names into the scan (discovery channel)")
     a = ap.parse_args()
     names = [s.strip().upper() for s in a.watchlist.split(",") if s.strip()]
+
+    # Discovery channel: the ranker scores ~600 names nightly; the watchlist is
+    # static. The model's current top names join the scan so a high-rank name
+    # the desk isn't watching still gets researched (advisory, never auto-traded).
+    ml_conn = sqlite3.connect(FEAT)
+    ml, ml_as_of = _ml_ranks(ml_conn)
+    ml_conn.close()
+    if ml and a.model_top_n > 0:
+        top = sorted(ml.items(), key=lambda kv: kv[1]["rank"])[: a.model_top_n]
+        for t, _info in top:
+            if t not in names:
+                names.append(t)
 
     sig_rows, _ = signal_scan.scan(names, min_fired=1)
     sig = {r["ticker"]: r for r in sig_rows}
@@ -131,6 +161,13 @@ def main():
             flags.append("QUANT_CONVICTION")
         if x_z is not None and x_z >= 2.5:
             flags.append("SOCIAL_SPIKE")               # abnormal X attention — investigate catalyst
+        m = ml.get(t)
+        if m and m["n"]:
+            pct = m["rank"] / m["n"]
+            if pct <= 0.10:
+                flags.append("MODEL_TOP_DECILE")       # nightly GBM ranks it top-10% — investigate why
+            elif pct >= 0.90:
+                flags.append("MODEL_BOTTOM_DECILE")    # model dislikes it — caution on longs
         if not flags:
             continue
         if sec_rel is not None and sec_rel > 5:
@@ -145,9 +182,11 @@ def main():
                      "neg_catalysts": neg_hit, "themes": themes,
                      "headlines": [x.get("title") for x in arts[:3]]},
             "social": {"x_attention_z": x_z, "x_mentions_today": x_count},
+            "model": ({"rank": m["rank"], "of": m["n"], "as_of": ml_as_of} if m else None),
         })
     conn.close()
-    order = {"OVERREACTION_LONG": 0, "CATALYST_POS": 1, "CATALYST_NEG": 2, "QUANT_CONVICTION": 3, "SOCIAL_SPIKE": 4}
+    order = {"OVERREACTION_LONG": 0, "CATALYST_POS": 1, "CATALYST_NEG": 2, "QUANT_CONVICTION": 3,
+             "MODEL_TOP_DECILE": 4, "SOCIAL_SPIKE": 5, "MODEL_BOTTOM_DECILE": 6}
     brief.sort(key=lambda b: min(order.get(f, 9) for f in b["flags"]))
     json.dump({"generated": __import__("datetime").datetime.utcnow().isoformat() + "Z", "brief": brief},
               open(OUT, "w"), indent=2)
@@ -165,6 +204,8 @@ def main():
         soc = b.get("social", {})
         if soc.get("x_attention_z") is not None:
             print(f"         social: X attention z={soc['x_attention_z']} ({soc.get('x_mentions_today')} mentions today)")
+        if b.get("model"):
+            print(f"         model : rank {b['model']['rank']}/{b['model']['of']} (nightly GBM, {b['model']['as_of']})")
     print("\n(advisory — the research agent reasons over this brief to judge over/under-reaction and emit hypotheses)")
 
 

@@ -39,6 +39,24 @@ append fresh `hypothesis_evidence` rows (new `retrieved_at`, real URLs) so the n
 pass's intent clears the gate; if it no longer holds, mark the hypothesis dormant
 with a one-line rationale. A thesis nobody re-checks is not an edge — it's a memory.
 
+## Catalyst brief + model radar (added 2026-07-03)
+
+Read `~/.openclaw/state/catalyst_brief.json` (regenerated each pre-open by
+`learning-signals.sh`) before sourcing ideas. It fuses quant conviction, news
+catalysts, social attention, and the nightly cross-sectional GBM rank per name.
+Flags and how to treat them:
+
+- `MODEL_TOP_DECILE` — the 600-name ranker puts it in the top 10%. This is a
+  DISCOVERY prompt, not a buy signal: investigate WHY (what mechanism/catalyst
+  would explain the rank) and only author a hypothesis if you find a real,
+  primary-source-grounded story. The model's top-10 names are auto-added to the
+  brief even when they're off the watchlist.
+- `MODEL_BOTTOM_DECILE` — the model dislikes it; treat as a counterargument any
+  long thesis on the name must answer explicitly.
+- The rank is ADVISORY and never a sizing input; cite it in
+  `hypothesis_evidence` as `source: ml_ranker gbm-rank-v1` with the rank/date
+  so graded outcomes can attribute discovery credit to the model.
+
 ## Hard rules
 
 - Never write to `trade_intents`, `orders`, `positions`, `regime`, or `critic_reviews`.

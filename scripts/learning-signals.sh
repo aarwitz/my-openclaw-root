@@ -39,6 +39,14 @@ else log "   FAIL: refresh-live"; FAILED="refresh-live"; fi
 if "$PY" "$TI/x_features.py" --top-n 64 >>"$LOG" 2>&1; then log "   ok: x-features"
 else log "   WARN: x-features failed (non-blocking)"; fi
 
+# 1c) catalyst brief — the quant×news×social×model reasoning brief the research
+# agents read (state/catalyst_brief.json). Was fully orphaned (no cron ran it;
+# the UI showed "insights as of 6d ago"). Includes the nightly GBM top-10 as a
+# discovery channel + MODEL_TOP/BOTTOM_DECILE flags. Best-effort: news-API
+# hiccups must not block the signal chain.
+if timeout 300 "$PY" "$TI/catalyst_scan.py" --days 7 >>"$LOG" 2>&1; then log "   ok: catalyst-brief"
+else log "   WARN: catalyst-brief failed (non-blocking)"; fi
+
 # 2) fire calibrated mechanisms -> top-conviction RAW hypotheses (extra args pass through).
 # --scan-top-n 600: scan the top-600 liquid names (not just 200) so the 4 picks are
 # selected from the full high-conviction pool; downstream caps/gates are unchanged.
