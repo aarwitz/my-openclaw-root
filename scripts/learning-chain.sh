@@ -57,6 +57,11 @@ step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
 # in features.sqlite::ml_scores. Nothing trades on this until the human-gated
 # promotion (see docs/06_ALPHA_ENGINE_ROADMAP.md P2).
 step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
+# Internal paper engine (docs/07 P1, D51): mirror desk fills into the shadow
+# ledger, apply corporate actions (audited), mark EOD equity, parity vs Alpaca.
+# Non-zero exit = shadow diverged from the broker — exactly what shadow mode
+# exists to catch, so it flows into FAILED and pages via the chain alert.
+step "sim-parity"          "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
