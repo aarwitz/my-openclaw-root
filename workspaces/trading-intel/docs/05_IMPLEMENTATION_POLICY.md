@@ -1,6 +1,6 @@
 # 05 — Implementation Policy
 
-Status: active. Schedules, approved actions, deferred features, build phases, and validation gates. Implements `01_OPERATING_AUTHORITY.md` and `02_ARCHITECTURE.md`.
+Status: active. Schedules, approved actions, deferred features, build phases, and validation gates. Implements `01_OPERATING_AUTHORITY.md` and `~/.openclaw/SYSTEM_ARCHITECTURE.md` (canonical).
 
 ## 1. Approved actions at launch
 
@@ -16,7 +16,7 @@ Status: active. Schedules, approved actions, deferred features, build phases, an
 - Margin beyond Alpaca paper defaults.
 - Crypto.
 - Futures.
-- Any data source not declared in `02_ARCHITECTURE.md` section 6.
+- Any data source not declared in `DATA_SOURCES.md` (catalog) / `~/.openclaw/SYSTEM_ARCHITECTURE.md` §6.
 
 Lift restrictions only through a new `DECISION_LOG.md` entry approved by Aaron.
 

@@ -1,6 +1,6 @@
 # 01 — Operating Authority
 
-Status: active. Authority order: this doc > `02_ARCHITECTURE.md` > `03_EXECUTION_STATE_MACHINE.md` > `04_SHARED_STATE_SCHEMA.md` > `05_IMPLEMENTATION_POLICY.md`.
+Status: active. Authority order: `~/.openclaw/SYSTEM_ARCHITECTURE.md` (canonical) > this doc > `03_EXECUTION_STATE_MACHINE.md` > `04_SHARED_STATE_SCHEMA.md` > `05_IMPLEMENTATION_POLICY.md`.
 
 ## 1. Mandate
 

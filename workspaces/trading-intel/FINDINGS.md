@@ -11,6 +11,12 @@ quirk that changes interpretation; a consensus belief the data contradicts; a st
 market behavior worth remembering. **Format:** date, one-line claim in bold, then the
 evidence and caveats in 2-5 sentences. Newest first.
 
+**Expiry convention (2026-07-04):** quantitative claims (ICs, hit rates, return spreads)
+decay with the regime. Tag them with a `revalidate-by: YYYY-MM-DD` line; the weekly
+`scripts/doc-lint.py` pass flags expired tags so the claim gets re-verified or revised
+instead of silently rotting into false canon. Structural/one-off findings (dataset quirks,
+incident postmortems) need no tag.
+
 ---
 
 ## 2026-07-04 — options audition ($0 spent): net premium direction is the keeper, volume-spike was a mirage
@@ -27,6 +33,7 @@ evidence and caveats in 2-5 sentences. Newest first.
   features.sqlite::options_daily and reusable). Per the pre-registered rule
   (|IC| ≥ 0.03 → buy history), the next step is Massive Options Developer
   ($79/mo, 4yr) for the full FDR backtest — OPERATOR PURCHASE DECISION pending.
+- revalidate-by: 2026-10-01 (moot earlier if the 4yr FDR backtest runs first)
 
 ## 2026-07-03 (evening) — v7: analyst price targets are the biggest single-family lift yet
 
@@ -40,6 +47,7 @@ evidence and caveats in 2-5 sentences. Newest first.
   we already pay for, unwired. The promotion bar (t>3) is now within sight of the live
   track record accrual. On the record: the nightly scorer trains with 43 features from
   tonight (2026-07-03) — v7's first live ranks land in ml_scores tomorrow pre-market.
+- revalidate-by: 2026-10-03 (quarterly retrain checkpoint — confirm the pt lift holds OOS)
 
 ## 2026-07-03 — the size-axis experiment (v6): a feature can fatten the backtest while making the model worse
 

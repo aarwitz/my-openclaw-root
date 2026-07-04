@@ -70,8 +70,10 @@ nodes/
 devices/
 identity/
 telegram/
-cron/runs/
-cron/jobs-state.json
+# Cron: track the live job source, never runtime state.
+!cron/
+cron/*
+!cron/jobs.json
 agents/
 npm/
 canvas/

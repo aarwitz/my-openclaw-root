@@ -6,7 +6,7 @@ Status: active. Authoritative entity model. The implementing DDL lives in `sql/s
 
 - Engine: SQLite (WAL mode).
 - Location: `~/.openclaw/state/trading-intel.sqlite`.
-- Access: all five trading agents share this DB. Write permissions are enforced at the application layer (see `02_ARCHITECTURE.md` section 4).
+- Access: all five trading agents share this DB. Write permissions are enforced at the application layer (see `~/.openclaw/SYSTEM_ARCHITECTURE.md` §4).
 - Backups: daily snapshot to `~/.openclaw/state/backups/trading-intel-YYYY-MM-DD.sqlite`.
 
 ## 2. Storage policy for reasoning

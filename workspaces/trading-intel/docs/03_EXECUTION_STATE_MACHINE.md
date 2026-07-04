@@ -1,6 +1,6 @@
 # 03 — Execution State Machine
 
-Status: active. Defines the deterministic state transitions, gates, and reconciliation rules for hypotheses, trade intents, orders, and positions. Implements `02_ARCHITECTURE.md`.
+Status: active. Defines the deterministic state transitions, gates, and reconciliation rules for hypotheses, trade intents, orders, and positions. Implements `~/.openclaw/SYSTEM_ARCHITECTURE.md` (canonical).
 
 ## 1. Entities and primary states
 

@@ -198,8 +198,9 @@ See `reference/validation_corpus/CONTINUOUS_LEARNING_APPROVAL_LOOP.md` for full 
 ## Authority hierarchy (what wins when things conflict)
 
 ```
-01_OPERATING_AUTHORITY.md  >  02_ARCHITECTURE.md  >  03_EXECUTION_STATE_MACHINE.md
-    >  sql/schema.sql  >  04_SHARED_STATE_SCHEMA.md  >  05_IMPLEMENTATION_POLICY.md
+~/.openclaw/SYSTEM_ARCHITECTURE.md (canonical)  >  01_OPERATING_AUTHORITY.md
+    >  03_EXECUTION_STATE_MACHINE.md  >  sql/schema.sql
+    >  04_SHARED_STATE_SCHEMA.md  >  05_IMPLEMENTATION_POLICY.md
 ```
 
 Any change to these docs requires a `DECISION_LOG.md` entry.
