@@ -50,4 +50,9 @@ entries append to the Scout log at the bottom.
 
 ## Scout log (appended monthly by `data-scout-monthly`)
 
-*(empty — first run 2026-08-01)*
+**2026-07-04 (operator-session audition, pre-cron):** ThetaData free-tier options
+audition COMPLETE — 63 names × 1yr EOD aggregates, $0 spent. `opt_net_prem` pooled
+IC 0.059 (passes the ≥0.03 audition bar); `opt_pcr_vol` 0.018; `opt_vol_z` 0.001
+(the 20-name preview's −0.11 was small-sample noise). Verdict: AUDITION PASSED →
+recommend Massive Options Developer $79/mo (4yr history) for the full FDR backtest.
+Awaiting operator purchase decision. Raw aggregates banked in options_daily.

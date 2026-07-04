@@ -13,6 +13,21 @@ evidence and caveats in 2-5 sentences. Newest first.
 
 ---
 
+## 2026-07-04 — options audition ($0 spent): net premium direction is the keeper, volume-spike was a mirage
+
+- **The 20-name preview's headline feature evaporated at full sample** — opt_vol_z
+  showed IC −0.109 on 20 names, then **0.001 on 63 names**. Small-cross-section ICs
+  with 10 rebalances are noise until proven otherwise; widening the panel before
+  deciding saved us from buying data for a phantom signal.
+- **`opt_net_prem` (dollar-weighted call-vs-put premium direction) is the real
+  candidate: pooled IC 0.059 on 63 names × 1yr** (t 0.99 — only 10 monthly obs, so
+  no statistical claim yet). If it held at 4yr depth it would slot near the top of
+  the feature table (realized vol = 0.071). Put/call volume ratio: 0.018, weak.
+- Audition cost $0 (ThetaData free tier, 14,835 daily aggregates now banked in
+  features.sqlite::options_daily and reusable). Per the pre-registered rule
+  (|IC| ≥ 0.03 → buy history), the next step is Massive Options Developer
+  ($79/mo, 4yr) for the full FDR backtest — OPERATOR PURCHASE DECISION pending.
+
 ## 2026-07-03 (evening) — v7: analyst price targets are the biggest single-family lift yet
 
 - **Adding three price-target features (`pt_upside`, `pt_rev_60d`, `pt_count_90d` from
