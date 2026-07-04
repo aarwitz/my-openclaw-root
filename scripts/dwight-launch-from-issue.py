@@ -62,7 +62,20 @@ def enforce_hosted_tm_base(raw_base: Optional[str], env_name: str = "TASK_MANAGE
 DEFAULT_TM_BASE = enforce_hosted_tm_base(os.environ.get("TASK_MANAGER_URL"))
 DEFAULT_LAUNCHER = os.path.expanduser("~/.openclaw/scripts/dwight-assign-coding-task.sh")
 TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))
-TM_BEARER_TOKEN = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or "").strip()
+def _tm_bearer_token() -> str:
+    """Env first; fall back to the shared credential file so token rotation
+    propagates to every host client (same pattern as jerry-host-poll)."""
+    tok = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or os.environ.get("TM_BEARER_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        with open(os.path.expanduser("~/.openclaw/credentials/task-manager-agent.json")) as fh:
+            return str(json.load(fh).get("session_token") or "").strip()
+    except Exception:
+        return ""
+
+
+TM_BEARER_TOKEN = _tm_bearer_token()
 
 
 class TMEndpointMissing(RuntimeError):
@@ -221,6 +234,17 @@ def infer_repo(issue: Dict[str, Any], override: str) -> str:
 
         repo_slug = get_first_nonempty(issue, ["repo_slug", "repoSlug", "project_slug"])
         if repo_slug:
+            # Product registry first: ~/.openclaw/products.json maps slug -> local
+            # path authoritatively (handles paths outside ~/repos, e.g. the robot
+            # at ~/CleaningRobot and the openclaw tree itself).
+            try:
+                reg = json.load(open(os.path.expanduser("~/.openclaw/products.json")))
+                for prod in reg.get("products", []):
+                    for r in prod.get("repos", []):
+                        if r.get("slug", "").lower() == repo_slug.strip().lower() and r.get("path"):
+                            candidates.insert(0, r["path"])
+            except Exception:
+                pass
             add_repo_candidate(repo_slug)
 
         expanded_candidates: List[str] = []
