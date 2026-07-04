@@ -1,0 +1,172 @@
+{
+  "$comment": "Product registry \u2014 single source of truth for the autonomous dev org. Consumed by dwight-launch-from-issue.py (repo resolution), the org-owner cron (backlog health), and TM issue routing. Add a product here and every lane knows it.",
+  "version": 1,
+  "products": [
+    {
+      "id": "autotrade",
+      "name": "AutoTrade",
+      "description": "Self-improving agentic paper-trading desk + trader_intel web app",
+      "repos": [
+        {
+          "slug": "aarwitz/my-openclaw-root",
+          "path": "/home/aaron/.openclaw"
+        },
+        {
+          "slug": "aarwitz/lidi-solutions",
+          "path": "/home/aaron/repos/lidi-solutions",
+          "subdir": "public/solutions/trader_intel"
+        }
+      ],
+      "tm_assignee": "Developer",
+      "owner_agent": "overseer",
+      "verify": [
+        "bash ~/.openclaw/scripts/test-coding-lane-regression.sh",
+        "python3 ~/.openclaw/scripts/system-health-sweep.py"
+      ],
+      "deploy": "~/.openclaw/scripts/run-with-trace.sh --tag manual ~/.openclaw/scripts/publish-trader-intel.sh",
+      "status": "active",
+      "notes": "Trading logic changes flow as rule_proposals (human-gated); web/app code via normal PR lane."
+    },
+    {
+      "id": "resilife",
+      "name": "ResiLife (EWAG iOS)",
+      "description": "Multifamily wellness amenity iOS app \u2014 EWAG's product",
+      "repos": [
+        {
+          "slug": "EWAG-dev/iosApp",
+          "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/EWAG-iosApp",
+          "note": "clone PENDING \u2014 mac lacks non-interactive GitHub auth (deploy key needed)"
+        },
+        {
+          "slug": "EWAG-dev/iosApp",
+          "path": "/home/aaron/repos/EWAG-dev-iosApp",
+          "note": "linux checkout (no builds)"
+        }
+      ],
+      "tm_assignee": "EWAG-Backend",
+      "owner_agent": "dwight",
+      "verify": [
+        "ssh mac-dev: xcodebuild -scheme ResiLife -destination 'platform=iOS Simulator,name=iPhone 15' build"
+      ],
+      "qa": "openclaw-qa engine (see product autotap)",
+      "deploy": "TestFlight via runbook APNS_DEPLOYMENT_RUNBOOK.md (human-gated)",
+      "status": "active",
+      "notes": "Runner containers (lidi-task-manager-ewag-agent-*) handle branch/PR scaffolding; codegen goes through the gateway codex lane.",
+      "runner": "mac-dev"
+    },
+    {
+      "id": "montra",
+      "name": "MONTRA",
+      "description": "Montra Dev Console (web) \u2014 lives inside lidi-solutions",
+      "repos": [
+        {
+          "slug": "EWAG-dev/MONTRA",
+          "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/MONTRA"
+        },
+        {
+          "slug": "aarwitz/lidi-solutions",
+          "path": "/home/aaron/repos/lidi-solutions",
+          "subdir": "public/solutions/montra_dev",
+          "note": "web console"
+        }
+      ],
+      "tm_assignee": "Developer",
+      "owner_agent": "dwight",
+      "verify": [
+        "cd /home/aaron/repos/lidi-solutions && npm run build"
+      ],
+      "deploy": "npm run deploy:pages (human-gated)",
+      "status": "active",
+      "notes": "iOS app repo found 2026-07-03: EWAG-dev/MONTRA on the mac node.",
+      "runner": "mac-dev"
+    },
+    {
+      "id": "autotap",
+      "name": "AutoTap / OpenClaw QA",
+      "description": "Autonomous iOS QA: simulator capture harness + macOS app + orchestration engine",
+      "repos": [
+        {
+          "slug": "aarwitz/AutoTap",
+          "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/AutoTap",
+          "note": "THE AutoTap source (RN-native-view driving validated)"
+        },
+        {
+          "slug": "aaronclawrsl-bot/OpenClawQA",
+          "path": "/home/aaron/repos/OpenClawQA"
+        },
+        {
+          "slug": "aarwitz/openclaw-qa",
+          "path": "/home/aaron/repos/openclaw-qa"
+        }
+      ],
+      "tm_assignee": "Developer",
+      "owner_agent": "dwight",
+      "verify": [
+        "cd /home/aaron/repos/openclaw-qa/engine && npm test 2>&1 | tail -3"
+      ],
+      "status": "active",
+      "notes": "This is the org's QA arm \u2014 every iOS product's verification gate once wired.",
+      "runner": "mac-dev"
+    },
+    {
+      "id": "robot",
+      "name": "CleaningRobot",
+      "description": "Apartment cleaning robot: firmware + vision + (future) embedded agent",
+      "repos": [
+        {
+          "slug": "aarwitz/CleaningRobot",
+          "path": "/home/aaron/CleaningRobot",
+          "path_on": "robot-orin:~/workspaces/CleaningRobot",
+          "note": "linux checkout at /home/aaron/CleaningRobot; LIVE dev happens on the orin"
+        }
+      ],
+      "tm_assignee": "Developer",
+      "owner_agent": "dwight",
+      "verify": [],
+      "status": "active",
+      "notes": "RobotFirmware + Vision subdirs. Related research repos: Dockerized_GroundingSAM, OrbSlam, tracking-dataset. Embedded-agent runtime design TBD.",
+      "runner": "robot-orin"
+    },
+    {
+      "id": "taskmanager",
+      "name": "LIDI Task Manager",
+      "description": "The org's work queue (CF Worker + D1 at tm.lidisolutions.ai)",
+      "repos": [
+        {
+          "slug": "aarwitz/lidi-task-manager",
+          "path": "/home/aaron/repos/lidi-task-manager"
+        }
+      ],
+      "tm_assignee": "Developer",
+      "owner_agent": "dwight",
+      "verify": [
+        "cd /home/aaron/repos/lidi-task-manager && python3 -m pytest tests/ -q"
+      ],
+      "deploy": "npx wrangler deploy (human-gated)",
+      "status": "active",
+      "notes": "Dwight is sole maintainer per workspace contract."
+    }
+  ],
+  "runners": {
+    "mac-dev": {
+      "host": "100.125.133.123",
+      "user": "taylorolsen-vogt",
+      "os": "macOS 26.4.1",
+      "capabilities": [
+        "xcodebuild (Xcode 26.6)",
+        "simctl",
+        "AutoTap QA"
+      ],
+      "ssh": "keyed from this host (verified 2026-07-03)",
+      "role": "all iOS dev/build/test/QA"
+    },
+    "robot-orin": {
+      "host": "ubuntu",
+      "user": "taylor",
+      "device": "NVIDIA Orin Nano (the actual robot)",
+      "repo": "~/workspaces/CleaningRobot",
+      "ssh": "PENDING \u2014 needs this host's pubkey in authorized_keys",
+      "role": "robot live tests + on-device dev"
+    }
+  }
+}

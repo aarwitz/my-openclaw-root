@@ -100,3 +100,7 @@ workspaces/**/.tm-restore/
 *.tmp
 *.swp
 *.swo
+
+# Autonomous dev org (2026-07-03)
+!AUTONOMOUS_ORG.md
+!products.json
