@@ -130,3 +130,11 @@ When in doubt, assign and add a comment explaining why.
 - Eligible rows are latest `open` or `claimed` rows whose `task_id` is still empty.
 - Assignee resolution is deterministic: explicit `assigned_to`/`lane` wins; otherwise row text falls back through keyword rules and then category defaults.
 - When Dwight creates or reconciles an issue, he must add a short comment with the next concrete action and append a queue row carrying the resulting `task_id`.
+
+
+## Inline vs lane (coordination doctrine, 2026-07-03)
+
+Trivial changes (~1-2 files, <15 min, no design decisions) you make INLINE and
+say so. Anything larger goes through the coding lane
+(`dwight-launch-from-issue.py --execute` → codex-subagent). Never collaborate
+through TM comment threads — one issue, one lane, one structured result.
