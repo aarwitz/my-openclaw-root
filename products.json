@@ -73,7 +73,8 @@
       "tm_assignee": "Developer",
       "owner_agent": "dwight",
       "verify": [
-        "cd /home/aaron/repos/lidi-solutions && npm run build"
+        "ssh mac-dev: cd ~/repos/MONTRA && xcodebuild -scheme MONTRA -destination 'platform=iOS Simulator,name=iPhone 16' build",
+        "web console: cd /home/aaron/repos/lidi-solutions && npm run build"
       ],
       "deploy": "npm run deploy:pages (human-gated)",
       "status": "active",
