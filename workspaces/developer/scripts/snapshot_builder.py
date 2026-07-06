@@ -658,6 +658,40 @@ def _build_system_health(
 # ---------------------------------------------------------------------------
 
 
+def _load_sim_books(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Internal paper-engine books (docs/07): daily equity curves + holdings.
+    'shadow' validates our ledger vs Alpaca; 'model' is the GBM ranker's live
+    long-only top-decile track record (P2)."""
+    books: dict[str, Any] = {}
+    try:
+        for book, cash, starting, created in conn.execute(
+                "SELECT book, cash, starting_cash, created_at FROM sim_accounts"):
+            curve = [
+                {"date": d, "equity": _safe_float(e), "cash": _safe_float(c)}
+                for d, e, c in conn.execute(
+                    "SELECT date, equity, cash FROM book_equity WHERE book=? ORDER BY date",
+                    (book,))
+            ]
+            holdings = [
+                {"ticker": t, "qty": _safe_float(q), "cost_basis": _safe_float(cb),
+                 "current_value": _safe_float(cv)}
+                for t, q, cb, cv in conn.execute(
+                    "SELECT ticker, qty, cost_basis, current_value FROM sim_positions "
+                    "WHERE book=? AND state='open' ORDER BY current_value DESC", (book,))
+            ]
+            books[book] = {
+                "cash": _safe_float(cash),
+                "starting_cash": _safe_float(starting),
+                "since": created,
+                "equity_curve": curve,
+                "holdings_count": len(holdings),
+                "top_holdings": holdings[:15],
+            }
+    except sqlite3.Error:
+        return {}
+    return books
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -697,6 +731,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "cronRuns": cron["runs"],
         "audits": audits,
         "counts": counts,
+        "simBooks": _load_sim_books(conn),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison
         ),

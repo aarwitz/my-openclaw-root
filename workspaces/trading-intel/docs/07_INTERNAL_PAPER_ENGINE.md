@@ -57,6 +57,16 @@ Then we can run *experiments as first-class accounts*:
   the sim ledger; nightly parity check (qty/basis/equity drift < 5bps).
 - **P2** — `model` book goes live on the sim engine (no Alpaca involvement).
   Ablation books as wanted.
+  **LIVE 2026-07-06** (`sim_broker.py rebalance-model`, wired into `nightly`).
+  Pre-registered policy: long-only top decile of the nightly GBM ranks
+  (~60 names), equal-weight, INVEST_FRACTION 98%, rebalance on the first
+  nightly run of each calendar month, fills at mark ± half-spread
+  `max(1, 8/√ADV$M)` bps with a 2%-of-ADV participation cap, ranks older
+  than 5 days refuse to trade. First rebalance 2026-07-06: 59 names,
+  $19.78 total spread cost on $98k deployed. The book's `book_equity`
+  curve is the ranker's live forward track record — the promotion evidence
+  (t>3 bar) that a backtest cannot provide. Surfaced in the web app via
+  `snapshot_builder` → `simBooks`.
 - **P3** — after ≥10 trading days of shadow parity: `execute_intent.py
   --broker sim` becomes the desk default; Alpaca demoted to data-only. Rule
   proposal + operator approval gates the cutover.

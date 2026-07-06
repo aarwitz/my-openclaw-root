@@ -16,7 +16,9 @@ CLI:
   python3 sim_broker.py mark  --book shadow   # EOD marks -> book_equity
   python3 sim_broker.py corporate-actions --book shadow
   python3 sim_broker.py parity                # shadow vs Alpaca live account
+  python3 sim_broker.py rebalance-model [--force]   # P2: top-decile GBM model book
   python3 sim_broker.py nightly               # mirror -> CAs -> mark -> parity
+                                              #   -> model CAs/rebalance(monthly)/mark
 """
 
 from __future__ import annotations
@@ -200,6 +202,128 @@ def apply_corporate_actions(conn, book: str) -> int:
     return n
 
 
+# ---------------------------------------------------------------- model book (P2)
+
+FEAT_DB = "/home/aaron/.openclaw/state/features.sqlite"
+MODEL_BOOK = "model"
+MODEL_CASH = 100_000.0
+TOP_FRACTION = 0.10          # long-only top decile of the ranked universe
+INVEST_FRACTION = 0.98       # keep a small cash buffer
+MAX_RANK_AGE_DAYS = 5        # refuse to trade stale ranks
+
+
+def _latest_ranks(conn_feat) -> tuple[str, list[str]]:
+    """(as_of, [tickers ranked 1..N]) from the nightly GBM scorer."""
+    as_of = conn_feat.execute("SELECT MAX(as_of) FROM ml_scores").fetchone()[0]
+    if not as_of:
+        raise RuntimeError("ml_scores is empty")
+    rows = conn_feat.execute(
+        "SELECT ticker FROM ml_scores WHERE as_of=? ORDER BY rank", (as_of,)).fetchall()
+    return as_of, [r[0].upper() for r in rows]
+
+
+def _adv_dollars(sym: str) -> float | None:
+    """Trailing-21d average daily dollar volume (for the spread/participation model)."""
+    try:
+        bars = alpaca.daily_bars(sym, days=30)[-21:]
+        if not bars:
+            return None
+        return sum(float(b["c"]) * float(b.get("v") or 0) for b in bars) / len(bars)
+    except Exception:
+        return None
+
+
+def _fill_price(px: float, side: str, adv_dollars: float | None) -> float:
+    """Cost-realistic sim fill: cross half the modeled spread. Thin names cost more."""
+    adv_m = (adv_dollars or 0) / 1e6
+    half_spread_bps = max(1.0, SPREAD_K / (adv_m ** 0.5)) if adv_m > 0 else 25.0
+    adj = half_spread_bps / 1e4
+    return px * (1 + adj) if side == "buy" else px * (1 - adj)
+
+
+def _last_model_rebalance(conn) -> str | None:
+    r = conn.execute(
+        "SELECT MAX(filled_at) FROM sim_orders WHERE book=? AND source='model-rebalance'",
+        (MODEL_BOOK,)).fetchone()
+    return r[0][:10] if r and r[0] else None
+
+
+def rebalance_model_book(conn, *, force: bool = False) -> dict:
+    """Monthly, long-only, equal-weight top decile of the GBM ranks — the live
+    forward track record for the ML ranker. Runs from nightly; only trades on
+    the first nightly run of a new calendar month (or --force)."""
+    import sqlite3 as _sq
+    ensure_book(conn, MODEL_BOOK, MODEL_CASH)
+    today = _iso_today()
+    last = _last_model_rebalance(conn)
+    if not force and last and last[:7] == today[:7]:
+        return {"rebalanced": False, "reason": f"already rebalanced this month ({last})"}
+
+    feat = _sq.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
+    as_of, ranked = _latest_ranks(feat)
+    feat.close()
+    age = (date.fromisoformat(today) - date.fromisoformat(as_of)).days
+    if age > MAX_RANK_AGE_DAYS:
+        return {"rebalanced": False, "reason": f"ranks stale: as_of {as_of} ({age}d old) — refusing"}
+
+    n_top = max(1, int(len(ranked) * TOP_FRACTION))
+    targets = ranked[:n_top]
+
+    held = positions(conn, MODEL_BOOK)
+    # marks + ADV for everything we must touch (current holdings ∪ targets)
+    marks: dict[str, float] = {}
+    advs: dict[str, float | None] = {}
+    untradeable = []
+    for sym in sorted(set(held) | set(targets)):
+        px = _mark_price(sym)
+        if px is None or px <= 0:
+            untradeable.append(sym)
+            continue
+        marks[sym] = px
+        advs[sym] = _adv_dollars(sym)
+    targets = [t for t in targets if t in marks]
+    if not targets:
+        raise RuntimeError("no tradeable targets — refusing to empty the model book")
+
+    equity = get_cash(conn, MODEL_BOOK) + sum(
+        p["qty"] * marks[s] for s, p in held.items() if s in marks)
+    per_name = equity * INVEST_FRACTION / len(targets)
+
+    sells, buys = [], []
+    for sym, pos in held.items():
+        if sym not in marks:
+            continue  # unmarkable holding: hold rather than guess (flagged below)
+        tgt_qty = (per_name / marks[sym]) if sym in targets else 0.0
+        delta = tgt_qty - pos["qty"]
+        (sells if delta < 0 else buys).append((sym, delta))
+    for sym in targets:
+        if sym not in held:
+            buys.append((sym, per_name / marks[sym]))
+
+    n_trades = 0
+    for batch, side in ((sells, "sell"), (buys, "buy")):
+        for sym, delta in batch:
+            qty = round(abs(delta), 4)
+            if qty * marks[sym] < 1.0:      # ignore sub-$1 rebalance dust
+                continue
+            adv = advs.get(sym)
+            if adv:
+                cap_qty = PARTICIPATION_CAP * adv / marks[sym]
+                qty = min(qty, round(cap_qty, 4))
+            px = _fill_price(marks[sym], side, adv)
+            apply_fill(conn, MODEL_BOOK, sym, side, qty, px, source="model-rebalance")
+            n_trades += 1
+
+    audit(conn, actor="executor", entity_type="sim_account", entity_id=MODEL_BOOK,
+          action="model_rebalance",
+          rationale=f"ranks as_of {as_of}: top {len(targets)} equal-weight, "
+                    f"{n_trades} fills, equity {equity:.2f}")
+    conn.commit()
+    return {"rebalanced": True, "as_of_ranks": as_of, "names": len(targets),
+            "trades": n_trades, "equity": round(equity, 2),
+            "untradeable_skipped": untradeable}
+
+
 # ---------------------------------------------------------------- marks / parity
 
 def _mark_price(sym: str) -> float | None:
@@ -265,6 +389,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("mark"); p.add_argument("--book", required=True)
     p = sub.add_parser("corporate-actions"); p.add_argument("--book", required=True)
     sub.add_parser("parity")
+    p = sub.add_parser("rebalance-model"); p.add_argument("--force", action="store_true")
     sub.add_parser("nightly")
     a = ap.parse_args(argv)
     conn = connect()
@@ -281,13 +406,25 @@ def main(argv=None) -> int:
         print(json.dumps({"applied": apply_corporate_actions(conn, a.book)}))
     elif a.cmd == "parity":
         print(json.dumps(parity(conn), indent=2))
+    elif a.cmd == "rebalance-model":
+        print(json.dumps(rebalance_model_book(conn, force=a.force), indent=2))
     elif a.cmd == "nightly":
+        # Shadow (parity validation) first — a model-book hiccup must never
+        # block the P1 parity signal.
         out = {"mirrored": mirror_desk_fills(conn)}
         out["corporate_actions"] = apply_corporate_actions(conn, "shadow")
         out["mark"] = mark_book(conn, "shadow")
         out["parity"] = parity(conn)
+        model_ok = True
+        try:
+            out["model_corporate_actions"] = apply_corporate_actions(conn, MODEL_BOOK)
+            out["model_rebalance"] = rebalance_model_book(conn)
+            out["model_mark"] = mark_book(conn, MODEL_BOOK)
+        except Exception as exc:
+            model_ok = False
+            out["model_error"] = str(exc)[:300]
         print(json.dumps(out, indent=2))
-        return 0 if out["parity"]["ok"] else 1
+        return 0 if (out["parity"]["ok"] and model_ok) else 1
     return 0
 
 
