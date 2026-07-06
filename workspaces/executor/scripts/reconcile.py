@@ -229,11 +229,14 @@ def compute_divergences(conn) -> dict:
                 "type": "order_in_db_not_in_broker",
                 "broker_order_id": oid, "db_status": o["status"], "symbol": o["symbol"],
             })
-    for oid, o in bord.items():
-        if oid not in dord:
+    for o in broker_orders:
+        # match on either id — bord double-keys each order under UUID and
+        # client_order_id, so iterating bord flags every DB-known order once
+        # as a phantom under its other key
+        if o.get("id") not in dord and o.get("client_order_id") not in dord:
             divergences.append({
                 "type": "order_in_broker_not_in_db",
-                "broker_order_id": oid, "broker_status": o.get("status"),
+                "broker_order_id": o.get("id"), "broker_status": o.get("status"),
                 "symbol": o.get("symbol"),
             })
 

@@ -12,6 +12,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 #   6. gate_evaluator on every proposed/critic_review intent -> risk_review
 #   7. risk_gate (Risk agent caps size; risk_review -> approved|blocked)
 #   8. execute_intent for every approved intent (LIVE — paper account only)
+#   8b. sync_fills (broker truth per order id → fills, intents, positions)
 #   9. reconcile (alpaca vs DB)
 #  10. benchmark_scoreboard (portfolio vs SPY per horizon -> benchmarks rows)
 #  11. snapshot writer (refreshes lidisolutions.ai data.json)
@@ -100,6 +101,12 @@ if [[ "$SKIP_EXECUTE" -eq 0 && "$TRADING_DAY" == "1" ]]; then
 else
   printf ',\n  "execute_intent": {"rc": 0, "skipped": true}'
 fi
+# sync_fills BEFORE reconcile: pulls broker truth per order id (fill price,
+# filled_at) and books positions against the real hypothesis lineage. Without
+# it, non-instant fills rot as pending_new until reconcile marks them
+# closed_unknown (price lost) and re-creates the position as a POS-SYNC
+# placeholder with a fabricated hypothesis (2026-07-06 finding).
+run_step "sync_fills" 60 python3 workspaces/executor/scripts/sync_fills.py
 run_step "reconcile" 30 python3 workspaces/executor/scripts/reconcile.py
 run_step "portfolio_risk" 120 python3 workspaces/trading-intel/scripts/risk_model.py snapshot
 run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scoreboard.py --backfill

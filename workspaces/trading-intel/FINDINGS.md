@@ -19,6 +19,22 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-07-06 — a state machine that depends on timing luck looks healthy until the first slow fill
+
+- **Every historical order that filled instantly hid the fact that nothing tracked fills at
+  all.** `execute_intent` polled once at submit; mid-session market orders fill inside that
+  poll, so the books looked right for weeks. The first morning of at-the-open auction orders
+  (today) exposed it: fills sat `pending_new`, reconcile "repaired" vanished orders to
+  `closed_unknown` (price lost — 14 of 29 lifetime orders), and re-created the positions as
+  placeholders with fabricated hypotheses — **70% of the book had severed lineage**, meaning
+  the calibration engine would have graded outcomes against theses that never existed.
+- The general lesson for every gate/stage here: ask "what happens when the async thing
+  completes AFTER my window?" — and never let a repair path *fabricate* lineage; a repair
+  that invents a placeholder hypothesis converts missing data into wrong data, which is
+  strictly worse for a learning system. Fixed via the `sync_fills` stage + lineage backfill
+  (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
+  lineage — barely in time.
+
 ## 2026-07-04 — options audition ($0 spent): net premium direction is the keeper, volume-spike was a mirage
 
 - **The 20-name preview's headline feature evaporated at full sample** — opt_vol_z

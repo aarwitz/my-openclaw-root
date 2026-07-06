@@ -77,6 +77,13 @@ def list_orders(status: str = "open", limit: int = 100) -> list[dict[str, Any]]:
     return _get(PAPER_API, "/v2/orders", {"status": status, "limit": limit}) or []
 
 
+def get_order(order_id: str) -> dict[str, Any]:
+    """Fetch one order by broker id — works for closed orders too, which
+    list_orders(status='open') never returns. This is the only reliable way
+    to learn the fill price of an order that didn't fill at submit time."""
+    return _get(PAPER_API, f"/v2/orders/{order_id}")
+
+
 def portfolio_history(period: str = "all", timeframe: str = "1D") -> list[dict[str, Any]]:
     """Daily account equity history, oldest first: [{date, equity}, ...].
 

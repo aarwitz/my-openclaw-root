@@ -141,7 +141,10 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
   → gate_evaluator       trading-intel/scripts/gate_evaluator.py  proposed|critic_review → risk_review | blocked
   → risk_gate            risk/scripts/gate_risk_intents.py     risk_review → approved|blocked (size capped)
   → execute_intent       executor/scripts/execute_intent.py    approved → submitted (Alpaca paper)
-  → reconcile            executor/scripts/reconcile.py          fills vs DB
+  → sync_fills           executor/scripts/sync_fills.py        broker truth per order id → orders (fill
+                                                               price/time), intents (actuals), positions
+                                                               (real hypothesis lineage; added 2026-07-06)
+  → reconcile            executor/scripts/reconcile.py          fills vs DB (placeholder repair = last resort)
   → scoreboard           trading-intel/scripts/benchmark_scoreboard.py → benchmarks rows (vs SPY, all horizons)
   → macro_seed/actuals   trading-intel/scripts/macro_calendar.py → macro_releases (+ surprise → market_event)
   → snapshot (+overlay)  developer/scripts/snapshot_builder.py → app data.json
