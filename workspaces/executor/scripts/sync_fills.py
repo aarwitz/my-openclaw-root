@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
 
-from connectors.alpaca import ConnectorError, get_order  # noqa: E402
+from broker import ConnectorError, get_order  # noqa: E402  (adapter, D52)
 
 TERMINAL = ("filled", "canceled", "cancelled", "rejected", "expired", "closed", "done_for_day")
 OPEN_POS_STATES = ("opening", "open", "scaling", "trimming", "closing")

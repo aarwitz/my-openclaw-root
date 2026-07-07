@@ -241,6 +241,11 @@ def _fill_price(px: float, side: str, adv_dollars: float | None) -> float:
     return px * (1 + adj) if side == "buy" else px * (1 - adj)
 
 
+def fill_price(symbol: str, side: str, ref_price: float) -> float:
+    """Public fill model for the broker adapter (D52 desk cutover)."""
+    return round(_fill_price(float(ref_price), side, _adv_dollars(symbol)), 4)
+
+
 def _last_model_rebalance(conn) -> str | None:
     r = conn.execute(
         "SELECT MAX(filled_at) FROM sim_orders WHERE book=? AND source='model-rebalance'",
@@ -409,12 +414,18 @@ def main(argv=None) -> int:
     elif a.cmd == "rebalance-model":
         print(json.dumps(rebalance_model_book(conn, force=a.force), indent=2))
     elif a.cmd == "nightly":
-        # Shadow (parity validation) first — a model-book hiccup must never
-        # block the P1 parity signal.
-        out = {"mirrored": mirror_desk_fills(conn)}
-        out["corporate_actions"] = apply_corporate_actions(conn, "shadow")
-        out["mark"] = mark_book(conn, "shadow")
-        out["parity"] = parity(conn)
+        # D52 cutover: the desk book IS the broker. Nightly = corporate
+        # actions + EOD marks per live book + model rebalance. Alpaca
+        # mirror/parity only while the legacy backend is active.
+        import broker as _broker
+        out = {"backend": _broker.backend()}
+        books_ok = True
+        try:
+            out["desk_corporate_actions"] = apply_corporate_actions(conn, "desk")
+            out["desk_mark"] = mark_book(conn, "desk")
+        except Exception as exc:
+            books_ok = False
+            out["desk_error"] = str(exc)[:300]
         model_ok = True
         try:
             out["model_corporate_actions"] = apply_corporate_actions(conn, MODEL_BOOK)
@@ -423,6 +434,14 @@ def main(argv=None) -> int:
         except Exception as exc:
             model_ok = False
             out["model_error"] = str(exc)[:300]
+        if _broker.backend() == "alpaca":
+            out["mirrored"] = mirror_desk_fills(conn)
+            out["shadow_corporate_actions"] = apply_corporate_actions(conn, "shadow")
+            out["shadow_mark"] = mark_book(conn, "shadow")
+            out["parity"] = parity(conn)
+        else:
+            eq = (out.get("desk_mark") or {}).get("equity")
+            out["parity"] = {"ok": bool(eq and eq > 0) and books_ok, "mode": "internal-ledger"}
         print(json.dumps(out, indent=2))
         return 0 if (out["parity"]["ok"] and model_ok) else 1
     return 0

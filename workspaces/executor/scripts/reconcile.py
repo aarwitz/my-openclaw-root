@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
 
-from connectors.alpaca import ConnectorError, list_orders, list_positions  # noqa: E402
+from broker import ConnectorError, list_orders, list_positions  # noqa: E402  (adapter, D52)
 
 
 def _db_positions(conn) -> dict[str, dict]:

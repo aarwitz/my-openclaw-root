@@ -32,7 +32,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import ConnectorError, get_account, list_orders, list_positions  # noqa: E402
+from connectors.alpaca import ConnectorError  # noqa: E402
+sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
+from broker import get_account, list_orders, list_positions  # noqa: E402  (adapter, D52)
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 DEFAULT_OUT = Path(
@@ -446,6 +448,7 @@ def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[
         ]
         broker = {
             "status": acct.get("status"),
+            "source": acct.get("source", "alpaca"),
             "account_number": acct.get("account_number"),
             "equity": _safe_float(acct.get("equity"), 0.0),
             "last_equity": _safe_float(acct.get("last_equity"), 0.0),

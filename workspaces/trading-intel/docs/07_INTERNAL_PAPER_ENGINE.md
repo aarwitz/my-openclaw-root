@@ -67,9 +67,12 @@ Then we can run *experiments as first-class accounts*:
   curve is the ranker's live forward track record — the promotion evidence
   (t>3 bar) that a backtest cannot provide. Surfaced in the web app via
   `snapshot_builder` → `simBooks`.
-- **P3** — after ≥10 trading days of shadow parity: `execute_intent.py
-  --broker sim` becomes the desk default; Alpaca demoted to data-only. Rule
-  proposal + operator approval gates the cutover.
+- **P3 — LIVE 2026-07-07 (D52).** Operator-directed early cutover after the
+  second broker-side incident in a week. `broker.py` adapter seam, backend
+  `sim` (config/broker-backend), desk book bootstrapped at parity from the
+  live account with full curve continuity, web serving the sim ledger.
+  Alpaca demoted to market-data-only; quote-source diversification (FMP/
+  Massive) is the remaining step to full elimination.
 
 Non-goals v1: intraday microstructure realism, options, margin interest. The
 desk trades 21-day-horizon equities in ~$1k clips; fill realism beyond

@@ -108,6 +108,9 @@ fi
 # placeholder with a fabricated hypothesis (2026-07-06 finding).
 run_step "sync_fills" 60 python3 workspaces/executor/scripts/sync_fills.py
 run_step "reconcile" 30 python3 workspaces/executor/scripts/reconcile.py
+# D52: mark the internal desk book each pass so book_equity (the equity curve
+# the app serves) stays fresh intraday — daily-keyed, so this upserts today.
+run_step "sim_mark" 60 python3 workspaces/executor/scripts/sim_broker.py mark --book desk
 run_step "portfolio_risk" 120 python3 workspaces/trading-intel/scripts/risk_model.py snapshot
 run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scoreboard.py --backfill
 # Macro layer: keep the forward calendar populated and detect realized surprises

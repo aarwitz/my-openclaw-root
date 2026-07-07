@@ -47,7 +47,8 @@ from pathlib import Path
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import ConnectorError, get_account  # noqa: E402
+sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
+from broker import ConnectorError, get_account  # noqa: E402  (adapter, D52)
 from connectors import eventregistry  # noqa: E402
 import risk_model  # noqa: E402  (correlation-cluster cap; degrades gracefully)
 

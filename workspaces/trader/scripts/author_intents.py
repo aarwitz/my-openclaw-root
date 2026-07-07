@@ -47,9 +47,10 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 from connectors.alpaca import (  # noqa: E402
     ConnectorError,
     daily_bars,
-    get_account,
     latest_trade,
 )
+sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
+from broker import get_account  # noqa: E402  (adapter, D52)
 import worldmodel as wm  # noqa: E402
 
 SIZE_PCT_OF_EQUITY = 0.01      # 1% per intent (baseline fallback when no prediction)
