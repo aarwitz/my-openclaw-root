@@ -88,6 +88,10 @@ run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
 run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
 if [[ "$TRADING_DAY" == "1" ]]; then
+  # D53: enforce declared stop rules BEFORE authoring new ideas — cut rule-
+  # breaching losers first, then deploy freed capital. (2026-07-07: ORCL sat
+  # at -22.6% against a stated -8% stop while the desk kept opening names.)
+  run_step "enforce_stops" 90 python3 workspaces/trader/scripts/enforce_stops.py
   run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
   run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
   run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending

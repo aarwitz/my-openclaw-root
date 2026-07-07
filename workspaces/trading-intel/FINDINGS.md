@@ -35,6 +35,25 @@ incident postmortems) need no tag.
   (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
+## 2026-07-07 (pm) — the desk declared stops it never enforced, and a mixed-semantics basis column almost made enforcement fire wrong
+
+- **Every intent carries `stop_rule: "-8% from entry"`; nothing enforced it.** Live
+  P&L at 2:41 PM ET: ORCL −22.6%, CRM −9.9%, CEG −8.2% still open while the desk
+  bought new names. A written-but-unexecuted rule is worse than no rule — it
+  produces false confidence in the risk story. Enforcer shipped (D53); the three
+  breaches were cut at live prices the same hour.
+- **`positions.cost_basis` meant different things depending on which code wrote
+  the row** — total cost for some (CEG 782.34 = 3×260.78), per-share for others
+  (ORCL 182.75). The enforcer's dry run flagged CRWD at −42.9% when the truth was
+  +14% — one false stop-out away from selling the book's best performer. Lesson:
+  a column whose semantics vary by writer is not data, it's a trap; normalize to
+  one convention against an authoritative ledger (the sim book) and audit the
+  repair. The dry-run-first discipline is what caught it.
+- Learning-loop reality check: 166 predictions live, ZERO resolved yet (oldest
+  2026-06-19; first maturations mid-July). The +5.2% / +3.7pp-alpha record so far
+  is selection skill, not learning — the learning claim gets its first graded
+  test this month.
+
 ## 2026-07-07 — a broker can lie to you transiently: 21 of 24 positions "vanished" and came back
 
 - **Alpaca's positions endpoint served a partial account for a window this morning**

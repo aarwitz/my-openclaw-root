@@ -360,6 +360,12 @@ def mark_book(conn, book: str) -> dict:
                      (px, pos["qty"] * px, pos["id"]))
     conn.execute("INSERT OR REPLACE INTO book_equity (book, date, equity, cash) VALUES (?,?,?,?)",
                  (book, _iso_today(), equity, cash))
+    # intraday sample for the 1D/1W chart (D53); 14-day retention
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    conn.execute("INSERT OR REPLACE INTO book_equity_intraday (book, ts, equity) VALUES (?,?,?)",
+                 (book, now_ms, equity))
+    conn.execute("DELETE FROM book_equity_intraday WHERE book=? AND ts < ?",
+                 (book, now_ms - 14 * 86400_000))
     conn.commit()
     return {"book": book, "date": _iso_today(), "equity": round(equity, 2), "cash": round(cash, 2)}
 

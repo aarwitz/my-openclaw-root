@@ -724,6 +724,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "brokerPositions": broker_positions,
         "brokerOrders": broker_orders,
         "equityHistory": equity_history,
+        "equityHistoryIntraday": _intraday_equity(),
         "positions": positions,
         "hypotheses": hypotheses,
         "criticReviews": critic_reviews,
@@ -758,6 +759,20 @@ def write_atomic(path: Path, payload: dict[str, Any]) -> None:
         os.fsync(tmp.fileno())
         tmp_path = Path(tmp.name)
     os.replace(tmp_path, path)
+
+
+def _intraday_equity():
+    """Last 7 days of intraday desk-book equity samples (D53, powers 1D/1W chart)."""
+    try:
+        import sqlite3, time
+        c = sqlite3.connect(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
+        cutoff = int((time.time() - 7 * 86400) * 1000)
+        rows = c.execute(
+            "SELECT ts, equity FROM book_equity_intraday WHERE book='desk' AND ts >= ? ORDER BY ts",
+            (cutoff,)).fetchall()
+        return [{"ts": int(t), "equity": float(e)} for t, e in rows]
+    except Exception:
+        return []
 
 
 def main(argv: list[str] | None = None) -> int:

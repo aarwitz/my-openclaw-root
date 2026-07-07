@@ -43,6 +43,10 @@ fi
 
 cd "$LIDI_REPO" || exit 2
 
+# D53: sample the desk book's intraday equity before each snapshot so the
+# 1D/1W chart has real points (10-min cadence from this cron).
+python3 "$LIDI_REPO/../../.openclaw/workspaces/executor/scripts/sim_broker.py" mark --book desk >/dev/null 2>&1 || true
+
 echo "[push-data] snapshot"
 if ! node scripts/snapshot-trader-intel.mjs; then
   echo "FATAL: snapshot-trader-intel.mjs failed" >&2
