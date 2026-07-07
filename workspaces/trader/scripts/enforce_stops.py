@@ -61,6 +61,32 @@ def main(argv=None) -> int:
         "SELECT DISTINCT ticker FROM trade_intents WHERE action IN ('exit','trim') "
         "AND state IN ('proposed','critic_review','risk_review','approved','submitted','partial')")}
 
+    # Phase 0: close the learning loop on prior stop-outs — a FILLED stop exit
+    # means the thesis was falsified at the desk's own risk limit. Resolve the
+    # hypothesis (resolved_state='wrong' as a TRADE verdict; archivist may
+    # refine the narrative grade later). Without this, stopped-out hypotheses
+    # sat 'active' forever and the most informative outcomes never fed learning.
+    resolved = 0
+    for r in conn.execute(
+            "SELECT DISTINCT ti.hypothesis_id FROM trade_intents ti "
+            "JOIN hypotheses h ON h.id = ti.hypothesis_id "
+            "WHERE ti.triggered_by='stop_rule_enforcer_v1' AND ti.state='filled' "
+            "AND h.state NOT IN ('resolved','retired')").fetchall():
+        hid = r[0]
+        conn.execute(
+            "UPDATE hypotheses SET state='resolved', resolved_at=?, resolved_state='wrong', "
+            "rationale_concise=COALESCE(rationale_concise,'') WHERE id=?", (_now_iso(), hid))
+        aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + hid[:24]
+        conn.execute(
+            "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
+            "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "
+            "'hypothesis', ?, 'resolve_stopped_out', 'active', 'resolved', "
+            "'stop-rule exit filled: thesis falsified at the -8% risk limit (trade verdict wrong; archivist may refine)')",
+            (aid, _now_iso(), hid))
+        resolved += 1
+    if resolved:
+        conn.commit()
+
     results = []
     for p in positions:
         tick = p["ticker"].upper()
@@ -109,7 +135,8 @@ def main(argv=None) -> int:
              f"(mark {px:.2f}) breaches the -{STOP_PCT*100:.0f}% stop every intent declares. "
              "Exit authored; flows the normal gate path."))
         conn.commit()
-    print(json.dumps({"stop_breaches": results, "authored": 0 if a.dry_run else len(results),
+    print(json.dumps({"stop_breaches": results, "resolved_stopped_out": resolved,
+                      "authored": 0 if a.dry_run else len(results),
                       "dry_run": a.dry_run, "stop_pct": STOP_PCT}, indent=2))
     return 0
 
