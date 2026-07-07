@@ -403,10 +403,24 @@ def check_jerry_poll():
     return finding("jerry_poll", "ok", f"last {len(recent)} runs: {len(recent) - len(fails)} ok")
 
 
+def check_ledger_backup():
+    """Since D52 the internal ledger IS the brokerage; a stale backup means the
+    account has no disaster recovery (D54)."""
+    import glob
+    files = sorted(glob.glob(f"{ROOT}/backups/ledger/trading-intel-*.sqlite"))
+    if not files:
+        return finding("ledger_backup", "crit", "NO ledger backups exist — the desk account has no recovery path")
+    age_h = (datetime.now(timezone.utc).timestamp() - os.path.getmtime(files[-1])) / 3600
+    if age_h > 30:
+        return finding("ledger_backup", "warn", f"newest ledger backup is {age_h:.0f}h old (daily expected)")
+    return finding("ledger_backup", "ok", f"newest ledger backup {age_h:.1f}h old ({len(files)} retained)")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
+    check_ledger_backup,
 ]
 
 

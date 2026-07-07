@@ -43,6 +43,8 @@ log "===== learning chain start (pid $$) ====="
 # so the post-close refresh must cover the full scanned pool or 450 of them trade
 # on stale feature tails (2026-07-02 dataset audit). Post-close has no deadline;
 # the tight 08:52 pre-open refresh stays at 150 (daily bars only change at close).
+# D54: the internal ledger IS the brokerage — back it up before anything else.
+step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 # LLM feature factory (P3): type today's news into point-in-time features
 # (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
