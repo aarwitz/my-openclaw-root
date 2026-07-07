@@ -60,5 +60,7 @@ if [[ $rc -ne 0 ]]; then
   tg notify "⚠️ Daily KG rebuild FAILED at: ${FAILED:-unknown} (rc=$rc). before[$before] after[$after]. Log: $LOG"
   exit 1
 fi
-tg silent "🧠 Daily KG refreshed — $after (prev $before)"
+# Human summary, not a stats dump (operator feedback 2026-07-07)
+delta_edges=$(( $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) - $(echo "$before" | grep -o "edges=[0-9]*" | cut -d= -f2) ))
+tg silent "🧠 Knowledge graph refreshed overnight — $( [ "$delta_edges" -ge 0 ] && echo "+$delta_edges" || echo "$delta_edges" ) causal/entity links vs yesterday."
 exit 0

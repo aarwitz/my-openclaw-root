@@ -241,8 +241,12 @@ def infer_repo(issue: Dict[str, Any], override: str) -> str:
                 reg = json.load(open(os.path.expanduser("~/.openclaw/products.json")))
                 for prod in reg.get("products", []):
                     for r in prod.get("repos", []):
-                        if r.get("slug", "").lower() == repo_slug.strip().lower() and r.get("path"):
-                            candidates.insert(0, r["path"])
+                        if r.get("slug", "").lower() == repo_slug.strip().lower():
+                            # gateway_path first: it's inside the container mount
+                            # (~/.openclaw/mirrors); host-only paths don't exist there.
+                            for key in ("gateway_path", "path"):
+                                if r.get(key):
+                                    candidates.insert(0, r[key])
             except Exception:
                 pass
             add_repo_candidate(repo_slug)

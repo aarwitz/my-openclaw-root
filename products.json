@@ -35,12 +35,14 @@
         {
           "slug": "EWAG-dev/iosApp",
           "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/EWAG-iosApp",
-          "note": "clone PENDING \u2014 mac lacks non-interactive GitHub auth (deploy key needed)"
+          "note": "clone PENDING \u2014 mac lacks non-interactive GitHub auth (deploy key needed)",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/EWAG-dev-iosApp"
         },
         {
           "slug": "EWAG-dev/iosApp",
           "path": "/home/aaron/repos/EWAG-dev-iosApp",
-          "note": "linux checkout (no builds)"
+          "note": "linux checkout (no builds)",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/EWAG-dev-iosApp"
         }
       ],
       "tm_assignee": "EWAG-Backend",
@@ -93,11 +95,13 @@
         },
         {
           "slug": "aaronclawrsl-bot/OpenClawQA",
-          "path": "/home/aaron/repos/OpenClawQA"
+          "path": "/home/aaron/repos/OpenClawQA",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/OpenClawQA"
         },
         {
           "slug": "aarwitz/openclaw-qa",
-          "path": "/home/aaron/repos/openclaw-qa"
+          "path": "/home/aaron/repos/openclaw-qa",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/openclaw-qa"
         }
       ],
       "tm_assignee": "Developer",
@@ -118,7 +122,8 @@
           "slug": "aarwitz/CleaningRobot",
           "path": "/home/aaron/CleaningRobot",
           "path_on": "robot-orin:~/workspaces/CleaningRobot",
-          "note": "linux checkout at /home/aaron/CleaningRobot; LIVE dev happens on the orin"
+          "note": "linux checkout at /home/aaron/CleaningRobot; LIVE dev happens on the orin",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/CleaningRobot"
         }
       ],
       "tm_assignee": "Developer",
@@ -135,7 +140,8 @@
       "repos": [
         {
           "slug": "aarwitz/lidi-task-manager",
-          "path": "/home/aaron/repos/lidi-task-manager"
+          "path": "/home/aaron/repos/lidi-task-manager",
+          "gateway_path": "/home/aaron/.openclaw/mirrors/lidi-task-manager"
         }
       ],
       "tm_assignee": "Developer",
@@ -169,5 +175,6 @@
       "ssh": "PENDING \u2014 needs this host's pubkey in authorized_keys",
       "role": "robot live tests + on-device dev"
     }
-  }
+  },
+  "$comment2": "gateway_path = checkout visible inside the openclaw-gateway container (~/.openclaw/mirrors); path = host checkout. dwight-launch prefers gateway_path when running in-container."
 }
