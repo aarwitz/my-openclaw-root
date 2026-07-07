@@ -84,6 +84,12 @@ def apply_repairs(conn, result: dict) -> dict:
     """
     repaired = []
     unresolved = []
+    if result.get("broker_data_suspect"):
+        return {"repaired": [], "unresolved": [{
+            "type": "broker_data_suspect",
+            "reason": result.get("suspect_reason"),
+            "action": "refused_all_repairs",
+        }]}
     now = now_iso()
     by_type = {}
     for d in result.get("divergences", []):
@@ -240,8 +246,37 @@ def compute_divergences(conn) -> dict:
                 "symbol": o.get("symbol"),
             })
 
+    # --- Broker-data sanity guard (2026-07-07 incident) ---------------------
+    # Alpaca's positions endpoint transiently served 3 of 24 positions ("$24k
+    # vanished") for a window on 2026-07-07; cash was intact and no sell orders
+    # existed. A liquidation ALWAYS leaves closing orders + proceeds, so:
+    # if several DB positions are "missing" at the broker but none of those
+    # symbols has a recent filled SELL order, the broker DATA is suspect —
+    # flag it and let apply_repairs refuse to act. Repairing against a glitch
+    # would close a healthy book.
+    missing = [d["ticker"] for d in divergences if d["type"] == "position_in_db_not_in_broker"]
+    broker_data_suspect = False
+    suspect_reason = None
+    if len(missing) >= 3:
+        try:
+            closed_orders = list_orders(status="closed", limit=200)
+            sold = {o["symbol"].upper() for o in closed_orders
+                    if o.get("side") == "sell" and o.get("status") == "filled"}
+            no_proceeds = [s for s in missing if s not in sold]
+            if len(no_proceeds) >= 3:
+                broker_data_suspect = True
+                suspect_reason = (f"{len(missing)} DB positions missing at broker but "
+                                  f"{len(no_proceeds)} of them have NO filled sell order — "
+                                  "positions cannot vanish without proceeds; broker positions "
+                                  "endpoint is likely serving stale/partial data. NO repairs; re-poll later.")
+        except ConnectorError:
+            broker_data_suspect = True
+            suspect_reason = "could not verify closing orders — refusing to trust the divergence"
+
     return {
         "divergences": divergences,
+        "broker_data_suspect": broker_data_suspect,
+        "suspect_reason": suspect_reason,
         "summary": {
             "db_positions": len(dpos),
             "broker_positions": len(bpos),

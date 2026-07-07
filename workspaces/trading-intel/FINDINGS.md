@@ -35,6 +35,25 @@ incident postmortems) need no tag.
   (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
+## 2026-07-07 — a broker can lie to you transiently: 21 of 24 positions "vanished" and came back
+
+- **Alpaca's positions endpoint served a partial account for a window this morning**
+  — 3 of 24 positions, equity showing $79,948 vs the real $103,995 — and the desk's
+  reconcile dutifully flagged a "21-position divergence" while the overseer demanded
+  repairs. The positions were never gone: **cash was intact to the penny and there
+  were no sell orders** — a real liquidation always leaves closing orders and
+  proceeds. An hour later the endpoint healed.
+- The terrifying counterfactual: `reconcile.py --repair` marks DB-only positions
+  closed. Run during the glitch window, it would have CLOSED THE ENTIRE HEALTHY BOOK
+  in the DB on the strength of one bad API response. Only the flag-gating (the pass
+  runs without --repair) saved it.
+- Fix shipped: reconcile now runs a **proceeds test** — ≥3 positions missing at the
+  broker with no filled sell orders ⇒ `broker_data_suspect`, all repairs refused,
+  re-poll later. Lesson for every broker-truth invariant: *truth requires
+  consistency between the position claim and the cash/order ledger; a single
+  endpoint is not truth.* Also the strongest argument yet for the internal paper
+  engine (docs/07): our own ledger cannot glitch-liquidate itself.
+
 ## 2026-07-04 — options audition ($0 spent): net premium direction is the keeper, volume-spike was a mirage
 
 - **The 20-name preview's headline feature evaporated at full sample** — opt_vol_z
