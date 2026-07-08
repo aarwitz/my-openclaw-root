@@ -250,7 +250,10 @@ def check_data_freshness():
     if not os.path.exists(db):
         return finding("data_freshness", "warn", "features.sqlite not found")
     try:
-        c = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+        # mode=ro only — immutable=1 ignores the live WAL (writers run all day)
+        # and intermittently reads a torn image ("database disk image is
+        # malformed", seen 2026-07-07).
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
         rows = c.execute("SELECT source, MAX(as_of) FROM features GROUP BY source").fetchall()
         c.close()
     except Exception as e:

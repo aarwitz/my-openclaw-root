@@ -63,6 +63,15 @@ DEPLOY_LOG="$(mktemp -t publish-trader-intel.XXXXXX.log)"
 if ./node_modules/.bin/wrangler pages deploy dist --project-name=lidi-solutions --branch=main --commit-dirty=true >"$DEPLOY_LOG" 2>&1; then
   tail -25 "$DEPLOY_LOG"
   rm -f "$DEPLOY_LOG"
+  # Post-deploy verification (2026-07-07): the deploy is not "ok" until the live
+  # API actually serves sane chart ranges. audit-trader-live.mjs fails on empty
+  # or malformed ranges — the exact class of bug that shipped silently before.
+  echo "[publish] post-deploy verify: audit-trader-live.mjs"
+  sleep 15  # let the Pages deployment propagate before probing
+  if ! node "$LIDI_REPO/scripts/audit-trader-live.mjs"; then
+    echo "FATAL: deploy went out but /api/trader-live failed post-deploy audit" >&2
+    exit 1
+  fi
   echo "[publish] ok"
   exit 0
 fi

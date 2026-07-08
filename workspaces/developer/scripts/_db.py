@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +29,10 @@ def audit(conn, *, actor: str = "developer", entity_type: str, entity_id: str,
           before_state: str | None = None, after_state: str | None = None,
           experiment_id: str | None = None) -> str:
     ts = now_iso()
-    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + entity_id[:24]
+    # uuid suffix: second-resolution ts + entity-id prefix collided when a batch
+    # wrote >=2 audits in the same second (learning chain died on UNIQUE
+    # audits.id, 2026-07-07 compute_attribution).
+    aid = f"AUDIT-{ts.replace(':', '').replace('-', '')}-{uuid.uuid4().hex[:12]}"
     conn.execute(
         "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
         "before_state, after_state, rationale_concise, experiment_id) VALUES "
