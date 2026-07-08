@@ -60,7 +60,18 @@ if [[ $rc -ne 0 ]]; then
   tg notify "⚠️ Daily KG rebuild FAILED at: ${FAILED:-unknown} (rc=$rc). before[$before] after[$after]. Log: $LOG"
   exit 1
 fi
-# Human summary, not a stats dump (operator feedback 2026-07-07)
-delta_edges=$(( $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) - $(echo "$before" | grep -o "edges=[0-9]*" | cut -d= -f2) ))
-tg silent "🧠 Knowledge graph refreshed overnight — $( [ "$delta_edges" -ge 0 ] && echo "+$delta_edges" || echo "$delta_edges" ) causal/entity links vs yesterday."
+# Human summary, not a stats dump (operator feedback 2026-07-07).
+# Delta must compare consolidated-to-consolidated: `before` includes a day of
+# raw intraday edges that the dream pass dedupes, so before-vs-after reads as a
+# big negative ("-2093 links") even on a day the durable graph GREW (operator
+# confusion 2026-07-08). Baseline = yesterday's post-consolidation counts.
+AFTER_STATE="$HOME/.openclaw/state/kg-last-after.txt"
+prev_after="$(cat "$AFTER_STATE" 2>/dev/null || true)"
+echo "$after" > "$AFTER_STATE"
+if [[ -n "$prev_after" ]]; then
+  delta_edges=$(( $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) - $(echo "$prev_after" | grep -o "edges=[0-9]*" | cut -d= -f2) ))
+  tg silent "🧠 Knowledge graph refreshed overnight — $( [ "$delta_edges" -ge 0 ] && echo "+$delta_edges" || echo "$delta_edges" ) durable causal/entity links vs yesterday (after consolidation)."
+else
+  tg silent "🧠 Knowledge graph refreshed overnight — $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) links total (first consolidated baseline recorded)."
+fi
 exit 0

@@ -142,8 +142,11 @@ def main() -> int:
             "actor" if _col_exists(con, "audits", "actor") else
             ("agent_id" if _col_exists(con, "audits", "agent_id") else None)
         )
-        ts_col = "created_at" if _col_exists(con, "audits", "created_at") else (
-            "at" if _col_exists(con, "audits", "at") else None
+        # live schema names the column `timestamp` (was probing created_at/at
+        # only, so archivist freshness reported null forever — pq-0fd8e006c5ef)
+        ts_col = next(
+            (c for c in ("timestamp", "created_at", "at") if _col_exists(con, "audits", c)),
+            None,
         )
         if actor_col and ts_col:
             row = con.execute(

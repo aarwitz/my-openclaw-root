@@ -55,7 +55,15 @@ import risk_model  # noqa: E402  (correlation-cluster cap; degrades gracefully)
 # --- risk limits (single source of truth) ----------------------------------
 MAX_NAME_PCT = 0.10        # <=10% of equity in any one name
 MAX_GROSS_PCT = 0.60       # <=60% of equity deployed gross
-MAX_POSITIONS = 24         # max concurrent names (positions + pending intents); 12->24 per rule_proposal rp-e907106afbfb49a4aff1 (risk-gate audit: ~94% idle cash, all blocks were name-count)
+# max concurrent names (positions + pending intents).
+# 12->24 per rule_proposal rp-e907106afbfb49a4aff1 (risk-gate audit: ~94% idle
+# cash, all blocks were name-count). 24->48 operator-directed 2026-07-07
+# (Aaron via Telegram: "2x the max-positions cap") after the cap blocked
+# critic-cleared ideas (DAL, CMG) while gross exposure sat far below
+# MAX_GROSS_PCT — name-count was the binding constraint, not capital at risk.
+# Dollar-level guards (MAX_NAME_PCT, MAX_GROSS_PCT, MAX_CLUSTER_PCT) still cap
+# real concentration; recorded as rule_proposal rp-opcap-20260708.
+MAX_POSITIONS = 48
 DAILY_DD_HALT_PCT = 0.03   # halt new risk if day P&L <= -3% of equity
 # Correlation cap: a correlated cluster (a new name + holdings it co-moves with at
 # corr>=0.70) can't exceed this % of equity combined — the "8 names, 1 bet" guard.
