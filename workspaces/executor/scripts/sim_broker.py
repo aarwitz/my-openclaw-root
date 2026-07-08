@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import date, datetime, timezone
@@ -39,10 +40,152 @@ from connectors import alpaca, fmp  # noqa: E402
 # Fill model (P2 'model' book; the shadow book mirrors real fill prices instead):
 SPREAD_K = 8.0          # half-spread bps ≈ max(1, K/sqrt(ADV$ millions))
 PARTICIPATION_CAP = 0.02  # max fraction of trailing-21d ADV per order
+CASH_YIELD_MAX_APY = float(os.environ.get("SIM_CASH_YIELD_MAX_APY", "0.10"))
+CASH_YIELD_FALLBACK_APY = float(os.environ.get("SIM_CASH_YIELD_FALLBACK_APY", "0.045"))
 
 
 def _iso_today() -> str:
     return date.today().isoformat()
+
+
+def _ensure_cash_yield_tables(conn):
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sim_cash_yield_events ("
+        "id TEXT PRIMARY KEY, "
+        "book TEXT NOT NULL, "
+        "as_of_date TEXT NOT NULL, "
+        "annual_yield REAL NOT NULL, "
+        "cash_start REAL NOT NULL, "
+        "credit REAL NOT NULL, "
+        "applied_at TEXT NOT NULL, "
+        "UNIQUE(book, as_of_date))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS book_return_attribution ("
+        "book TEXT NOT NULL, "
+        "date TEXT NOT NULL, "
+        "equity REAL NOT NULL, "
+        "last_equity REAL, "
+        "trading_pl REAL NOT NULL, "
+        "cash_yield_pl REAL NOT NULL, "
+        "total_pl REAL NOT NULL, "
+        "trading_return_pct REAL, "
+        "cash_yield_return_pct REAL, "
+        "total_return_pct REAL, "
+        "created_at TEXT NOT NULL, "
+        "PRIMARY KEY(book, date))"
+    )
+
+
+def _sgov_proxy_apy() -> float:
+    """Estimate risk-free cash yield from SGOV trailing 21d return.
+
+    Falls back to a conservative env-configured APY when SGOV data is missing.
+    """
+    try:
+        bars = alpaca.daily_bars("SGOV", days=45)
+        if len(bars) >= 22:
+            c0 = float(bars[-22]["c"])
+            c1 = float(bars[-1]["c"])
+            if c0 > 0 and c1 > 0:
+                ret_21d = (c1 / c0) - 1.0
+                apy = ret_21d * (252.0 / 21.0)
+                # SGOV price alone can understate yield because distributions
+                # carry a chunk of the return. Floor at fallback APY so idle
+                # cash accounting stays broker-realistic.
+                apy = max(CASH_YIELD_FALLBACK_APY, apy)
+                return max(0.0, min(CASH_YIELD_MAX_APY, apy))
+    except Exception:
+        pass
+    return max(0.0, min(CASH_YIELD_MAX_APY, CASH_YIELD_FALLBACK_APY))
+
+
+def _apply_cash_yield_once_per_day(conn, book: str) -> dict:
+    today = _iso_today()
+    row = conn.execute(
+        "SELECT annual_yield, cash_start, credit FROM sim_cash_yield_events "
+        "WHERE book=? AND as_of_date=?",
+        (book, today),
+    ).fetchone()
+    if row:
+        return {
+            "applied": False,
+            "already_applied": True,
+            "annual_yield": float(row["annual_yield"]),
+            "cash_start": float(row["cash_start"]),
+            "credit": float(row["credit"]),
+        }
+
+    cash_start = get_cash(conn, book)
+    annual_yield = _sgov_proxy_apy()
+    credit = round(cash_start * annual_yield / 252.0, 6)
+    if credit != 0:
+        conn.execute("UPDATE sim_accounts SET cash=cash+? WHERE book=?", (credit, book))
+    eid = f"cye-{book}-{uuid.uuid4().hex[:14]}"
+    conn.execute(
+        "INSERT INTO sim_cash_yield_events (id, book, as_of_date, annual_yield, cash_start, credit, applied_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (eid, book, today, annual_yield, cash_start, credit, now_iso()),
+    )
+    audit(
+        conn,
+        actor="executor",
+        entity_type="sim_account",
+        entity_id=book,
+        action="cash_yield_credit",
+        rationale=f"{book}: SGOV-proxy APY {annual_yield:.4%} on ${cash_start:.2f} -> +${credit:.2f}",
+    )
+    return {
+        "applied": True,
+        "already_applied": False,
+        "annual_yield": annual_yield,
+        "cash_start": cash_start,
+        "credit": credit,
+    }
+
+
+def _write_return_attribution(conn, book: str, equity: float, cash_yield_credit: float):
+    today = _iso_today()
+    prev = conn.execute(
+        "SELECT equity FROM book_equity WHERE book=? AND date<? ORDER BY date DESC LIMIT 1",
+        (book, today),
+    ).fetchone()
+    last_equity = float(prev[0]) if prev else None
+    total_pl = 0.0 if last_equity in (None, 0.0) else (equity - last_equity)
+    trading_pl = total_pl - float(cash_yield_credit)
+    trading_ret = None if last_equity in (None, 0.0) else (trading_pl / last_equity) * 100.0
+    cash_ret = None if last_equity in (None, 0.0) else (float(cash_yield_credit) / last_equity) * 100.0
+    total_ret = None if last_equity in (None, 0.0) else (total_pl / last_equity) * 100.0
+    conn.execute(
+        "INSERT OR REPLACE INTO book_return_attribution ("
+        "book, date, equity, last_equity, trading_pl, cash_yield_pl, total_pl, "
+        "trading_return_pct, cash_yield_return_pct, total_return_pct, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            book,
+            today,
+            equity,
+            last_equity,
+            trading_pl,
+            float(cash_yield_credit),
+            total_pl,
+            trading_ret,
+            cash_ret,
+            total_ret,
+            now_iso(),
+        ),
+    )
+    return {
+        "date": today,
+        "equity": round(equity, 2),
+        "last_equity": None if last_equity is None else round(last_equity, 2),
+        "trading_pl": round(trading_pl, 2),
+        "cash_yield_pl": round(float(cash_yield_credit), 2),
+        "total_pl": round(total_pl, 2),
+        "trading_return_pct": None if trading_ret is None else round(trading_ret, 4),
+        "cash_yield_return_pct": None if cash_ret is None else round(cash_ret, 4),
+        "total_return_pct": None if total_ret is None else round(total_ret, 4),
+    }
 
 
 # ---------------------------------------------------------------- account/ledger
@@ -349,6 +492,8 @@ def _mark_price(sym: str) -> float | None:
 
 def mark_book(conn, book: str) -> dict:
     ensure_book(conn, book)
+    _ensure_cash_yield_tables(conn)
+    cy = _apply_cash_yield_once_per_day(conn, book)
     cash = get_cash(conn, book)
     equity = cash
     for sym, pos in positions(conn, book).items():
@@ -366,8 +511,20 @@ def mark_book(conn, book: str) -> dict:
                  (book, now_ms, equity))
     conn.execute("DELETE FROM book_equity_intraday WHERE book=? AND ts < ?",
                  (book, now_ms - 14 * 86400_000))
+    attribution = _write_return_attribution(conn, book, equity, cy.get("credit", 0.0))
     conn.commit()
-    return {"book": book, "date": _iso_today(), "equity": round(equity, 2), "cash": round(cash, 2)}
+    return {
+        "book": book,
+        "date": _iso_today(),
+        "equity": round(equity, 2),
+        "cash": round(cash, 2),
+        "cash_yield": {
+            "annual_yield": round(float(cy.get("annual_yield") or 0.0), 6),
+            "credit": round(float(cy.get("credit") or 0.0), 4),
+            "already_applied": bool(cy.get("already_applied")),
+        },
+        "attribution": attribution,
+    }
 
 
 def parity(conn) -> dict:

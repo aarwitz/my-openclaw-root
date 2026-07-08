@@ -8,15 +8,19 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 #   2. score_hypotheses (writes quant_score on raw hypotheses)
 #   3. critic_baseline (deterministic critic challenges; raises bar on rich names)
 #   4. predict (world-model probabilistic call: p_correct + name-aware return band)
-#   5. author_intents (fractional-Kelly sizing from the prediction)
-#   6. gate_evaluator on every proposed/critic_review intent -> risk_review
-#   7. risk_gate (Risk agent caps size; risk_review -> approved|blocked)
-#   8. execute_intent for every approved intent (LIVE — paper account only)
-#   8b. sync_fills (broker truth per order id → fills, intents, positions)
-#   9. reconcile (alpaca vs DB)
-#  10. benchmark_scoreboard (portfolio vs SPY per horizon -> benchmarks rows)
-#  11. snapshot writer (refreshes lidisolutions.ai data.json)
-#  12. audit_pipeline_health + audit_app_snapshot (Bessent watchdogs)
+#   4b. ml_evidence_track (advisory ranker trust ledger; no trading control)
+#   5. enforce_horizons (exit theses past wm horizon + grace — D55)
+#   5b. enforce_stops (D53 stop-rule enforcement)
+#   6. author_intents (adaptive deployment governor + probabilistic sizing)
+#   7. gate_evaluator on every proposed/critic_review intent -> risk_review
+#   8. risk_gate (Risk agent caps size; risk_review -> approved|blocked)
+#   9. execute_intent for every approved intent (LIVE — paper account only)
+#   9b. sync_fills (broker truth per order id → fills, intents, positions)
+#  10. reconcile (ledger vs DB)
+#  11. benchmark_scoreboard (portfolio vs SPY per horizon -> benchmarks rows)
+#  12. capital_efficiency_audit (rank dollar bottlenecks -> capital_efficiency_snapshots)
+#  13. snapshot writer (refreshes lidisolutions.ai data.json)
+#  14. audit_pipeline_health + audit_app_snapshot (Bessent watchdogs)
 #
 # Outputs ONE consolidated JSON to stdout summarizing each step. The agent
 # turn that calls this script should parse this JSON and compose the
@@ -87,15 +91,18 @@ run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation
 run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses.py
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
 run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
+run_step "ml_evidence_track" 30 python3 workspaces/trading-intel/scripts/track_ml_evidence.py
 if [[ "$TRADING_DAY" == "1" ]]; then
   # D53: enforce declared stop rules BEFORE authoring new ideas — cut rule-
   # breaching losers first, then deploy freed capital. (2026-07-07: ORCL sat
   # at -22.6% against a stated -8% stop while the desk kept opening names.)
+  run_step "enforce_horizons" 90 python3 workspaces/trader/scripts/enforce_horizons.py
   run_step "enforce_stops" 90 python3 workspaces/trader/scripts/enforce_stops.py
   run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
   run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
   run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
 else
+  printf ',\n  "enforce_horizons": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "author_intents": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "gate_evaluator": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "risk_gate": {"rc": 0, "skipped": "non-trading day"}'
@@ -124,6 +131,7 @@ run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scor
 # (both idempotent + cheap; pull-actuals writes a market_event on a big surprise).
 run_step "macro_seed" 30 python3 workspaces/trading-intel/scripts/macro_calendar.py seed --months 3
 run_step "macro_actuals" 45 python3 workspaces/trading-intel/scripts/macro_calendar.py pull-actuals
+run_step "capital_efficiency" 45 python3 workspaces/trading-intel/scripts/capital_efficiency_audit.py
 if [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
   if [[ ! -d "$LIDI_REPO/public/solutions/trader_intel/app" ]]; then
     printf ',\n  "snapshot": {"rc": 2, "out": "FATAL: lidi-solutions repo not mounted at %s. Add bind mount in docker-compose.openclaw.yml and safe-restart."}' "$LIDI_REPO"

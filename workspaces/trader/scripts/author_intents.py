@@ -67,6 +67,7 @@ MODELED_SLIPPAGE_BPS = 8.0
 KELLY_SCALE = 0.25             # quarter-Kelly
 KELLY_CAP = 0.10               # never suggest > 10% of equity pre-risk-gate
 RETRIEVE_EPISODES = "/home/aaron/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py"
+MAX_POSITIONS_ASSUMED = int(os.environ.get("TRADER_MAX_POSITIONS_ASSUMED", "48"))
 
 
 def _now_iso() -> str:
@@ -110,7 +111,8 @@ def _latest_prediction(conn, hyp_id: str):
     ).fetchone()
 
 
-def _kelly_sizing(pred, equity: float) -> dict:
+def _kelly_sizing(pred, equity: float, *, kelly_scale: float = KELLY_SCALE,
+                  kelly_cap: float = KELLY_CAP) -> dict:
     """Translate a prediction into a fractional-Kelly notional suggestion.
 
     Returns a dict with sizing_basis, kelly_fraction, notional_raw, and (when a
@@ -128,7 +130,7 @@ def _kelly_sizing(pred, equity: float) -> dict:
         return {"sizing_basis": "baseline_1pct", "kelly_fraction": None,
                 "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
                 "p_correct": p, "prediction_id": pred["id"]}
-    frac = wm.kelly_fraction(p, up, down, kelly_scale=KELLY_SCALE, cap=KELLY_CAP)
+    frac = wm.kelly_fraction(p, up, down, kelly_scale=kelly_scale, cap=kelly_cap)
     if frac <= 0:
         # Neutral or slightly negative prediction bands should not zero the queue when
         # the desk still has a ready hypothesis. Fall back to the baseline starter size
@@ -139,6 +141,116 @@ def _kelly_sizing(pred, equity: float) -> dict:
     return {"sizing_basis": "kelly", "kelly_fraction": round(frac, 4),
             "notional_raw": frac * equity, "skip": False, "p_correct": p,
             "prediction_id": pred["id"]}
+
+
+def _adv_dollars(ticker: str) -> float | None:
+    try:
+        bars = daily_bars(ticker, days=30)[-21:]
+        if not bars:
+            return None
+        return sum(float(b["c"]) * float(b.get("v") or 0.0) for b in bars) / len(bars)
+    except Exception:
+        return None
+
+
+def _risk_gate_strength(conn) -> float:
+    """Recent approval quality from the real gate, 0..1."""
+    row = conn.execute(
+        "SELECT "
+        "SUM(CASE WHEN state IN ('approved','submitted','filled','partial') THEN 1 ELSE 0 END) AS passed, "
+        "SUM(CASE WHEN state='blocked' THEN 1 ELSE 0 END) AS blocked "
+        "FROM trade_intents "
+        "WHERE action='open' AND created_at >= datetime('now','-14 day')"
+    ).fetchone()
+    passed = int((row["passed"] or 0) if row else 0)
+    blocked = int((row["blocked"] or 0) if row else 0)
+    denom = passed + blocked
+    if denom == 0:
+        return 0.5
+    return max(0.0, min(1.0, passed / denom))
+
+
+def _calibration_factor(conn) -> tuple[float, int, int]:
+    row = conn.execute(
+        "SELECT "
+        "SUM(CASE WHEN resolved_at IS NOT NULL THEN 1 ELSE 0 END) AS resolved, "
+        "SUM(CASE WHEN resolved_at IS NULL THEN 1 ELSE 0 END) AS open "
+        "FROM predictions"
+    ).fetchone()
+    resolved = int((row["resolved"] or 0) if row else 0)
+    open_ = int((row["open"] or 0) if row else 0)
+    # Needs resolved outcomes before Kelly should carry full weight.
+    factor = max(0.0, min(1.0, resolved / 50.0))
+    return factor, resolved, open_
+
+
+def _deployment_governor(conn, hyp_row, *, ticker: str, equity: float, cash_remaining: float,
+                         regime: str, p_correct: float | None) -> dict:
+    quant = float(hyp_row["quant_score"] or 0.0)
+    quality = max(0.0, min(1.0, (quant - 60.0) / 40.0))
+    risk_strength = _risk_gate_strength(conn)
+    calibration_factor, resolved_preds, open_preds = _calibration_factor(conn)
+
+    concurrent = conn.execute(
+        "SELECT COUNT(DISTINCT ticker) FROM positions "
+        "WHERE state IN ('opening','open','scaling','trimming','closing')"
+    ).fetchone()[0] or 0
+    overlap_headroom = max(0.0, min(1.0, 1.0 - (float(concurrent) / max(1.0, float(MAX_POSITIONS_ASSUMED)))))
+
+    adv = _adv_dollars(ticker)
+    # 0 at $2m ADV, 1 at $20m+ ADV
+    liquidity = 0.0 if not adv else max(0.0, min(1.0, (adv - 2_000_000.0) / 18_000_000.0))
+
+    if regime == "risk_on":
+        regime_factor = 1.0
+    elif regime == "neutral":
+        regime_factor = 0.7
+    elif regime == "caution":
+        regime_factor = 0.4
+    else:
+        regime_factor = 0.25
+
+    capital = max(0.0, min(1.0, cash_remaining / max(1.0, equity)))
+    conviction = 0.5 if p_correct is None else max(0.0, min(1.0, (float(p_correct) - 0.5) / 0.5))
+
+    score = (
+        0.22 * quality
+        + 0.14 * risk_strength
+        + 0.10 * overlap_headroom
+        + 0.16 * liquidity
+        + 0.10 * regime_factor
+        + 0.18 * calibration_factor
+        + 0.10 * capital
+    )
+    score = max(0.0, min(1.0, score))
+
+    base_size_pct = 0.01 + 0.01 * score
+    adaptive_ceiling = 2000.0 + 2000.0 * score
+
+    # Before outcomes resolve, dampen Kelly-driven upsizing.
+    kelly_scale_eff = KELLY_SCALE * (0.4 + 0.6 * calibration_factor)
+    kelly_cap_eff = min(KELLY_CAP, (adaptive_ceiling / max(1.0, equity)))
+
+    return {
+        "score": round(score, 4),
+        "size_pct": round(base_size_pct, 6),
+        "notional_floor": NOTIONAL_FLOOR,
+        "notional_ceiling": round(adaptive_ceiling, 2),
+        "quality": round(quality, 4),
+        "risk_strength": round(risk_strength, 4),
+        "overlap_headroom": round(overlap_headroom, 4),
+        "liquidity": round(liquidity, 4),
+        "regime_factor": round(regime_factor, 4),
+        "calibration_factor": round(calibration_factor, 4),
+        "calibration_resolved_predictions": resolved_preds,
+        "calibration_open_predictions": open_preds,
+        "capital_factor": round(capital, 4),
+        "conviction_factor": round(conviction, 4),
+        "kelly_scale_effective": round(kelly_scale_eff, 6),
+        "kelly_cap_effective": round(kelly_cap_eff, 6),
+        "adv_dollars": None if adv is None else round(adv, 2),
+        "concurrent_open_names": int(concurrent),
+    }
 
 
 def _count_open_intents(conn) -> int:
@@ -301,22 +413,34 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": f"price_lookup_failed: {exc}"}
 
+    regime = _regime_current(conn)
     pred = _latest_prediction(conn, hid)
-    sizing = _kelly_sizing(pred, equity)
+    p_correct = float(pred["p_correct"]) if pred and pred["p_correct"] is not None else None
+    governor = _deployment_governor(
+        conn,
+        hyp_row,
+        ticker=ticker,
+        equity=equity,
+        cash_remaining=cash_remaining,
+        regime=regime,
+        p_correct=p_correct,
+    )
+    sizing = _kelly_sizing(
+        pred,
+        equity,
+        kelly_scale=float(governor["kelly_scale_effective"]),
+        kelly_cap=float(governor["kelly_cap_effective"]),
+    )
     if sizing.get("skip"):
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": f"no_probabilistic_edge (p={sizing.get('p_correct')}, kelly=0)"}
 
-    # Conviction-scaled ceiling: let high-conviction predictions (p_correct from the combined
-    # calibrated-mechanism posteriors) size up toward the Kelly cap, instead of the flat $2k cap
-    # throttling everything. Low conviction stays at the legacy ceiling. Risk gate caps downstream.
-    p_conv = sizing.get("p_correct") or 0.5
-    conv = max(0.0, min(1.0, (float(p_conv) - 0.5) / 0.5))
-    dyn_ceiling = max(NOTIONAL_CEILING, min(KELLY_CAP * equity,
-                                            NOTIONAL_CEILING + conv * (KELLY_CAP * equity - NOTIONAL_CEILING)))
-    notional = max(NOTIONAL_FLOOR, min(dyn_ceiling, sizing["notional_raw"] * episode_mult))
+    baseline_notional = governor["size_pct"] * equity
+    raw_notional = max(float(sizing["notional_raw"]), baseline_notional)
+    dyn_ceiling = min(governor["notional_ceiling"], governor["kelly_cap_effective"] * equity)
+    notional = max(governor["notional_floor"], min(dyn_ceiling, raw_notional * episode_mult))
     notional = min(notional, cash_remaining)
-    if notional < min(NOTIONAL_FLOOR, cash_remaining):
+    if notional < min(governor["notional_floor"], cash_remaining):
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": f"insufficient_cash_remaining={cash_remaining:.2f}"}
     qty = int(math.floor(notional / last))
@@ -331,11 +455,12 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     edge_scorecard = {
         "quant_score": float(hyp_row["quant_score"] or 0),
         "evidence_floor_met": True,
-        "regime_at_author": _regime_current(conn),
+        "regime_at_author": regime,
         "sizing_basis": sizing["sizing_basis"],
         "kelly_fraction": sizing.get("kelly_fraction"),
         "p_correct": sizing.get("p_correct"),
         "prediction_id": sizing.get("prediction_id"),
+        "deployment_governor": governor,
         "episode_context": episode_ctx,
         "episode_sizing_multiplier": episode_mult,
         "episode_signal": episode_flag,
@@ -356,6 +481,9 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
             "notional": realized_notional, "sizing_basis": sizing["sizing_basis"],
             "kelly_fraction": sizing.get("kelly_fraction"),
             "p_correct": sizing.get("p_correct"),
+            "governor_score": governor["score"],
+            "adaptive_size_pct": governor["size_pct"],
+            "adaptive_ceiling": governor["notional_ceiling"],
             "episode_signal": episode_flag,
         }
 

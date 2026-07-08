@@ -695,6 +695,76 @@ def _load_sim_books(conn: sqlite3.Connection) -> dict[str, Any]:
     return books
 
 
+def _load_capital_attribution(conn: sqlite3.Connection, spy_comparison: dict[str, Any]) -> dict[str, Any]:
+    """Desk attribution split: trading P&L vs cash yield vs total, plus benchmark-relative.
+
+    The daily rows are written by sim_broker.mark_book into book_return_attribution.
+    """
+    try:
+        today = conn.execute(
+            "SELECT date, equity, last_equity, trading_pl, cash_yield_pl, total_pl, "
+            "trading_return_pct, cash_yield_return_pct, total_return_pct "
+            "FROM book_return_attribution WHERE book='desk' ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if not today:
+            return {"available": False, "note": "book_return_attribution_empty"}
+
+        cumulative_cash_yield = conn.execute(
+            "SELECT COALESCE(SUM(credit),0) FROM sim_cash_yield_events WHERE book='desk'"
+        ).fetchone()[0]
+
+        total_alpha_pct = None
+        spy_ret_pct = None
+        port_ret_pct = None
+        if spy_comparison.get("available"):
+            if "horizons" in spy_comparison and isinstance(spy_comparison["horizons"], list):
+                all_h = next((h for h in spy_comparison["horizons"] if h.get("horizon") == "all"), None)
+                pick = all_h if all_h else (spy_comparison["horizons"][0] if spy_comparison["horizons"] else None)
+                if pick:
+                    total_alpha_pct = _safe_float(pick.get("alpha_pct"), None)
+                    spy_ret_pct = _safe_float(pick.get("spy_return_pct"), None)
+                    port_ret_pct = _safe_float(pick.get("portfolio_return_pct"), None)
+            else:
+                total_alpha_pct = _safe_float(spy_comparison.get("alpha_pct"), None)
+                spy_ret_pct = _safe_float(spy_comparison.get("spy_return_pct"), None)
+                port_ret_pct = _safe_float(spy_comparison.get("portfolio_return_pct"), None)
+
+        start_eq = _safe_float(today["last_equity"], None)
+        cash_yield_return_since_start = None
+        trading_alpha_pct = None
+        if start_eq and start_eq > 0:
+            cash_yield_return_since_start = float(cumulative_cash_yield) / float(start_eq) * 100.0
+            if total_alpha_pct is not None:
+                trading_alpha_pct = float(total_alpha_pct) - cash_yield_return_since_start
+
+        return {
+            "available": True,
+            "daily": {
+                "date": today["date"],
+                "equity": _safe_float(today["equity"], None),
+                "last_equity": _safe_float(today["last_equity"], None),
+                "trading_pl": _safe_float(today["trading_pl"], None),
+                "cash_yield_pl": _safe_float(today["cash_yield_pl"], None),
+                "total_pl": _safe_float(today["total_pl"], None),
+                "trading_return_pct": _safe_float(today["trading_return_pct"], None),
+                "cash_yield_return_pct": _safe_float(today["cash_yield_return_pct"], None),
+                "total_return_pct": _safe_float(today["total_return_pct"], None),
+            },
+            "cumulative": {
+                "cash_yield_pl": _safe_float(cumulative_cash_yield, 0.0),
+            },
+            "benchmark_relative": {
+                "portfolio_return_pct": port_ret_pct,
+                "spy_return_pct": spy_ret_pct,
+                "total_alpha_pct": total_alpha_pct,
+                "trading_alpha_pct": None if trading_alpha_pct is None else round(trading_alpha_pct, 4),
+                "cash_yield_alpha_pct": None if cash_yield_return_since_start is None else round(cash_yield_return_since_start, 4),
+            },
+        }
+    except sqlite3.Error:
+        return {"available": False, "note": "attribution_query_failed"}
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -736,6 +806,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "audits": audits,
         "counts": counts,
         "simBooks": _load_sim_books(conn),
+        "capital_attribution": _load_capital_attribution(conn, spy_comparison),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison
         ),

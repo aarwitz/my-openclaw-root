@@ -137,16 +137,26 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
   → score_hypotheses     quant/scripts/score_hypotheses.py     → quant_score
   → critic_baseline      critic/scripts/critic_baseline.py     → critic challenges
   → predict              quant/scripts/predict.py              → predictions (p + band)
-  → author_intents       trader/scripts/author_intents.py      → trade_intents (Kelly size, state=proposed)
+  → ml_evidence_track    trading-intel/scripts/track_ml_evidence.py → ml_evidence_tracking (advisory
+                                                               ranker trust ledger; no trading control)
+  → enforce_horizons     trader/scripts/enforce_horizons.py    → exit intents for theses past
+                                                               wm.HORIZON_DAYS + 5td grace (D55)
+  → enforce_stops        trader/scripts/enforce_stops.py       → exit intents for stop breaches (D53)
+  → author_intents       trader/scripts/author_intents.py      → trade_intents (adaptive deployment
+                                                               governor + fractional-Kelly, state=proposed)
   → gate_evaluator       trading-intel/scripts/gate_evaluator.py  proposed|critic_review → risk_review | blocked
   → risk_gate            risk/scripts/gate_risk_intents.py     risk_review → approved|blocked (size capped)
-  → execute_intent       executor/scripts/execute_intent.py    approved → submitted (Alpaca paper)
+  → execute_intent       executor/scripts/execute_intent.py    approved → submitted (internal ledger)
   → sync_fills           executor/scripts/sync_fills.py        broker truth per order id → orders (fill
                                                                price/time), intents (actuals), positions
                                                                (real hypothesis lineage; added 2026-07-06)
   → reconcile            executor/scripts/reconcile.py          fills vs DB (placeholder repair = last resort)
+  → sim_mark             executor/scripts/sim_broker.py mark   → book_equity + SGOV-proxy cash-yield accrual
+                                                               + book_return_attribution (trading vs yield, D55)
   → scoreboard           trading-intel/scripts/benchmark_scoreboard.py → benchmarks rows (vs SPY, all horizons)
   → macro_seed/actuals   trading-intel/scripts/macro_calendar.py → macro_releases (+ surprise → market_event)
+  → capital_efficiency   trading-intel/scripts/capital_efficiency_audit.py → capital_efficiency_snapshots
+                                                               (ranked dollar bottlenecks, D55)
   → snapshot (+overlay)  developer/scripts/snapshot_builder.py → app data.json
   → pipeline_health + app_snapshot   developer watchdogs
 ```
