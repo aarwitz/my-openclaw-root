@@ -287,6 +287,28 @@ CREATE TABLE IF NOT EXISTS patterns (
   experiment_id         TEXT
 );
 
+-- Post-exit rebound tracking (D56): what the market did AFTER every exit, so
+-- "sold too early" is measured (per exit lane) instead of anecdotal.
+CREATE TABLE IF NOT EXISTS exit_quality (
+  id              TEXT PRIMARY KEY,
+  intent_id       TEXT NOT NULL UNIQUE REFERENCES trade_intents(id),
+  hypothesis_id   TEXT,
+  ticker          TEXT NOT NULL,
+  exit_reason     TEXT,
+  exited_at       TEXT NOT NULL,
+  exit_price      REAL,
+  qty             REAL,
+  ret_1d          REAL,
+  ret_3d          REAL,
+  ret_5d          REAL,
+  spy_ret_5d      REAL,
+  premature_5d    INTEGER,
+  regret_usd_5d   REAL,
+  computed_at     TEXT NOT NULL,
+  final           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_exit_quality_reason ON exit_quality(exit_reason, premature_5d);
+
 -- ----------------------------------------------------------------------------
 -- Validation Cases and Regime Rules
 -- ----------------------------------------------------------------------------

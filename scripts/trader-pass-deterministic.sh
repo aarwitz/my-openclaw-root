@@ -127,6 +127,24 @@ run_step "reconcile" 30 python3 workspaces/executor/scripts/reconcile.py --repai
 run_step "sim_mark" 60 python3 workspaces/executor/scripts/sim_broker.py mark --book desk
 run_step "portfolio_risk" 120 python3 workspaces/trading-intel/scripts/risk_model.py snapshot
 run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scoreboard.py --backfill
+# --- learning loop (D56) --------------------------------------------------
+# These stages existed but were NEVER wired into the pass: 174 predictions had
+# never been graded, 5/6 resolved hypotheses had no postmortem, and 0 patterns
+# were ever extracted. Order matters:
+#   grade_outcomes    — grade matured predictions from realized prices (vs SPY)
+#   calibrate         — fold graded outcomes into mechanism Beta posteriors
+#                       (--no-propose: per-pass data accumulation is autonomous;
+#                       gated rule_proposals stay on the daily learning pass)
+#   write_postmortems — every resolved hypothesis gets a structured postmortem
+#   extract_patterns  — promote recurring postmortem themes to patterns
+#   exit_quality      — measure post-exit rebounds so "sold too early" is a
+#                       tracked number per exit lane, not an anecdote
+run_step "grade_outcomes" 120 python3 workspaces/archivist/scripts/grade_outcomes.py
+run_step "calibrate" 90 python3 workspaces/archivist/scripts/calibrate.py --no-propose
+run_step "write_postmortems" 30 python3 workspaces/archivist/scripts/write_postmortems.py
+run_step "extract_patterns" 30 python3 workspaces/archivist/scripts/extract_patterns.py
+run_step "exit_quality" 90 python3 workspaces/trading-intel/scripts/exit_quality_audit.py
+# ---------------------------------------------------------------------------
 # Macro layer: keep the forward calendar populated and detect realized surprises
 # (both idempotent + cheap; pull-actuals writes a market_event on a big surprise).
 run_step "macro_seed" 30 python3 workspaces/trading-intel/scripts/macro_calendar.py seed --months 3

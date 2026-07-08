@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -54,7 +55,9 @@ def connect():
 
 def _audit(conn, *, entity_id: str, action: str, rationale: str) -> None:
     ts = now_iso()
-    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + entity_id[:24]
+    # uuid suffix: two patterns written in the same second share the first 24
+    # chars of their PATTERN- ids (all timestamp), which collided on audits.id.
+    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + uuid.uuid4().hex[:12]
     conn.execute(
         "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
         "rationale_concise) VALUES (?, ?, ?, ?, ?, ?, ?)",

@@ -163,6 +163,31 @@ def section_bottlenecks(conn, trend_days: int) -> dict:
     return out
 
 
+def section_learning(conn) -> dict:
+    """Learning-loop health: postmortem coverage, patterns, exit regret (D56)."""
+    resolved = int(_scalar(conn, "SELECT COUNT(*) FROM hypotheses WHERE state='resolved'", default=0))
+    with_pm = int(_scalar(conn, "SELECT COUNT(DISTINCT hypothesis_id) FROM postmortems", default=0))
+    patterns = [dict(zip(("pattern", "confidence"), r)) for r in conn.execute(
+        "SELECT pattern, confidence FROM patterns ORDER BY created_at DESC LIMIT 5")]
+    exit_lanes = {}
+    try:
+        for r in conn.execute(
+                "SELECT exit_reason, COUNT(*) n, SUM(premature_5d) prem, "
+                "ROUND(SUM(regret_usd_5d),2) regret, SUM(final) matured "
+                "FROM exit_quality GROUP BY exit_reason"):
+            exit_lanes[r[0] or "unknown"] = {
+                "exits": r[1], "premature": int(r[2] or 0),
+                "regret_usd": float(r[3] or 0.0), "matured": int(r[4] or 0)}
+    except sqlite3.OperationalError:
+        pass
+    return {
+        "resolved_hypotheses": resolved,
+        "postmortem_coverage": f"{with_pm}/{resolved}",
+        "patterns": patterns,
+        "exit_regret_by_lane": exit_lanes,
+    }
+
+
 def section_ml_trust(conn) -> dict:
     try:
         row = conn.execute(
@@ -234,6 +259,17 @@ def render_text(panel: dict) -> str:
                      f"  idle {d['usd_idle']:+,.0f}  stale {d['usd_stale']:+,.0f}"
                      f"  blocked {d['usd_blocked']:+,.0f}")
     L.append("")
+    lr = panel.get("learning") or {}
+    if lr:
+        L.append(f"LEARN  postmortems {lr['postmortem_coverage']}"
+                 f"  patterns={len(lr['patterns'])}")
+        for p in lr["patterns"]:
+            L.append(f"       pattern: {p['pattern']} ({p['confidence']})")
+        for lane, v in (lr.get("exit_regret_by_lane") or {}).items():
+            L.append(f"       exit regret [{lane}]: {v['exits']} exits"
+                     f" ({v['matured']} matured), {v['premature']} premature,"
+                     f" ${v['regret_usd']:,.2f} rebound regret")
+    L.append("")
     if ml.get("available"):
         L.append(f"ML     cited={ml['cited_ml']}/{ml['hypotheses_tracked']}"
                  f"  agree/disagree={ml['agree']}/{ml['disagree']}"
@@ -256,6 +292,7 @@ def main() -> int:
         "calibration": section_calibration(conn),
         "lifecycle": section_lifecycle(conn),
         "bottlenecks": section_bottlenecks(conn, args.trend_days),
+        "learning": section_learning(conn),
         "ml_trust": section_ml_trust(conn),
     }
     conn.close()
