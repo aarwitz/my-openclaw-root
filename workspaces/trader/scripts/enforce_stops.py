@@ -56,6 +56,93 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _ensure_stop_postmortem(conn: sqlite3.Connection, hypothesis_id: str, *,
+                            ticker: str, dd_pct: float | None = None,
+                            basis: float | None = None, mark: float | None = None) -> bool:
+    """Write one structured postmortem row per stopped-out hypothesis.
+
+    This ensures stop-loss failures are not only audited as events, but also
+    ingested by Archivist pattern extraction (`extract_patterns.py`).
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM postmortems WHERE hypothesis_id=? LIMIT 1",
+        (hypothesis_id,),
+    ).fetchone()
+    if exists:
+        return False
+
+    ts = _now_iso()
+    pid = "PM-STOP-" + ts.replace(":", "").replace("-", "") + "-" + hypothesis_id[:18]
+    dd_txt = "unknown" if dd_pct is None else f"{dd_pct:+.1f}%"
+    basis_txt = "unknown" if basis is None else f"{basis:.2f}"
+    mark_txt = "unknown" if mark is None else f"{mark:.2f}"
+    theme = "stop_whipsaw_or_tight_stop"
+    thesis = {
+        "theme": theme,
+        "summary": (
+            f"{ticker} stop-triggered loss at {dd_txt}; assess whether hard -8% full exit "
+            "was too tight versus prevailing trend and volatility regime."
+        ),
+        "details": {
+            "ticker": ticker,
+            "stop_drawdown_pct": dd_pct,
+            "entry_basis": basis,
+            "stop_mark": mark,
+            "stop_policy": f"-{STOP_PCT * 100:.0f}% hard stop",
+            "assessment": "trade_wrong",
+        },
+    }
+    expression = {
+        "issue": "full liquidation on first stop breach",
+        "improvement": "use deterministic trim-first near threshold when momentum remains constructive",
+    }
+    critic = {
+        "challenge": "stop may clip winners during transient dislocations",
+        "status": "accepted",
+    }
+    researcher = {
+        "next_checks": [
+            "measure 1d/3d/5d post-stop rebound distribution",
+            "segment outcomes by regime and volatility",
+        ]
+    }
+
+    conn.execute(
+        "INSERT INTO postmortems (id, hypothesis_id, resolved_at, grade, "
+        "thesis_analysis_json, expression_analysis_json, critic_analysis_json, "
+        "researcher_analysis_json, external_mechanism_check_json, experiment_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            pid,
+            hypothesis_id,
+            ts,
+            "wrong",
+            json.dumps(thesis),
+            json.dumps(expression),
+            json.dumps(critic),
+            json.dumps(researcher),
+            json.dumps({"status": "pending"}),
+            "world_model_v1",
+        ),
+    )
+    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + pid[:24]
+    conn.execute(
+        "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
+        "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "
+        "'postmortem', ?, 'record_stop_postmortem', NULL, 'written', ?)",
+        (
+            aid,
+            ts,
+            pid,
+            (
+                f"postmortem recorded for stopped-out thesis {hypothesis_id} "
+                f"({ticker}, dd={dd_txt}, basis={basis_txt}, mark={mark_txt})"
+            ),
+        ),
+    )
+    return True
+
+
 def _constructive_momentum(ticker: str) -> bool:
     """Return True when recent daily trend remains constructive.
 
@@ -100,22 +187,54 @@ def main(argv=None) -> int:
     # refine the narrative grade later). Without this, stopped-out hypotheses
     # sat 'active' forever and the most informative outcomes never fed learning.
     resolved = 0
+    postmortems_written = 0
     for r in conn.execute(
-            "SELECT DISTINCT ti.hypothesis_id FROM trade_intents ti "
+            "SELECT ti.hypothesis_id, ti.ticker, ti.stop_rule, p.cost_basis "
+            "FROM trade_intents ti "
             "JOIN hypotheses h ON h.id = ti.hypothesis_id "
-            "WHERE ti.triggered_by='stop_rule_enforcer_v1' AND ti.state='filled' "
-            "AND h.state NOT IN ('resolved','retired')").fetchall():
-        hid = r[0]
-        conn.execute(
-            "UPDATE hypotheses SET state='resolved', resolved_at=?, resolved_state='wrong', "
-            "rationale_concise=COALESCE(rationale_concise,'') WHERE id=?", (_now_iso(), hid))
-        aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + hid[:24]
-        conn.execute(
-            "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
-            "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "
-            "'hypothesis', ?, 'resolve_stopped_out', 'active', 'resolved', "
-            "'stop-rule exit filled: thesis falsified at the -8% risk limit (trade verdict wrong; archivist may refine)')",
-            (aid, _now_iso(), hid))
+            "LEFT JOIN positions p ON p.hypothesis_id = ti.hypothesis_id AND UPPER(p.ticker)=UPPER(ti.ticker) "
+            "WHERE ti.triggered_by IN ('stop_rule_enforcer_v1','stop_rule_soft_enforcer_v1') "
+            "AND ti.state='filled' "
+            "GROUP BY ti.hypothesis_id, ti.ticker "
+            "ORDER BY MAX(ti.created_at) DESC").fetchall():
+        hid = r["hypothesis_id"]
+        tick = (r["ticker"] or "").upper()
+        stop_rule = (r["stop_rule"] or "")
+        dd_pct = None
+        try:
+            # stop_rule strings include forms like "STOP HIT: -8.3% vs -8% rule"
+            pct = stop_rule.split(":", 1)[-1].strip().split("%", 1)[0]
+            dd_pct = float(pct.split()[-1])
+        except Exception:
+            dd_pct = None
+        basis = float(r["cost_basis"] or 0) if r["cost_basis"] is not None else None
+        mark = None if (basis is None or dd_pct is None) else basis * (1.0 + (dd_pct / 100.0))
+
+        if not a.dry_run:
+            if _ensure_stop_postmortem(conn, hid, ticker=tick, dd_pct=dd_pct, basis=basis, mark=mark):
+                postmortems_written += 1
+        else:
+            exists = conn.execute(
+                "SELECT 1 FROM postmortems WHERE hypothesis_id=? LIMIT 1",
+                (hid,),
+            ).fetchone()
+            if not exists:
+                postmortems_written += 1
+
+        hrow = conn.execute("SELECT state FROM hypotheses WHERE id=?", (hid,)).fetchone()
+        if not hrow or hrow["state"] in ("resolved", "retired"):
+            continue
+        if not a.dry_run:
+            conn.execute(
+                "UPDATE hypotheses SET state='resolved', resolved_at=?, resolved_state='wrong', "
+                "rationale_concise=COALESCE(rationale_concise,'') WHERE id=?", (_now_iso(), hid))
+            aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + hid[:24]
+            conn.execute(
+                "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
+                "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "
+                "'hypothesis', ?, 'resolve_stopped_out', 'active', 'resolved', "
+                "'stop-rule exit filled: thesis falsified at the -8% risk limit (trade verdict wrong; archivist may refine)')",
+                (aid, _now_iso(), hid))
         resolved += 1
     if resolved:
         conn.commit()
@@ -208,6 +327,7 @@ def main(argv=None) -> int:
              )))
         conn.commit()
     print(json.dumps({"stop_breaches": results, "resolved_stopped_out": resolved,
+                      "postmortems_written": postmortems_written,
                       "authored": 0 if a.dry_run else len(results),
                       "dry_run": a.dry_run, "stop_pct": STOP_PCT}, indent=2))
     return 0
