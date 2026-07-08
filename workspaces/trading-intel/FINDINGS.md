@@ -19,6 +19,32 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-07-08 — one colliding audit id silently cost the desk a day of learning
+
+- **A batch-unsafe id scheme in a shared helper killed the learning chain the first time the
+  desk did the right thing.** `developer/_db.py` built audit ids as
+  `AUDIT-<second-resolution-ts>-<entity_id[:24]>`; every attribution row id begins with the
+  same `ATTR-<same second>` prefix, so the first multi-row batch (the four 2026-07-07 stop
+  exits — exactly the losers the loop exists to learn from) hit `UNIQUE audits.id` and the
+  chain died at `compute_attribution`, taking the daily debrief down with it. The executor's
+  copy of the same helper had already been fixed (ts+uuid) — the fix never propagated to the
+  duplicated code. Lessons: (1) ids must be collision-safe under batch writes, not just under
+  "one write per second" luck; (2) duplicated helpers rot independently — when one copy gets
+  a correctness fix, grep for its siblings. Backfilled: 4 attribution rows + the 07-07
+  debrief (`mev-d2ff861fc41a432d8417`).
+
+## 2026-07-08 — the dashboard served an empty equity curve for a month of ranges, and no check noticed
+
+- **The web equity chart broke at the field-name boundary between two components built the
+  same day.** The KV snapshot's `equityHistory` rows carry `timestamp`; the Pages function
+  parsed `ts`/`date` → every daily point dropped → 1M/YTD/1Y/All rendered "Not enough
+  history" since the D52 sim cutover, and 1W collapsed to a 1.3-hour intraday sliver.
+  `scripts/audit-trader-live.mjs` existed and would have failed loudly on `empty_1m` — it was
+  simply never wired into the deploy path. Contract mismatches live at component seams;
+  verification that isn't executed automatically is documentation, not verification.
+  (Fixed: parse + merged 1W ranges; publish-trader-intel.sh now gates "ok" on the live audit
+  passing post-deploy.)
+
 ## 2026-07-06 — a state machine that depends on timing luck looks healthy until the first slow fill
 
 - **Every historical order that filled instantly hid the fact that nothing tracked fills at
