@@ -419,11 +419,47 @@ def check_ledger_backup():
     return finding("ledger_backup", "ok", f"newest ledger backup {age_h:.1f}h old ({len(files)} retained)")
 
 
+def check_learning_loop():
+    """The keystone: predictions must RESOLVE once matured or calibration/Kelly
+    starve silently. grade_outcomes reported 'ok, graded 0' for weeks (correct —
+    first cohort matures 2026-07-10) but nothing would notice if it kept saying
+    that AFTER maturity. Approximates trading-day maturity with calendar days
+    (horizon trading days * 1.45); flags matured-but-unresolved predictions."""
+    db = f"{ROOT}/state/trading-intel.sqlite"
+    if not os.path.exists(db):
+        return finding("learning_loop", "warn", "trading-intel.sqlite not found")
+    horizon_cal = {"intraday": 2, "swing_1_5d": 5, "position_1_4w": 22, "trend_1_3m": 66, "long_6m_plus": 262}
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
+        rows = c.execute(
+            "SELECT horizon, predicted_at FROM predictions WHERE resolved_at IS NULL").fetchall()
+        resolved = c.execute("SELECT COUNT(*) FROM predictions WHERE resolved_at IS NOT NULL").fetchone()[0]
+        c.close()
+    except Exception as e:
+        return finding("learning_loop", "warn", f"predictions query failed: {e}")
+    now = datetime.now(timezone.utc)
+    overdue = 0
+    for horizon, predicted_at in rows:
+        try:
+            t0 = datetime.fromisoformat(str(predicted_at).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        # +3 days grace beyond the calendar-approximated horizon before flagging
+        if (now - t0).days > horizon_cal.get(horizon, 22) + 3:
+            overdue += 1
+    if overdue:
+        return finding("learning_loop", "crit",
+                       f"{overdue} matured prediction(s) unresolved — grade_outcomes is not closing "
+                       f"the loop; calibration and Kelly sizing are running blind ({resolved} resolved lifetime)")
+    return finding("learning_loop", "ok",
+                   f"no matured-unresolved predictions ({len(rows)} pending, {resolved} resolved lifetime)")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
-    check_ledger_backup,
+    check_ledger_backup, check_learning_loop,
 ]
 
 
