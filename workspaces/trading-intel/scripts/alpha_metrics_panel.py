@@ -119,6 +119,7 @@ def section_lifecycle(conn) -> dict:
     states = {r[0]: r[1] for r in conn.execute("SELECT state, COUNT(*) FROM hypotheses GROUP BY state")}
     lanes = {}
     for lane, trig in (("stop_exits", "stop_rule_enforcer_v1"),
+                       ("soft_stop_trims", "stop_rule_soft_enforcer_v1"),
                        ("horizon_exits", "horizon_enforcer_v1"),
                        ("swap_exits", "swap_rotation")):
         row = conn.execute(
