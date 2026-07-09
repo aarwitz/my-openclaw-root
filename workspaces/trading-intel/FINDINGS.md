@@ -61,6 +61,27 @@ incident postmortems) need no tag.
   (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
+## 2026-07-09 (pm) — options flow is dead: the audition signal did not survive four years
+
+- **The full test killed it.** opt_net_prem's audition IC of 0.059 (63 names ×
+  1yr, 10 rebalances) collapsed to **0.017 (t=1.19)** on the real panel — 592
+  names × 4 years × 46 monthly rebalances from Massive's OPRA flat files. A
+  final pre-registered round (flow-change, 5d horizon variants) also produced
+  nothing: **0 of 7 constructions survive BH-FDR at q=0.10.**
+- Daily option aggregates (price/volume only — no IV, greeks, or OI) carry no
+  exploitable cross-sectional signal at our 5–21d horizons. Richer microstructure
+  (IV skew, term structure) would need quotes-level data at ~TB scale — not this
+  tier, not this desk, not now.
+- **Process note: this is the system working, twice over.** The audition caught
+  x_vol_z's mirage at 63 names; the full test caught opt_net_prem's at 4 years.
+  Pre-registered bars + staged spending meant the total cost of a definitive
+  "no" was one month of Massive Options Developer ($79) — recommend canceling
+  the add-on; the 563k-row panel stays banked in options_daily for any future
+  re-test. The forward feed was removed from the chain the same day it was
+  added (dead data is clutter, and a canceled add-on would 403 it nightly).
+- v8 candidate priority reverts to: per-liquidity-tier X attention, Google
+  Trends (free), and the pt_* family interactions.
+
 ## 2026-07-09 — dress rehearsal: the July 14 exam works end-to-end, and previews a hard lesson
 
 - **Rehearsed Monday's grading on a scratch ledger with predictions time-shifted

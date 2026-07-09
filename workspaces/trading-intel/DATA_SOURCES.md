@@ -53,6 +53,8 @@ entries append to the Scout log at the bottom.
 **2026-07-04 (operator-session audition, pre-cron):** ThetaData free-tier options
 audition COMPLETE — 63 names × 1yr EOD aggregates, $0 spent. `opt_net_prem` pooled
 IC 0.059 (passes the ≥0.03 audition bar); `opt_pcr_vol` 0.018; `opt_vol_z` 0.001
-(the 20-name preview's −0.11 was small-sample noise). Verdict: AUDITION PASSED →
-recommend Massive Options Developer $79/mo (4yr history) for the full FDR backtest.
-Awaiting operator purchase decision. Raw aggregates banked in options_daily.
+(the 20-name preview's −0.11 was small-sample noise). Verdict: AUDITION PASSED → operator
+purchased Massive Options Developer 2026-07-09; 4yr flat-file backfill same day
+(563,543 rows, 592 names, 2022-07-11..2026-07-08). **FULL TEST FAILED: 0 of 7
+constructions survive BH-FDR q=0.10** (best: opt_net_prem IC 0.017, t=1.19,
+46 rebalances). Family KILLED; recommend canceling the add-on. Panel banked.
