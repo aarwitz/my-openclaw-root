@@ -1,426 +1,426 @@
 {
- "version": 1,
- "jobs": [
-  {
-   "id": "190bbb72-88e6-4541-9601-25c37667a541",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-pre-market-0900-et",
-   "description": "Weekday pre-market decision pass for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450108670,
-   "schedule": {
-    "kind": "cron",
-    "expr": "0 9 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "3f5c5b99-b26c-48a1-8504-3b4180431bf3",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-open-reaction-0930-et",
-   "description": "Weekday market-open reaction pass for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450124665,
-   "schedule": {
-    "kind": "cron",
-    "expr": "30 9 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "89e8f183-4903-446c-bfb4-41d0e5edb832",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-confirmation-1100-et",
-   "description": "Weekday confirmation or invalidation pass for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450131990,
-   "schedule": {
-    "kind": "cron",
-    "expr": "0 11 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "a373e5f7-311c-4c02-87a1-8ce7c159226d",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-rotation-1330-et",
-   "description": "Weekday replacement or rotation pass for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450137308,
-   "schedule": {
-    "kind": "cron",
-    "expr": "30 13 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "e0e3a92f-a1c1-49fe-8cff-58d328588501",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-close-risk-1530-et",
-   "description": "Weekday close-risk pass for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450142115,
-   "schedule": {
-    "kind": "cron",
-    "expr": "30 15 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "03947e72-794b-4096-9c7b-0f13261c0e03",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-weekly-audit-0800-et",
-   "description": "Weekly Sunday audit-style portfolio summary for AutoTrade.",
-   "enabled": true,
-   "createdAtMs": 1780450146616,
-   "schedule": {
-    "kind": "cron",
-    "expr": "0 8 * * 0",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-WEEKLY-V2] You are AutoTrade running the Sunday strategic review. This pass is about resetting the system for the upcoming trading week.\n\nStep 1: execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture snapshot JSON.\n\nStep 2: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Run the weekly retrospective. Resolve any stragglers. Compute hit-rate, average grade, and slippage for the past 5 trading days. Update regime_rules if a stat-sig pattern emerged. Return the retrospective as a 6-line summary.' Then `wait`.\n\nStep 3: spawn `researcher` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Source 10 fresh hypotheses for the upcoming week. Cover at least 3 distinct catalyst types and at least 6 tickers. INSERT into hypotheses with state=raw, created_by=researcher. Each must cite a primary source in hypothesis_evidence.' Then `wait`.\n\nStep 4: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score all raw hypotheses; refresh regime; return scored ids.' Then `wait`.\n\nStep 5: spawn `developer` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Audit the deterministic layer: any stale data feeds, missing skills, schema drift, or rule-engine mismatches. Open priority-queue rows for each. Return a one-line verdict per subsystem.' Then `wait`.\n\nStep 6: re-run deterministic core; re-read snapshot.\n\nStep 7: Telegram narration on `druck` (cron handles routing). One message, 5-7 short lines, in this contract:\n  - Headline: week-just-ended hit-rate + grade + S&P comparison.\n  - Lessons learned (one line) from archivist.\n  - New hypotheses sourced (count + top 3 tickers).\n  - Regime call for the upcoming week (set by quant).\n  - Developer's verdict on system health.\n  - One concrete focus area for the week.\n  Forbidden: 'no work needed', empty filler.\n\nStep 8: append any new priority-queue rows via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "to": "telegram:6043080629",
-    "channel": "telegram",
-    "accountId": "druck"
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "8469d34c-c018-4791-9088-16a5a97d07bc",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "overseer-daily-learning-1630-et",
-   "description": "Daily post-close world-model learning pass (debrief + calibrate); runs trade or no-trade.",
-   "enabled": true,
-   "createdAtMs": 1780761895374,
-   "schedule": {
-    "kind": "cron",
-    "expr": "30 16 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-LEARNING-V1] You are AutoTrade (agent id `overseer`) running the daily post-close LEARNING pass for the world model.\n\nDETERMINISTIC OWNERSHIP: the learning MATH now runs at 16:12 ET via host-cron `learning-chain.sh` (feature_store refresh-live, grade_outcomes, calibrate, compute_attribution, extract_patterns) \u2014 zero Codex, always. Do NOT run those scripts yourself; READ their results from the DB. Your role is LLM-only: research what moved, write the debrief narrative, emit fresh predictions, surface/review rule_proposals, and narrate to Telegram. This pass runs EVERY weekday whether or not we traded; its job is to capture what moved and why, fold realized outcomes into the probabilistic world model, and surface structural rule_proposals for human approval.\n\nStep 1 (deterministic core): execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the snapshot JSON (regime, counts, portfolio day P&L). The deterministic core now also refreshes the equity-vs-SPY scoreboard (`benchmarks`) and the macro calendar (`macro_releases`): note today's alpha-vs-SPY and whether any macro release printed a surprise. Then run two deterministic maintenance commands and capture their one-line output: (feature_store refresh-live ALREADY ran via host-cron learning-chain.sh \u2014 skip) (refresh the point-in-time feature store with fresh prices for the live universe), and (grade_outcomes ALREADY ran via host-cron learning-chain.sh \u2014 skip; read resolved_state from the DB) (grade any matured predictions from realized market-relative returns \u2014 this sets hypotheses.resolved_state so the calibrate step in Step 4 folds outcomes into the mechanism posteriors).\n\nStep 2 (what moved + why): spawn `researcher` with prompt 'Using PRIMARY sources only, identify the single most important market-moving development today and the mechanism(s) it exercised. FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py pull-actuals` (idempotent) and check whether a scheduled release surprised, and `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<todays catalyst>\"` for the closest historical analogue. Return: a one-line headline; catalyst_class (macro_release|geopolitical|earnings|policy|liquidity|technical|other); a surprise-vs-expectation note; 2-5 primary source URLs; and for each currently-seeded mechanism clearly exercised, its id and outcome (hit|miss|partial). List seeded mechanisms via `SELECT id,name,direction,status FROM mechanisms` against ~/.openclaw/state/trading-intel.sqlite.' Then `wait`.\n\nStep 3 (quantify): spawn `quant` with prompt 'For any hypotheses graded today (hypotheses.resolved_state set), confirm their linked predictions are ready to resolve. If new hypotheses are ready, emit fresh predictions via `python3 ~/.openclaw/workspaces/quant/scripts/predict.py` with explicit --link mechanism mappings. Return the prediction ids touched.' Then `wait`.\n\nStep 4 (capture + learn): spawn `archivist` with prompt 'Run the daily world-model update. (a) Write the debrief: `python3 ~/.openclaw/workspaces/archivist/scripts/market_debrief.py --headline \"<headline>\" --catalyst-class <class> --surprise \"<note>\" --lesson \"<=800 char lesson>\" --mechanisms <id:outcome,...> --sources <json array>`. (b) Run the learning engine: (calibrate ALREADY ran via host-cron learning-chain.sh \u2014 skip; read resolved predictions / moved posteriors / drafted rule_proposals from the DB) to resolve predictions (Brier), recompute mechanism Beta posteriors with half-life decay, and draft gated rule_proposals. (c) If today produced a clean, instructive episode worth keeping as durable ground truth, note it for addition to the episode library (workspaces/trading-intel/scripts/seed_episodes.py) with real ticker/date, mechanism, correct_action, and lesson. Return: observations emitted, predictions resolved, mechanisms whose posterior moved, and proposals drafted (ids + targets).' Then `wait`.\n\nStep 5 (narrate): send ONE Telegram message on `druck` (cron handles routing), 5-7 short lines: (1) what moved + catalyst; (2) our exposure alignment + day P&L + alpha vs SPY; (3) which mechanisms were exercised and how their posterior shifted; (4) predictions resolved + running Brier; (5) any rule_proposals AWAITING APPROVAL (id + target + one-line rationale); (6) one-line lesson.\n\nHard rules: the math is deterministic (scripts own it); the LLM authors prose/judgement only. Never approve your own rule_proposals; structural changes are human-gated. Never restart the gateway.\n\nFALSIFIER UPKEEP (D57): for every ACTIVE hypothesis with an open position, review its falsifier_signals rows against today's evidence: flip current_status to 'broken' when the falsifying condition has occurred (audited UPDATE), 'warning' when close. For active-position hypotheses with NO falsifiers, author 1-2 concrete falsifier_signals rows (condition must be checkable from our data). The deterministic pass exits positions whose falsifiers you mark broken \u2014 your status flips have teeth now.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "accountId": "druck",
-    "bestEffort": true
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "45abb61c-e5b7-47fa-bf0f-9fdba5237e5c",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "mechanism-proposer-daily",
-   "description": "Weekly: propose new world-model mechanisms, each validated OOS before proposing (human-gated).",
-   "enabled": true,
-   "createdAtMs": 1781813824520,
-   "schedule": {
-    "kind": "cron",
-    "expr": "7 7 * * *",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "accountId": "druck",
-    "bestEffort": true
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "8fd4070a-2302-415a-9ce6-8229faa0e7df",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "catalyst-research-0830-et",
-   "description": "Pre-open: fuse quant world model + live news; LLM judges over/under-reaction -> hypotheses.",
-   "enabled": true,
-   "createdAtMs": 1781816184031,
-   "schedule": {
-    "kind": "cron",
-    "expr": "30 8 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "accountId": "druck",
-    "bestEffort": true
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "job-6e304d950ec54097",
-   "agentId": "overseer",
-   "sessionKey": "agent:overseer:telegram:direct:6043080629",
-   "name": "pre-market-reconcile-0845-et",
-   "description": "Pre-market reconcile broker truth into the DB (sync overnight fills/closes) BEFORE the 9:00 pass, so sizing/risk see accurate exposure.",
-   "enabled": true,
-   "createdAtMs": 1782129889261,
-   "schedule": {
-    "kind": "cron",
-    "expr": "45 8 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order \u2014 execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 \u2014 the cron delivery handles routing). Write like a portfolio manager texting their principal \u2014 plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 \u2014 the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER \u2014 translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off \u2014 new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass \u2014 book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
-    "timeoutSeconds": 1800
-   },
-   "delivery": {
-    "mode": "announce",
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "accountId": "druck",
-    "bestEffort": true
-   },
-   "failureAlert": {
-    "after": 1,
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "cooldownMs": 3600000,
-    "includeSkipped": false,
-    "mode": "announce",
-    "accountId": "druck"
-   },
-   "state": {}
-  },
-  {
-   "id": "22db7620-ac67-4942-93d4-7f6c31c5945d",
-   "agentId": "researcher",
-   "sessionKey": "agent:researcher:cron:data-scout",
-   "name": "data-scout-monthly",
-   "description": "Monthly: audit dataset freshness/decay + scout new alt-data sources (proposals only, operator-gated).",
-   "enabled": true,
-   "schedule": {
-    "kind": "cron",
-    "expr": "15 10 1 * *",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:researcher:cron:data-scout",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[DATA-SCOUT] You are the researcher agent for the AutoTrade desk. Monthly data-quality + new-source scouting pass. The desk's edge is its dataset; your job is to keep it the best available for predicting US equities across horizons (21d core, quarterly, yearly).\n\nStep 1 \u2014 audit what we have (deterministic reads, no changes):\n  - Read ~/.openclaw/workspaces/trading-intel/DATA_SOURCES.md (the catalog) and FINDINGS.md.\n  - Check intake freshness per source: python3 ~/.openclaw/scripts/system-health-sweep.py (data_freshness finding).\n  - Check feature decay: read the latest logs/ml-ranker-*.log single_feature_ics blocks; flag any previously top-10 feature whose coverage-era IC dropped by >50% vs what FINDINGS records.\n\nStep 2 \u2014 scout new sources (web research):\n  Search for alternative-data sources for US equity prediction that we do NOT have (see catalog). Evaluate each candidate on: (a) point-in-time backtestable history available? (b) plausible mechanism for 21d-quarterly horizons, (c) cost tier, (d) API quality. Categories to check each month: options flow/positioning, short interest (daily), congressional/insider trading disclosures, Reddit/retail sentiment, web/app traffic, job postings, satellite/geolocation, credit-card panels, shipping/logistics, weather/commodities, plus anything genuinely new this month.\n\nStep 3 \u2014 report (writes):\n  - Append a dated 'Scout log' entry to DATA_SOURCES.md: sources checked, verdicts (ADD-CANDIDATE / SKIP + one-line why), any freshness/decay anomalies found.\n  - Telegram (druck bot) a <=10-line summary: top 1-2 ADD-CANDIDATEs with cost + expected value, any decaying features, one-line dataset health verdict.\n\nHARD RULES: You change NOTHING about live pipelines. No new connectors, no purchases, no credentials. ADD-CANDIDATEs are proposals for the operator \u2014 include cost so Aaron can decide. Every claim about a source must come from its actual docs/pricing page (cite URLs)."
-   },
-   "state": {}
-  },
-  {
-   "id": "9edd981b-78c1-44c9-bc01-11288cc3986e",
-   "agentId": "dwight",
-   "sessionKey": "agent:dwight:cron:org-owner",
-   "name": "org-owner-daily",
-   "description": "Daily: keep every product's backlog ready and dispatch the coding lane (cap 2/day, PRs only).",
-   "enabled": true,
-   "schedule": {
-    "kind": "cron",
-    "expr": "0 11 * * 1-5",
-    "tz": "America/New_York"
-   },
-   "sessionTarget": "session:agent:dwight:cron:org-owner",
-   "wakeMode": "now",
-   "payload": {
-    "kind": "agentTurn",
-    "message": "[ORG-OWNER] You are dwight, product/engineering owner for the autonomous dev org. Daily pass over ~/.openclaw/products.json \u2014 keep every active product moving. TM base: https://tm.lidisolutions.ai (bearer: credentials/task-manager-agent.json session_token; User-Agent header required).\n\nFor EACH product with status=active:\n1. BACKLOG HEALTH: list TM issues where repo_slug matches the product's repos. Count: ready-to-code (assignee + repo_slug + acceptance criteria + status to_do), in-flight (in_progress/in_review), stale (in_progress >7d with no comment).\n2. FEED THE FUNNEL: if a product has ZERO ready-to-code issues, inspect the repo (README/roadmap/TODOs/open TM comments/recent commits) and file exactly ONE well-formed issue: concrete scope (<=1 day of work), repo_slug set, branch name proposed, 2-4 testable acceptance criteria, assigned per the product's tm_assignee. Quality bar: an agent must be able to complete it without asking questions. NEVER assign to Aaron. NEVER file busywork \u2014 if a product genuinely has nothing worth doing, say so in the summary instead.\n3. DISPATCH: for ready-to-code issues, launch the coding lane: `OPENCLAW_RUN_WITH_TRACE=1 ~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --execute`. HARD CAP: at most 2 dispatches per daily pass across all products (POC throughput). Record each dispatch result as a TM comment (the launcher does this; verify it happened).\n4. NUDGE STALE: for stale in-flight issues, post one TM comment asking for status; if stale >14d, flip back to to_do with a note.\n\nThen send ONE Telegram summary (<=12 lines): per-product one-liner (ready/in-flight/dispatched/filed), plus anything needing Aaron (max 3 bullets).\n\nHARD RULES: no auto-merge, no deploys, no pushes to main/master \u2014 PRs only (existing contract). Do not touch the AutoTrade trading logic (rule_proposals only). Do not create repos or accounts."
-   },
-   "delivery": {
-    "mode": "announce",
-    "channel": "telegram",
-    "to": "telegram:6043080629",
-    "accountId": "dwight",
-    "bestEffort": true
-   },
-   "state": {}
-  }
- ]
+  "version": 1,
+  "jobs": [
+    {
+      "id": "190bbb72-88e6-4541-9601-25c37667a541",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-pre-market-0900-et",
+      "description": "Weekday pre-market decision pass for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450108670,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 9 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "3f5c5b99-b26c-48a1-8504-3b4180431bf3",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-open-reaction-0930-et",
+      "description": "Weekday market-open reaction pass for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450124665,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 9 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "89e8f183-4903-446c-bfb4-41d0e5edb832",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-confirmation-1100-et",
+      "description": "Weekday confirmation or invalidation pass for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450131990,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 11 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "a373e5f7-311c-4c02-87a1-8ce7c159226d",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-rotation-1330-et",
+      "description": "Weekday replacement or rotation pass for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450137308,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 13 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "e0e3a92f-a1c1-49fe-8cff-58d328588501",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-close-risk-1530-et",
+      "description": "Weekday close-risk pass for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450142115,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 15 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "03947e72-794b-4096-9c7b-0f13261c0e03",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-weekly-audit-0800-et",
+      "description": "Weekly Sunday audit-style portfolio summary for AutoTrade.",
+      "enabled": true,
+      "createdAtMs": 1780450146616,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 8 * * 0",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-WEEKLY-V2] You are AutoTrade running the Sunday strategic review. This pass is about resetting the system for the upcoming trading week.\n\nStep 1: execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture snapshot JSON.\n\nStep 2: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Run the weekly retrospective. Resolve any stragglers. Compute hit-rate, average grade, and slippage for the past 5 trading days. Update regime_rules if a stat-sig pattern emerged. Return the retrospective as a 6-line summary.' Then `wait`.\n\nStep 3: spawn `researcher` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Source 10 fresh hypotheses for the upcoming week. Cover at least 3 distinct catalyst types and at least 6 tickers. INSERT into hypotheses with state=raw, created_by=researcher. Each must cite a primary source in hypothesis_evidence.' Then `wait`.\n\nStep 4: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score all raw hypotheses; refresh regime; return scored ids.' Then `wait`.\n\nStep 5: spawn `developer` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Audit the deterministic layer: any stale data feeds, missing skills, schema drift, or rule-engine mismatches. Open priority-queue rows for each. Return a one-line verdict per subsystem.' Then `wait`.\n\nStep 6: re-run deterministic core; re-read snapshot.\n\nStep 7: Telegram narration on `druck` (cron handles routing). One message, 5-7 short lines, in this contract:\n  - Headline: week-just-ended hit-rate + grade + S&P comparison.\n  - Lessons learned (one line) from archivist.\n  - New hypotheses sourced (count + top 3 tickers).\n  - Regime call for the upcoming week (set by quant).\n  - Developer's verdict on system health.\n  - One concrete focus area for the week.\n  Forbidden: 'no work needed', empty filler.\n\nStep 8: append any new priority-queue rows via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "to": "telegram:6043080629",
+        "channel": "telegram",
+        "accountId": "druck"
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "8469d34c-c018-4791-9088-16a5a97d07bc",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "overseer-daily-learning-1630-et",
+      "description": "Daily post-close world-model learning pass (debrief + calibrate); runs trade or no-trade.",
+      "enabled": true,
+      "createdAtMs": 1780761895374,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 16 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-LEARNING-V1] You are AutoTrade (agent id `overseer`) running the daily post-close LEARNING pass for the world model.\n\nDETERMINISTIC OWNERSHIP: the learning MATH now runs at 16:12 ET via host-cron `learning-chain.sh` (feature_store refresh-live, grade_outcomes, calibrate, compute_attribution, extract_patterns) — zero Codex, always. Do NOT run those scripts yourself; READ their results from the DB. Your role is LLM-only: research what moved, write the debrief narrative, emit fresh predictions, surface/review rule_proposals, and narrate to Telegram. This pass runs EVERY weekday whether or not we traded; its job is to capture what moved and why, fold realized outcomes into the probabilistic world model, and surface structural rule_proposals for human approval.\n\nStep 1 (deterministic core): execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the snapshot JSON (regime, counts, portfolio day P&L). The deterministic core now also refreshes the equity-vs-SPY scoreboard (`benchmarks`) and the macro calendar (`macro_releases`): note today's alpha-vs-SPY and whether any macro release printed a surprise. Then run two deterministic maintenance commands and capture their one-line output: (feature_store refresh-live ALREADY ran via host-cron learning-chain.sh — skip) (refresh the point-in-time feature store with fresh prices for the live universe), and (grade_outcomes ALREADY ran via host-cron learning-chain.sh — skip; read resolved_state from the DB) (grade any matured predictions from realized market-relative returns — this sets hypotheses.resolved_state so the calibrate step in Step 4 folds outcomes into the mechanism posteriors).\n\nStep 2 (what moved + why): spawn `researcher` with prompt 'Using PRIMARY sources only, identify the single most important market-moving development today and the mechanism(s) it exercised. FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py pull-actuals` (idempotent) and check whether a scheduled release surprised, and `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<todays catalyst>\"` for the closest historical analogue. Return: a one-line headline; catalyst_class (macro_release|geopolitical|earnings|policy|liquidity|technical|other); a surprise-vs-expectation note; 2-5 primary source URLs; and for each currently-seeded mechanism clearly exercised, its id and outcome (hit|miss|partial). List seeded mechanisms via `SELECT id,name,direction,status FROM mechanisms` against ~/.openclaw/state/trading-intel.sqlite.' Then `wait`.\n\nStep 3 (quantify): spawn `quant` with prompt 'For any hypotheses graded today (hypotheses.resolved_state set), confirm their linked predictions are ready to resolve. If new hypotheses are ready, emit fresh predictions via `python3 ~/.openclaw/workspaces/quant/scripts/predict.py` with explicit --link mechanism mappings. Return the prediction ids touched.' Then `wait`.\n\nStep 4 (capture + learn): spawn `archivist` with prompt 'Run the daily world-model update. (a) Write the debrief: `python3 ~/.openclaw/workspaces/archivist/scripts/market_debrief.py --headline \"<headline>\" --catalyst-class <class> --surprise \"<note>\" --lesson \"<=800 char lesson>\" --mechanisms <id:outcome,...> --sources <json array>`. (b) Run the learning engine: (calibrate ALREADY ran via host-cron learning-chain.sh — skip; read resolved predictions / moved posteriors / drafted rule_proposals from the DB) to resolve predictions (Brier), recompute mechanism Beta posteriors with half-life decay, and draft gated rule_proposals. (c) If today produced a clean, instructive episode worth keeping as durable ground truth, note it for addition to the episode library (workspaces/trading-intel/scripts/seed_episodes.py) with real ticker/date, mechanism, correct_action, and lesson. Return: observations emitted, predictions resolved, mechanisms whose posterior moved, and proposals drafted (ids + targets).' Then `wait`.\n\nStep 5 (narrate): send ONE Telegram message on `druck` (cron handles routing), 5-7 short lines: (1) what moved + catalyst; (2) our exposure alignment + day P&L + alpha vs SPY; (3) which mechanisms were exercised and how their posterior shifted; (4) predictions resolved + running Brier; (5) any rule_proposals AWAITING APPROVAL (id + target + one-line rationale); (6) one-line lesson.\n\nHard rules: the math is deterministic (scripts own it); the LLM authors prose/judgement only. Never approve your own rule_proposals; structural changes are human-gated. Never restart the gateway.\n\nFALSIFIER UPKEEP (D57): for every ACTIVE hypothesis with an open position, review its falsifier_signals rows against today's evidence: flip current_status to 'broken' when the falsifying condition has occurred (audited UPDATE), 'warning' when close. For active-position hypotheses with NO falsifiers, author 1-2 concrete falsifier_signals rows (condition must be checkable from our data). The deterministic pass exits positions whose falsifiers you mark broken — your status flips have teeth now.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "druck",
+        "bestEffort": true
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "45abb61c-e5b7-47fa-bf0f-9fdba5237e5c",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "mechanism-proposer-daily",
+      "description": "Weekly: propose new world-model mechanisms, each validated OOS before proposing (human-gated).",
+      "enabled": true,
+      "createdAtMs": 1781813824520,
+      "schedule": {
+        "kind": "cron",
+        "expr": "7 7 * * *",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "druck",
+        "bestEffort": true
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "8fd4070a-2302-415a-9ce6-8229faa0e7df",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "catalyst-research-0830-et",
+      "description": "Pre-open: fuse quant world model + live news; LLM judges over/under-reaction -> hypotheses.",
+      "enabled": true,
+      "createdAtMs": 1781816184031,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 8 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "druck",
+        "bestEffort": true
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "job-6e304d950ec54097",
+      "agentId": "overseer",
+      "sessionKey": "agent:overseer:telegram:direct:6043080629",
+      "name": "pre-market-reconcile-0845-et",
+      "description": "Pre-market reconcile broker truth into the DB (sync overnight fills/closes) BEFORE the 9:00 pass, so sizing/risk see accurate exposure.",
+      "enabled": true,
+      "createdAtMs": 1782129889261,
+      "schedule": {
+        "kind": "cron",
+        "expr": "45 8 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:overseer:telegram:direct:6043080629",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.\n\nStep 1 (deterministic core, mandatory):\n  execute `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` and capture the stdout JSON. This runs classify_regime -> score_hypotheses -> gate_evaluator -> execute_intent -> reconcile -> snapshot -> pipeline_health -> app_snapshot. Read counts.hypotheses, counts.intents, counts.orders, regime.current, pipeline_health.color from the snapshot.\n\nStep 2 (inventory the canonical DB):\n  Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to get: hypotheses_total, hypotheses_by_state, oldest_unscored_age_min, last_researcher_pass_age_min, intents_pending, intents_ready_to_submit, orders_open, last_archivist_pass_age_min. If that script doesn't exist yet, run an equivalent inline Python query against `~/.openclaw/state/trading-intel.sqlite` and emit the same shape.\n\nStep 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):\n  3a. If hypotheses_total < 5 OR last_researcher_pass_age_min > 360: spawn `researcher` with the prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. FIRST check what is coming and what we have learned: run `python3 ~/.openclaw/workspaces/trading-intel/scripts/macro_calendar.py upcoming --days 10` to see scheduled high-impact macro releases (pre-position around them), and for each theme you pursue run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --query \"<your thesis>\" --tickers <T1,T2> --no-controls` to pull analogous PAST episodes (note their correct_action and naive_trap). THEN source 5 fresh, distinct, primary-source-grounded equity hypotheses (US large/mid-cap; mix of catalysts: earnings, guidance revisions, macro print, sector rotation, regulatory). For each, INSERT into hypotheses with state=raw, created_by=researcher, rationale_concise<=500 chars. Add at least one hypothesis_evidence row with provenance for each. Return the inserted hypothesis_ids in your final message.' Then `wait` for completion.\n  3b. If any hypotheses are in state=raw OR oldest_unscored_age_min>120: spawn `quant` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Score every hypothesis in state=raw and advance it to state=scored. Refresh the regime row if last classify is >120min old. Return scored ids and quant_scores.' Then `wait`.\n  3c. If any hypotheses in state=scored with quant_score>=60: spawn `critic` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Stress-test every scored hypothesis with quant_score>=60. Record critic_reviews. Move passing ones to state=ready, failing ones to state=challenged with rationale.' Then `wait`.\n  3d. If any hypotheses in state=ready: spawn `trader` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. For each ready hypothesis, FIRST run `python3 ~/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py --tickers <tickers> --query \"<thesis>\"` and let the most relevant episode's correct_action / naive_trap inform your conviction and sizing (especially: do not take the naive_trap side). THEN author a trade_intent for each ready hypothesis. One intent per hypothesis. Use Alpaca paper account; respect cash + position limits. Return intent_ids and target tickers.' Then `wait`.\n  3e. If any trade_intents exist with status=pending and gates green: spawn `executor` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Submit pending intents whose gates are green to Alpaca paper. Reconcile fills. Return order_ids and fill status.' Then `wait`.\n  3f. If any hypotheses were closed/exited this pass OR last_archivist_pass_age_min > 1440: spawn `archivist` with prompt 'In the spawned session, act directly as the named stage agent for this task. Do the work yourself in that session; do not try to spawn or delegate another agent, and do not reinterpret the request as an overseer orchestration task. Resolve any closed hypotheses; write archivist_grade and lessons_learned. Update regime_rules if a pattern is statistically meaningful.' Fire-and-forget (no wait required).\n\nStep 4 (re-run the deterministic core a second time) to capture any new state, then re-read snapshot counts.\n\nStep 5 (Telegram narration on account `druck`, target topic 641 in group -1003237263898 OR DM 6043080629 — the cron delivery handles routing). Write like a portfolio manager texting their principal — plain English, confident, zero system jargon. ONE message. Rules:\n  - Lead with what CHANGED and why it matters in money terms: 'Bought 7 SCHW at $101.30 and 6 STT at $176.49 — the brokerage theses cleared risk review.' Tickers and dollars YES; intent ids, order UUIDs, audit ids, table names, and state-machine words NEVER — translate to plain words ('cleared risk review', 'filled', 'blocked').\n  - Mention the regime ONLY when it changed since the last message, and say what it means for the book: 'Regime flipped to risk-off — new buying pauses.'\n  - Never restate standing state (open orders, approved-but-unfilled names) already reported and unchanged. Never list the same names twice in one day just to have content.\n  - Quiet pass = ONE short sentence ('Quiet pass — book unchanged, next look 13:30 ET.'). That is a complete, acceptable message; do not manufacture activity to avoid it.\n  - End with a time anchor only when something specific is expected ('SCHW should fill at the open').\n  - <=3 short paragraphs, no markdown tables, no fenced code.\n\nStep 6 (priority queue): if you observed any issue worth a follow-up (missing skill, broker error, stale data feed, drift), append a row via `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_append.py --by overseer --category <cat> --title <t> --details <d> --priority <1-5>`.",
+        "timeoutSeconds": 1800
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "druck",
+        "bestEffort": true
+      },
+      "failureAlert": {
+        "after": 1,
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "cooldownMs": 3600000,
+        "includeSkipped": false,
+        "mode": "announce",
+        "accountId": "druck"
+      },
+      "state": {}
+    },
+    {
+      "id": "22db7620-ac67-4942-93d4-7f6c31c5945d",
+      "agentId": "researcher",
+      "sessionKey": "agent:researcher:cron:data-scout",
+      "name": "data-scout-monthly",
+      "description": "Monthly: audit dataset freshness/decay + scout new alt-data sources (proposals only, operator-gated).",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "15 10 1 * *",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:researcher:cron:data-scout",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[DATA-SCOUT] You are the researcher agent for the AutoTrade desk. Monthly data-quality + new-source scouting pass. The desk's edge is its dataset; your job is to keep it the best available for predicting US equities across horizons (21d core, quarterly, yearly).\n\nStep 1 — audit what we have (deterministic reads, no changes):\n  - Read ~/.openclaw/workspaces/trading-intel/DATA_SOURCES.md (the catalog) and FINDINGS.md.\n  - Check intake freshness per source: python3 ~/.openclaw/scripts/system-health-sweep.py (data_freshness finding).\n  - Check feature decay: read the latest logs/ml-ranker-*.log single_feature_ics blocks; flag any previously top-10 feature whose coverage-era IC dropped by >50% vs what FINDINGS records.\n\nStep 2 — scout new sources (web research):\n  Search for alternative-data sources for US equity prediction that we do NOT have (see catalog). Evaluate each candidate on: (a) point-in-time backtestable history available? (b) plausible mechanism for 21d-quarterly horizons, (c) cost tier, (d) API quality. Categories to check each month: options flow/positioning, short interest (daily), congressional/insider trading disclosures, Reddit/retail sentiment, web/app traffic, job postings, satellite/geolocation, credit-card panels, shipping/logistics, weather/commodities, plus anything genuinely new this month.\n\nStep 3 — report (writes):\n  - Append a dated 'Scout log' entry to DATA_SOURCES.md: sources checked, verdicts (ADD-CANDIDATE / SKIP + one-line why), any freshness/decay anomalies found.\n  - Telegram (druck bot) a <=10-line summary: top 1-2 ADD-CANDIDATEs with cost + expected value, any decaying features, one-line dataset health verdict.\n\nHARD RULES: You change NOTHING about live pipelines. No new connectors, no purchases, no credentials. ADD-CANDIDATEs are proposals for the operator — include cost so Aaron can decide. Every claim about a source must come from its actual docs/pricing page (cite URLs)."
+      },
+      "state": {}
+    },
+    {
+      "id": "9edd981b-78c1-44c9-bc01-11288cc3986e",
+      "agentId": "dwight",
+      "sessionKey": "agent:dwight:cron:org-owner",
+      "name": "org-owner-daily",
+      "description": "Daily: keep every product's backlog ready and dispatch the coding lane (cap 2/day, PRs only).",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 11 * * 1-5",
+        "tz": "America/New_York"
+      },
+      "sessionTarget": "session:agent:dwight:cron:org-owner",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "[ORG-OWNER] You are dwight, product/engineering owner for the autonomous dev org. Daily pass over ~/.openclaw/products.json — keep every active product moving. TM base: https://tm.lidisolutions.ai (bearer: credentials/task-manager-agent.json session_token; User-Agent header required).\n\nFor EACH product with status=active:\n1. BACKLOG HEALTH: list TM issues where repo_slug matches the product's repos. Count: ready-to-code (assignee + repo_slug + acceptance criteria + status to_do), in-flight (in_progress/in_review), stale (in_progress >7d with no comment).\n2. FEED THE FUNNEL: if a product has ZERO ready-to-code issues, inspect the repo (README/roadmap/TODOs/open TM comments/recent commits) and file exactly ONE well-formed issue: concrete scope (<=1 day of work), repo_slug set, branch name proposed, 2-4 testable acceptance criteria, assigned per the product's tm_assignee. Quality bar: an agent must be able to complete it without asking questions. NEVER assign to Aaron. NEVER file busywork — if a product genuinely has nothing worth doing, say so in the summary instead.\n3. DISPATCH: for ready-to-code issues, launch the coding lane: `OPENCLAW_RUN_WITH_TRACE=1 ~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --execute`. HARD CAP: at most 2 dispatches per daily pass across all products (POC throughput). Record each dispatch result as a TM comment (the launcher does this; verify it happened).\n4. NUDGE STALE: for stale in-flight issues, post one TM comment asking for status; if stale >14d, flip back to to_do with a note.\n\nThen send ONE Telegram summary (<=12 lines): per-product one-liner (ready/in-flight/dispatched/filed), plus anything needing Aaron (max 3 bullets).\n\nHARD RULES: no auto-merge, no deploys, no pushes to main/master — PRs only (existing contract). Do not touch the AutoTrade trading logic (rule_proposals only). Do not create repos or accounts."
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "dwight",
+        "bestEffort": true
+      },
+      "state": {}
+    }
+  ]
 }

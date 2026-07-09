@@ -138,17 +138,13 @@ def score_freshness(conn: sqlite3.Connection, hyp_id: str) -> tuple[float, dict[
     age_h = _hours_old(latest)
     if age_h is None:
         return 30.0, {"latest_evidence_at": None, "note": "no evidence timestamps"}
-    if age_h <= 24:
-        score = 100.0
-    elif age_h <= 72:
-        score = 80.0
-    elif age_h <= 24 * 7:
-        score = 60.0
-    elif age_h <= 24 * 30:
-        score = 40.0
-    else:
-        score = 20.0
-    return score, {"latest_evidence_age_hours": round(age_h, 1)}
+    # Continuous decay (D57): the 5-step buckets collapsed every same-day
+    # thesis to an identical sub-score, and quant_score stopped discriminating
+    # (modal 70.7 across 41 of 125 hypotheses in the Jul-9 audit). Half-life
+    # ~66h: 100 at 0h, ~78 at 24h, ~47 at 72h, ~17 at 7d, floor 10.
+    import math as _math
+    score = max(10.0, 100.0 * _math.exp(-age_h / 96.0))
+    return round(score, 2), {"latest_evidence_age_hours": round(age_h, 1)}
 
 
 def score_catalyst_proximity(conn: sqlite3.Connection, hyp_id: str) -> tuple[float, dict[str, Any]]:
@@ -168,14 +164,10 @@ def score_catalyst_proximity(conn: sqlite3.Connection, hyp_id: str) -> tuple[flo
     if days_to_event is None:
         return 50.0, {"event_date": event, "note": "unparseable"}
     if days_to_event < 0:
-        return 30.0, {"event_date": event, "days_to_event": days_to_event}
-    if days_to_event <= 3:
-        return 100.0, {"event_date": event, "days_to_event": days_to_event}
-    if days_to_event <= 14:
-        return 85.0, {"event_date": event, "days_to_event": days_to_event}
-    if days_to_event <= 45:
-        return 65.0, {"event_date": event, "days_to_event": days_to_event}
-    return 45.0, {"event_date": event, "days_to_event": days_to_event}
+        # stale catalyst: decay further the longer past it is
+        return max(20.0, 30.0 + days_to_event), {"event_date": event, "days_to_event": days_to_event}
+    # continuous: 100 at 0d -> ~45 at 45d, floor 40 (D57 discrimination fix)
+    return round(max(40.0, 100.0 - 1.25 * days_to_event), 2), {"event_date": event, "days_to_event": days_to_event}
 
 
 def _days_until(iso: str) -> int | None:

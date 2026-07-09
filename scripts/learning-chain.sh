@@ -70,6 +70,7 @@ step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
 step "sim-parity"          "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
+step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
 step "extract_patterns"    "$PY" "$AR/extract_patterns.py"
 log "===== learning chain end (failed: ${FAILED:-none}) ====="
@@ -102,5 +103,10 @@ if [[ -n "$FAILED" ]]; then
   fi
   exit 1
 fi
-tg silent "🧪 Daily learning chain ok — predictions resolved $RES, observations $OBS, rule_proposals $RP, attribution $ATTR, patterns $PAT"
+EXAM=$("$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)" 2>/dev/null | grep '^SUMMARY:' | head -1)
+if [[ "$EXAM" == *graded* ]]; then
+  tg notify "🎓 ${EXAM#SUMMARY: } — full card in learning-chain.log"
+else
+  tg silent "🧪 Daily learning chain ok — predictions resolved $RES, observations $OBS, rule_proposals $RP, attribution $ATTR, patterns $PAT"
+fi
 exit 0

@@ -61,6 +61,25 @@ incident postmortems) need no tag.
   (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
+## 2026-07-09 — dress rehearsal: the July 14 exam works end-to-end, and previews a hard lesson
+
+- **Rehearsed Monday's grading on a scratch ledger with predictions time-shifted
+  −7 days**: 77 resolved, 68 hypotheses graded, **159 trade-sourced mechanism
+  observations** (the loop's first ever), 38 mechanisms recomputed, zero crashes.
+  The spine — grade → resolve → observe → recalibrate — is verified working
+  BEFORE exam day. One calibrate API wart found (DB_PATH must be a Path).
+- **Preview of the lesson**: the shifted cohort hit only ~40% (26 correct-right /
+  1 correct-wrong / 41 wrong), Brier 0.2529 ≈ coin-flip (expected: p was pinned
+  at 0.5), and growth/earnings-momentum mechanisms took the heaviest misses
+  (growth_strong 14, revenue_growth×momentum 13, earnings_beat 11). If Monday's
+  real windows look similar, the world model's first act will be marking DOWN
+  the desk's favorite thesis family — which is precisely the point of having it.
+- Also shipped: scoring made continuous (freshness exp-decay, catalyst linear —
+  the 70.7-constant is gone: rescored stdev 4.5), exam_report.py wired into the
+  chain (Monday's verdict arrives as one Telegram line + full card in the log).
+- Note: the GBM ranker stays quarantined from quant_score per D55's earn-trust
+  ledger — discrimination came from real components, not the untrusted model.
+
 ## 2026-07-07 (pm) — the desk declared stops it never enforced, and a mixed-semantics basis column almost made enforcement fire wrong
 
 - **Every intent carries `stop_rule: "-8% from entry"`; nothing enforced it.** Live
