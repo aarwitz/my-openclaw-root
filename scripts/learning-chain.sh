@@ -62,10 +62,11 @@ step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
 # ADVISORY nightly ML rank (P2 prep): builds the live out-of-sample track record
 # in features.sqlite::ml_scores. Nothing trades on this until the human-gated
 # promotion (see docs/06_ALPHA_ENGINE_ROADMAP.md P2).
-# D58: options flow forward-feed — thetadata free tier tops up recent days
-# (resumable) until the Massive flat-file backfill replaces it; keeps
-# options_daily fresh for the eventual opt_net_prem feature family.
-step "options-flow"        "$PY" "$TI/options_audit.py" pull --top-n 64 --months 1
+# D58: options flow forward-feed — Massive OPRA flat file for the prior
+# trading day (590-name universe; superseded the thetadata interim the same
+# day the S3 keys landed). Publishes T+1 early morning; the 16:12 chain pulls
+# yesterday's file.
+step "options-flow"        "$PY" "$TI/options_flow_ingest.py" day "$(date -u -d '-1 day' +%Y-%m-%d)"
 step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
 # Internal paper engine (docs/07 P1, D51): mirror desk fills into the shadow
 # ledger, apply corporate actions (audited), mark EOD equity, parity vs Alpaca.
