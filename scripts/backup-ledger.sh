@@ -50,4 +50,17 @@ print(f"features snapshot ok: {sys.argv[2]}")
 PY
   ls -t features-*.sqlite 2>/dev/null | tail -n +3 | xargs -r rm -f
 fi
+# D57: offsite copy — one disk must never hold the account AND all its backups.
+# mac-dev is a laptop (often asleep): soft-fail, stamp on success, sweep warns
+# when the marker goes >48h stale.
+OFFSITE="taylorolsen-vogt@100.125.133.123"
+NEWEST=$(ls -t "$DST"/trading-intel-*.sqlite | head -1)
+if timeout 120 rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=8" \
+    "$NEWEST" "$OFFSITE:openclaw-backups/ledger/" 2>/dev/null; then
+  touch "$DST/.last-offsite"
+  echo "offsite ok: $(basename "$NEWEST")"
+else
+  echo "offsite SKIPPED (mac unreachable) — sweep will warn at 48h"
+fi
+
 echo "ledger backup complete $STAMP"

@@ -264,7 +264,9 @@ def check_data_freshness():
     # and disseminated ~8 business days after settlement, so up to ~18 calendar
     # days between fresh points is normal. Everything else is daily-cadence
     # (4d tolerates a long holiday weekend).
-    WATCH = {"price": 4, "fmp": 4, "massive": 20, "sector": 4, "news": 4}
+    WATCH = {"price": 4, "fmp": 4, "massive": 20, "sector": 4, "news": 4,
+             # 2026-07-09 audit: these were silently unmonitored
+             "edgar": 35, "llm": 5, "x": 10}
     seen, stale = {}, []
     for src, maxd in rows:
         if src not in WATCH or not maxd:
@@ -406,6 +408,22 @@ def check_jerry_poll():
     return finding("jerry_poll", "ok", f"last {len(recent)} runs: {len(recent) - len(fails)} ok")
 
 
+def check_options_freshness():
+    """options_daily (thetadata audition data) lives in its own table — was 4td
+    stale with no monitor when the 2026-07-09 audit looked."""
+    try:
+        c = sqlite3.connect(f"file:{ROOT}/state/features.sqlite?mode=ro", uri=True, timeout=30)
+        maxd = c.execute("SELECT MAX(date) FROM options_daily").fetchone()[0]
+        c.close()
+    except Exception as e:
+        return finding("options_freshness", "warn", f"options_daily query failed: {e}")
+    if not maxd:
+        return finding("options_freshness", "warn", "options_daily empty")
+    age = (datetime.now(timezone.utc).date() - datetime.strptime(maxd, "%Y-%m-%d").date()).days
+    sev = "warn" if age > 7 else "ok"
+    return finding("options_freshness", sev, f"options_daily max date {maxd} ({age}d old)")
+
+
 def check_ledger_backup():
     """Since D52 the internal ledger IS the brokerage; a stale backup means the
     account has no disaster recovery (D54)."""
@@ -455,11 +473,24 @@ def check_learning_loop():
                    f"no matured-unresolved predictions ({len(rows)} pending, {resolved} resolved lifetime)")
 
 
+def check_offsite_backup():
+    """D57: all backups lived on the live host's own disk. backup-ledger.sh now
+    rsyncs to the mac node and stamps .last-offsite; >48h means one disk again
+    holds the account and all its copies."""
+    marker = f"{ROOT}/backups/ledger/.last-offsite"
+    if not os.path.exists(marker):
+        return finding("offsite_backup", "warn", "no offsite backup has ever succeeded (marker missing)")
+    age_h = (NOW - os.path.getmtime(marker)) / 3600
+    if age_h > 48:
+        return finding("offsite_backup", "warn", f"last offsite backup {age_h:.0f}h ago (mac node unreachable?)")
+    return finding("offsite_backup", "ok", f"offsite copy {age_h:.1f}h old")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
-    check_ledger_backup, check_learning_loop,
+    check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
 ]
 
 
@@ -481,6 +512,15 @@ def main() -> int:
         "escalate": [f for f in findings if f["severity"] != "ok"],
     }
     print(json.dumps(result, indent=2))
+    # Deterministic escalation contract (D57): crit -> exit 2, warn -> exit 1.
+    # Callers (sweep-and-page.sh, learning chain) page on non-zero; before this
+    # the sweep always exited 0 and crit findings reached no one unless an LLM
+    # happened to narrate them.
+    sevs = {f["severity"] for f in findings}
+    if "crit" in sevs:
+        return 2
+    if "warn" in sevs:
+        return 1
     return 0
 
 

@@ -322,7 +322,12 @@ def main(argv: list[str] | None = None) -> int:
                 continue
         mech_ids = links.get(hyp_id)
         if mech_ids is None:
-            mech_ids = [mid for mid, m in mechs.items() if keyword_match(hyp[2], m)]
+            # D57: deterministic three-tier linker (name/feature/class vs thesis +
+            # evidence indicators) — the old prose-only keyword_match linked ~nothing.
+            sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
+            import link_mechanisms as _lm
+            _text = _lm.hypothesis_text(conn, hyp[0], hyp[2])
+            mech_ids = [e["id"] for e in _lm.link(_text, list(mechs.values()))]
         pred = predict_one(conn, hyp, mech_ids, mechs, regime, args.experiment_id, args.dry_run)
         emitted.append(pred)
 

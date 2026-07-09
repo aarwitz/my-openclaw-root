@@ -97,6 +97,8 @@ if [[ "$TRADING_DAY" == "1" ]]; then
   # breaching losers first, then deploy freed capital. (2026-07-07: ORCL sat
   # at -22.6% against a stated -8% stop while the desk kept opening names.)
   run_step "enforce_horizons" 90 python3 workspaces/trader/scripts/enforce_horizons.py
+  # D57: falsifier tripwire — exits positions whose thesis tripwire has fired.
+  run_step "enforce_falsifiers" 60 python3 workspaces/trader/scripts/enforce_falsifiers.py
   run_step "enforce_stops" 90 python3 workspaces/trader/scripts/enforce_stops.py
   run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
   run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed

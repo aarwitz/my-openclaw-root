@@ -45,6 +45,10 @@ log "===== learning chain start (pid $$) ====="
 # the tight 08:52 pre-open refresh stays at 150 (daily bars only change at close).
 # D54: the internal ledger IS the brokerage — back it up before anything else.
 step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
+# D57: money-path CI — the ledger IS the brokerage; its math gets tested nightly.
+step "money-path-tests"    bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/money-path-tests.py"
+step "exec-edgecases"      "$PY" "$TI/test_pipeline_edgecases.py"
+step "risk-opposition"     "$PY" "$TI/test_risk_opposition_sweep.py"
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 # LLM feature factory (P3): type today's news into point-in-time features
 # (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
@@ -90,6 +94,12 @@ IFS='|' read -r RES OBS RP ATTR PAT <<<"$res"
 
 if [[ -n "$FAILED" ]]; then
   tg notify "⚠️ Daily learning chain — FAILED stage(s): ${FAILED}. (resolved=$RES obs=$OBS proposals=$RP). Log: $LOG"
+  # D57: an alert that fails to send is a silent failure of the alerting itself
+  # (Jun 29-Jul 1: three consecutive send failures, zero escalation). Page via
+  # the direct Bot API path, which works even with the gateway down.
+  if grep -q "WARN: telegram send failed" <(tail -5 "$LOG"); then
+    bash "$HOME/.openclaw/scripts/page-operator.sh" "chain-alert-dead" "learning chain FAILED (${FAILED}) AND its telegram alert failed to send" || true
+  fi
   exit 1
 fi
 tg silent "🧪 Daily learning chain ok — predictions resolved $RES, observations $OBS, rule_proposals $RP, attribution $ATTR, patterns $PAT"
