@@ -194,7 +194,7 @@ def main(argv=None) -> int:
             "JOIN hypotheses h ON h.id = ti.hypothesis_id "
             "LEFT JOIN positions p ON p.hypothesis_id = ti.hypothesis_id AND UPPER(p.ticker)=UPPER(ti.ticker) "
             "WHERE ti.triggered_by IN ('stop_rule_enforcer_v1','stop_rule_soft_enforcer_v1') "
-            "AND ti.state='filled' "
+            "AND ti.state='filled' AND ti.action='exit' "
             "GROUP BY ti.hypothesis_id, ti.ticker "
             "ORDER BY MAX(ti.created_at) DESC").fetchall():
         hid = r["hypothesis_id"]
@@ -236,7 +236,7 @@ def main(argv=None) -> int:
                 "'stop-rule exit filled: thesis falsified at the -8% risk limit (trade verdict wrong; archivist may refine)')",
                 (aid, _now_iso(), hid))
         resolved += 1
-    if resolved:
+    if resolved or postmortems_written:
         conn.commit()
 
     results = []

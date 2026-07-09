@@ -214,8 +214,14 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
         "type, limit_price, status, submitted_at, filled_at, avg_fill_price, raw_payload_path) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (broker_order_id, intent_id, intent_row["ticker"], side, qty, order_type,
-         limit_price, resp.get("status") or "submitted", submitted_at, None, None, None),
+         limit_price, resp.get("status") or "submitted", submitted_at,
+         # sim fills are instant — persist fill truth here or analytics read NULLs
+         resp.get("filled_at"), _f(resp.get("filled_avg_price")), None),
     )
+    if (resp.get("status") == "filled") and resp.get("filled_avg_price") is not None:
+        conn.execute(
+            "UPDATE trade_intents SET actual_price=?, actual_size=?, executed_at=? WHERE id=?",
+            (_f(resp.get("filled_avg_price")), qty, resp.get("filled_at"), intent_id))
     conn.execute(
         "UPDATE trade_intents SET state='submitted', submitted_at=?, broker_order_id=? "
         "WHERE id=?",
@@ -227,6 +233,13 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
     conn.commit()
     return {"intent_id": intent_id, "submitted": True, "broker_order_id": broker_order_id,
             "status": resp.get("status"), "submitted_at": submitted_at}
+
+
+def _f(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
