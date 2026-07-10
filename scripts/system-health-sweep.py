@@ -151,6 +151,16 @@ def check_tokens():
     low = out.lower()
     if rc == 0:
         return finding("tokens", "ok", "model auth usable")
+    # The check is global across providers; the FLEET runs on openai-codex.
+    # github-copilot is the host-lane (jerry) profile and is absent from cron
+    # env by design — its failure must not page as a fleet outage (2026-07-10:
+    # two false-positive CRIT pages from exactly this).
+    codex_ok = "openai-codex" in low and not any(
+        x in low for x in ("openai-codex expired", "openai-codex invalid", "openai-codex missing"))
+    only_copilot_bad = codex_ok and "github-copilot" in low
+    if only_copilot_bad:
+        return finding("tokens", "warn",
+                       "fleet auth (openai-codex) healthy; github-copilot (host lane) unauthenticated in this env")
     if "usable" in low and not any(x in low for x in ("missing", "invalid", "unusable")):
         return finding("tokens", "warn", "model auth usable but flagged (likely expiring soon)")
     return finding("tokens", "crit", f"model auth check failed (exit={rc}): {out.strip()[:160]}")

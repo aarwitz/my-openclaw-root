@@ -88,6 +88,10 @@ printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]]
 
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
 run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
+# D59: valuation-first ORIGINATION — value was compute-only (critic brake +
+# predict bands); nothing authored ideas from undervaluation. Max 3/day,
+# value-trap screened (requires trend or analyst inflection).
+run_step "value_scan" 120 python3 workspaces/trading-intel/scripts/value_scan.py
 run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses.py
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
 run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
