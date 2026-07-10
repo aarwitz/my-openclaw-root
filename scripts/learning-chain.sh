@@ -68,6 +68,10 @@ step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
 # Non-zero exit = shadow diverged from the broker — exactly what shadow mode
 # exists to catch, so it flows into FAILED and pages via the chain alert.
 step "sim-parity"          "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
+# D61: fundamental forecasting loop — grade FCF/EPS forecasts against newly
+# reported actuals daily; refresh forecasts for book names (cheap, cached).
+step "fund-grade"          "$PY" "$TI/fundamental_forecast.py" grade
+step "fund-forecast"       "$PY" "$TI/fundamental_forecast.py" forecast --book
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
