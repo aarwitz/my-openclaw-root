@@ -84,6 +84,13 @@ def _series(ticker: str):
     return rows
 
 
+def _ttm(vals: list[float]) -> list[float]:
+    """Rolling 4-quarter sums — first calibration run showed single-quarter FCF
+    is dominated by working-capital noise (median APE 49.5%); TTM is the
+    forecastable object."""
+    return [sum(vals[i - 3:i + 1]) for i in range(3, len(vals))]
+
+
 def _baseline(hist_vals: list[float]) -> tuple[float, float, float, dict] | None:
     """Median-growth continuation with dispersion bands. hist oldest-first, needs >=5."""
     if len(hist_vals) < 5:
@@ -124,9 +131,11 @@ def cmd_forecast(names: list[str]) -> dict:
         # next unreported quarter-end ≈ last end + ~91d
         from datetime import date, timedelta
         nxt = (date.fromisoformat(rows[-1]["end"]) + timedelta(days=91)).isoformat()
-        for metric in ("fcf_q", "eps_q"):
-            vals = [r["fcf"] if metric == "fcf_q" else r["eps"] for r in rows]
+        for metric in ("fcf_q", "eps_q", "fcf_ttm"):
+            vals = [r["fcf"] if metric.startswith("fcf") else r["eps"] for r in rows]
             vals = [v for v in vals if v is not None]
+            if metric == "fcf_ttm":
+                vals = _ttm(vals)
             tup = _baseline(vals)
             if tup:
                 _store(conn, t, metric, nxt, tup, _now())
@@ -146,11 +155,17 @@ def cmd_backfill(names: list[str], quarters: int) -> dict:
                 continue
             hist, target = rows[:cut], rows[cut]
             as_of = hist[-1]["accepted"] or hist[-1]["end"]  # knowable-at: last report's acceptance
-            for metric in ("fcf_q", "eps_q"):
-                vals = [r["fcf"] if metric == "fcf_q" else r["eps"] for r in hist]
+            for metric in ("fcf_q", "eps_q", "fcf_ttm"):
+                vals = [r["fcf"] if metric.startswith("fcf") else r["eps"] for r in hist]
                 vals = [v for v in vals if v is not None]
-                tup = _baseline(vals)
-                actual = target["fcf"] if metric == "fcf_q" else target["eps"]
+                if metric == "fcf_ttm":
+                    tv = _ttm(vals)
+                    tup = _baseline(tv)
+                    tgt_all = [r["fcf"] for r in rows[:cut + 1] if r["fcf"] is not None]
+                    actual = sum(tgt_all[-4:]) if len(tgt_all) >= 4 else None
+                else:
+                    tup = _baseline(vals)
+                    actual = target["fcf"] if metric == "fcf_q" else target["eps"]
                 if not tup or actual is None:
                     continue
                 p10, p50, p90, basis = tup
@@ -213,7 +228,7 @@ def cmd_grade() -> dict:
 def cmd_calibrate() -> dict:
     conn = _conn()
     out = {}
-    for metric in ("fcf_q", "eps_q"):
+    for metric in ("fcf_q", "eps_q", "fcf_ttm"):
         rows = conn.execute(
             "SELECT pct_error, band_hit FROM fundamental_forecasts "
             "WHERE resolved_at IS NOT NULL AND metric=?", (metric,)).fetchall()
