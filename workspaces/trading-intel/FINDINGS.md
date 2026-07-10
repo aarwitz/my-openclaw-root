@@ -61,6 +61,24 @@ incident postmortems) need no tag.
   (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
+## 2026-07-10 — the options question is now completely answered: even pre-earnings positioning carries nothing
+
+- **Event-conditioned test (the last plausible hypothesis) also dead**: across
+  ~8,500 earnings events × 4 years (39 quarterly clusters), pre-announcement
+  net premium [E-5,E-2] predicts post-earnings SPY-relative returns at IC
+  0.004 (5d, t 0.23) and 0.018 (21d, t 0.93). Tests #8-9 on this panel;
+  nothing survives FDR across all nine.
+- Conclusion with unusual confidence: at daily-aggregate granularity (price ×
+  volume, no IV/greeks/OI), options flow contains no exploitable cross-
+  sectional signal for 5-21d equity returns — not unconditionally, not as
+  change, not into catalysts. **Recommend canceling the Massive options
+  add-on**; the month bought a definitive, multi-angle no.
+- Same day, the fundamental forecasting loop's first calibration crank paid:
+  **TTM-smoothed FCF forecasts cut median error 49.5% → 30.8%** vs single-
+  quarter (working-capital noise was the enemy, not growth estimation). Next
+  cranks documented: empirical-quantile bands (coverage 62-73% vs 80% target),
+  analyst-estimate blending, per-sector error models.
+
 ## 2026-07-09 (pm) — options flow is dead: the audition signal did not survive four years
 
 - **The full test killed it.** opt_net_prem's audition IC of 0.059 (63 names ×
