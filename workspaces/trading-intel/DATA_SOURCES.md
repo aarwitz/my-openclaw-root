@@ -48,6 +48,20 @@ entries append to the Scout log at the bottom.
 - **Deleted 2026-07-03**: gdelt.py + alphavantage.py connectors and the feature_store alphavantage branch (credential-less no-ops).
 - The web layer (`trader-live.ts`) hits Alpaca directly — must be re-pointed when the internal paper engine (docs/07) cuts over.
 
+## Social/retail sentiment (scouted 2026-07-10)
+
+| source | verdict | why |
+|---|---|---|
+| **Reddit archive dumps** (Academic Torrents / Arctic Shift) | **AUDITION** (TM-filed) | only true point-in-time history in budget: raw WSB/stocks posts 2019→2025, $0 |
+| **ApeWisdom** | **COLLECTING** (4×/day cron since 2026-07-10, `social_mentions`) | free live cross-section (~17 subreddits+4chan), no history API — forward feed for the same family |
+| Finnhub social-sentiment | skip | not in our tier; paid tiers 403 it too (gh issue #557) |
+| StockTwits official | skip | API closed to new registrations; partner-only |
+| Quiver WSB (via QuantConnect) | fallback | clean 2018→Feb 2025 daily mentions, but collection STOPPED Feb 2025 |
+| Truth Social | skip | no API, auth-walled scraping, no ticker chatter of consequence |
+| Utradea / SocialSentiment.io / Tradestie | skip | rate-limited/opaque/dead respectively |
+
+Note: FMP Ultimate's social-sentiment endpoints are dead for our account (v4 legacy-only, /stable empty — probed 2026-07-10).
+
 ## Scout log (appended monthly by `data-scout-monthly`)
 
 **2026-07-04 (operator-session audition, pre-cron):** ThetaData free-tier options
