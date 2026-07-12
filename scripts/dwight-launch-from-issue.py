@@ -138,8 +138,8 @@ def get_first_nonempty(issue: Dict[str, Any], keys: List[str]) -> str:
 def normalize_owner(owner: str) -> str:
     raw = owner.strip().lower()
     aliases = {
-        "jerry": "main",
-        "main": "main",
+        "jerry": "jerry",
+        "main": "jerry",
         "resi": "resi",
         "druck": "druck",
         "dwight": "dwight",
@@ -161,7 +161,7 @@ def infer_owner(issue: Dict[str, Any], override: str) -> str:
         return normalize_owner(override)
     assigned = get_first_nonempty(issue, ["assigned_to", "assignee", "owner", "agent", "agent_id"])
     if not assigned:
-        return "main"
+        return "jerry"
     return normalize_owner(assigned)
 
 

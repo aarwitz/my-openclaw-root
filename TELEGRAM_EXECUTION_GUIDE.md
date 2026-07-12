@@ -21,7 +21,7 @@ Audience: Aaron operating OpenClaw through Telegram.
 - If a Telegram-routed bot should reply visibly, its agent config must include
 	`group:messaging` in the tool allowlist/profile. `message` alone is not a
 	reliable enough contract in this deployment.
-- Naming contract: the primary general bot account key is `jerry` and routes to agent id `main` (identity name Jerry). Transport account keys are not bot names.
+- Naming contract: the primary general bot account key is `jerry` and routes to agent id `jerry` (identity name Jerry). Transport account keys are not bot names.
 
 Routing matrix (authoritative):
 - Human-readable table: [workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md](workspaces/trading-intel/reference/TELEGRAM_ROUTING_MATRIX.md)

@@ -46,9 +46,15 @@ These are the rules most likely to cause real damage if violated:
   ops are always approval-gated. Structural/parameter changes to the trading logic flow as
   `rule_proposals` that a human approves; **agents never self-approve.** Task Manager state must
   never auto-launch non-code work or anything assigned to Aaron.
-- Host Docker/root actions belong to the **host-resident Jerry maintainer** (host cron,
-  `scripts/jerry-host-poll.py`, a separate `github-copilot` auth profile) — *not* the gateway
-  container (which has no `docker.sock` mounted).
+- Host Docker/root actions are **operator-owned** (terminal / Claude Code session on the host) —
+  the gateway container has no `docker.sock` mounted and every agent, including `jerry`, executes
+  inside it. `jerry` (the one default-assistant agent, bound to Telegram) gets real-filesystem
+  reach via the container's bind mounts (notably `/home/aaron/repos:rw` and `~/.openclaw`), not
+  via host exec. A paired-but-unused `rsl-host` node host exists (systemd user service,
+  `openclaw-node.service`, stopped) — the Codex harness runs its own in-process shell and does
+  not honor `tools.exec.host=node`, so node routing is a dead end in this build.
+  `scripts/jerry-host-poll.py` (host cron) is a supplementary Task-Manager-triggered dispatch
+  path into the same `jerry` agent, not a separate agent.
 
 ## Governed-script policy (applies to every script you write or run here)
 
@@ -91,11 +97,17 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
 
 ## The agent fleet & workspace convention
 
-Agents are defined in `openclaw.json` (`agents.list`): `main` (Jerry, default assistant), `resi`
-(AutoTap, untouched), and the AutoTrade desk — `researcher`, `quant`, `critic`, `risk`, `trader` (PM),
-`executor`, `archivist`, `overseer` (CIO/orchestrator), `developer`. `dwight` (general dev/PM + code
-dispatcher) runs in the gateway but was **decoupled from the trading desk 2026-06-17** — it is no
-longer a desk agent. `jerry` host maintainer runs on host cron, not as an in-gateway agent.
+Agents are defined in `openclaw.json` (`agents.list`): `jerry` (default assistant, bound to
+Telegram), `resi` (AutoTap, untouched), and the AutoTrade desk — `researcher`, `quant`, `critic`,
+`risk`, `trader` (PM), `executor`, `archivist`, `overseer` (CIO/orchestrator), `developer`. `dwight`
+(general dev/PM + code dispatcher) runs in the gateway but was **decoupled from the trading desk
+2026-06-17** — it is no longer a desk agent. Every agent (including `jerry`) runs through the
+Gateway inside `openclaw-gateway`. `jerry` works on the real filesystem via the container's bind
+mounts — `/home/aaron/repos` is mounted read-write, so it can create/edit real repos from
+Telegram — but host docker/systemd operations remain operator-owned (no `docker.sock` in the
+container). Do not re-attempt `tools.exec.host=node` routing for host access: the Codex
+app-server harness executes shell in-process and bypasses OpenClaw's node exec dispatch
+(verified 2026-07-11).
 
 Each agent has a `workspaces/<agent>/` directory following a consistent file convention — read these
 to understand an agent's contract before changing its behavior:

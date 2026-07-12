@@ -1,7 +1,7 @@
 {
   "meta": {
     "lastTouchedVersion": "2026.5.20",
-    "lastTouchedAt": "2026-06-03T16:00:54.511Z"
+    "lastTouchedAt": "2026-07-11T21:12:27.444Z"
   },
   "wizard": {
     "lastRunAt": "2026-03-29T12:38:10.227Z",
@@ -145,7 +145,7 @@
     },
     "list": [
       {
-        "id": "main",
+        "id": "jerry",
         "workspace": "/home/aaron/.openclaw/workspace",
         "model": "openai/gpt-5.4",
         "tools": {
@@ -157,7 +157,7 @@
         },
         "identity": {
           "name": "Jerry",
-          "emoji": "\ud83e\udd9e"
+          "emoji": "🦞"
         }
       },
       {
@@ -178,7 +178,7 @@
         },
         "identity": {
           "name": "Resi",
-          "emoji": "\ud83c\udfd7\ufe0f"
+          "emoji": "🏗️"
         }
       },
       {
@@ -194,7 +194,7 @@
         ],
         "identity": {
           "name": "Researcher",
-          "emoji": "\ud83d\udd0e"
+          "emoji": "🔎"
         }
       },
       {
@@ -209,7 +209,7 @@
         ],
         "identity": {
           "name": "Quant",
-          "emoji": "\ud83e\uddee"
+          "emoji": "🧮"
         }
       },
       {
@@ -227,7 +227,7 @@
         },
         "identity": {
           "name": "Executor",
-          "emoji": "\u2699\ufe0f"
+          "emoji": "⚙️"
         }
       },
       {
@@ -257,7 +257,7 @@
         },
         "identity": {
           "name": "Trader",
-          "emoji": "\ud83d\udcb0"
+          "emoji": "💰"
         }
       },
       {
@@ -273,7 +273,7 @@
         ],
         "identity": {
           "name": "Critic",
-          "emoji": "\u2696\ufe0f"
+          "emoji": "⚖️"
         }
       },
       {
@@ -290,7 +290,7 @@
         ],
         "identity": {
           "name": "Risk",
-          "emoji": "\ud83d\udee1\ufe0f"
+          "emoji": "🛡️"
         }
       },
       {
@@ -305,7 +305,7 @@
         ],
         "identity": {
           "name": "Archivist",
-          "emoji": "\ud83d\udcda"
+          "emoji": "📚"
         }
       },
       {
@@ -336,7 +336,7 @@
         },
         "identity": {
           "name": "Developer",
-          "emoji": "\ud83d\udee0\ufe0f"
+          "emoji": "🛠️"
         }
       },
       {
@@ -373,7 +373,7 @@
         ],
         "identity": {
           "name": "Dwight",
-          "emoji": "\ud83d\udccb"
+          "emoji": "📋"
         }
       },
       {
@@ -424,7 +424,7 @@
         },
         "identity": {
           "name": "AutoTrade",
-          "emoji": "\ud83e\udd16"
+          "emoji": "🤖"
         }
       }
     ]
@@ -444,7 +444,7 @@
         "channel": "telegram",
         "accountId": "jerry"
       },
-      "agentId": "main"
+      "agentId": "jerry"
     },
     {
       "match": {
@@ -606,7 +606,7 @@
             "github-ssh",
             "task-manager"
           ],
-          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker \u2014 route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
+          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker — route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
         },
         "-1003910955362": {
           "requireMention": true,
@@ -631,7 +631,7 @@
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution \u2014 requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift \u2014 route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
+          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution — requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift — route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
           "topics": {
             "1": {
               "agentId": "resi",
@@ -658,7 +658,7 @@
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are in the OpenClaw Admin group. Focus: gateway operations, reliability, config, security, runbooks. Prefer exact commands and verifiable checks. Hot reload first for config changes; never `systemctl restart` \u2014 if a restart is truly required, only use `~/.openclaw/scripts/safe-restart.sh`."
+          "systemPrompt": "You are in the OpenClaw Admin group. Focus: gateway operations, reliability, config, security, runbooks. Prefer exact commands and verifiable checks. Hot reload first for config changes; never `systemctl restart` — if a restart is truly required, only use `~/.openclaw/scripts/safe-restart.sh`."
         },
         "-1003846579956": {
           "requireMention": true,
@@ -810,6 +810,11 @@
         "calendar.add",
         "reminders.add",
         "sms.send"
+      ],
+      "allowCommands": [
+        "system.run.prepare",
+        "system.run",
+        "system.which"
       ]
     }
   },

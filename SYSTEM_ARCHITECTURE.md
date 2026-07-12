@@ -87,7 +87,7 @@ decision) are separate and individually visible.
 | 7 | `archivist` | 📚 | **Learning officer.** Daily market debrief; resolves predictions (Brier); updates the world model; drafts gated rule proposals. |
 | 8 | `overseer` (CIO) | 🤖 | Cron pipeline orchestrator + app/Telegram chat front door + heartbeat. Orchestrates only — never writes execution state, never edits scripts. |
 | 9 | `developer` | 🔧 | Implements software improvements in git worktrees; opens PRs (human-gated). |
-|  – | `jerry` | – | Host/container repair (host cron, sudo). Not an in-gateway agent. |
+|  – | `jerry` | 🦝 | Default assistant, bound to Telegram. Runs through the Gateway inside the container like every other agent; reaches the real filesystem via bind mounts (`/home/aaron/repos:rw`, `~/.openclaw`). Host docker/systemd ops stay operator-owned. Not part of the AutoTrade desk. |
 
 > **Decoupled 2026-06-17:** `dwight` (general dev/PM + code-task dispatcher for broader
 > work, e.g. RSL) is **no longer a desk agent**. It still runs in the gateway but is not
@@ -95,8 +95,9 @@ decision) are separate and individually visible.
 > desk's software-improvement backlog is mirrored deterministically (overseer priority
 > queue → `poll_priority_queue.py`); the `developer` agent does the desk's code work.
 >
-> `main` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
-> desk (`main` = default assistant; `resi`/AutoTap untouched).
+> `jerry` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
+> desk (`jerry` = default assistant, containerized with a `/home/aaron/repos:rw` bind mount;
+> `resi`/AutoTap untouched).
 
 ---
 
