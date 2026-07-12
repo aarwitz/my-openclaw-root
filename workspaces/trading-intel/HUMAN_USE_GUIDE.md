@@ -7,7 +7,8 @@ This guide complements `OPERATOR_GUIDE.md`.
 - Use this guide for how to interact with Druck efficiently day to day.
 
 Role split:
-- Druck (`trader`) is the Telegram chat front door, orchestrator, and trading-infrastructure developer.
+- `overseer` is the internal OpenClaw agent behind the Druck Telegram surface. Aaron talks to Druck in Telegram; the live routed agent is `overseer`.
+- `trader` is the portfolio-manager lane that authors trade intents inside the desk pipeline; it is not the Telegram front door.
 - `executor` is the deterministic execution lane and the only Alpaca submit/cancel actor.
 
 ## 0. Fast start
@@ -53,6 +54,7 @@ Surface definitions:
 - Topic: a thread inside a forum-enabled group. Topic ids are scoped to their group chat id.
 
 - Primary execution interface: `@druck_rsl_bot` in Trading Desk topic Ask Druck (`topic_id 641`).
+- Direct Telegram DM with `@druck_rsl_bot` reaches the same Druck surface; internally that DM is routed to `overseer`.
 - Oversight/escalation interface: Dwight in Trading Desk topic `1`.
 - Mention-gated policy is on. In group chat, address Druck explicitly with `@druck_rsl_bot`.
 - `FYI @druck_rsl_bot ...` or `cc @druck_rsl_bot ...` means listen-only. Use that when you want Druck to absorb context without replying.

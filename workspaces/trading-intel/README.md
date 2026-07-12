@@ -1,6 +1,6 @@
 # Trading Intelligence — Canonical Root
 
-This is the single source of truth for the OpenClaw 6-agent trading system.
+This is the single source of truth for the OpenClaw AutoTrade desk.
 
 - Authoritative docs live in `docs/`.
 - Canonical SQLite schema lives in `sql/schema.sql`.
@@ -10,14 +10,23 @@ This is the single source of truth for the OpenClaw 6-agent trading system.
 
 ## Topology (locked)
 
-Six OpenClaw agents share one canonical SQLite store and one repo of authoritative docs:
+The live desk topology is the canonical `9 agents + Jerry` model described in `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md`.
+
+Trading-desk roles:
 
 - `researcher` — background discovery and hypothesis generation
 - `quant` — scoring, regime, expression selection, sizing
 - `critic` — prospective challenge of every hypothesis and trade intent
+- `risk` — intent-to-order veto, sizing limits, exposure and drawdown controls
+- `trader` — portfolio-manager lane that authors sized intents within the risk budget
+- `executor` — deterministic execution agent; only lane that submits/cancels paper orders and mirrors broker state
 - `archivist` — post-resolution grading and pattern extraction
-- `trader` — only Telegram-facing agent (persona name: Druck); chat front door, orchestrator, and trading-infrastructure developer
-- `executor` — deterministic execution agent; only agent that submits/cancels Alpaca paper orders and mirrors broker state
+- `overseer` — Telegram/chat front door, cron orchestrator, and pipeline coordinator behind the Druck surface
+- `developer` — software-improvement lane for desk code, scripts, connectors, schema, and app contract
+
+Support role outside the desk count:
+
+- `jerry` — default assistant and general OpenClaw platform/orchestration layer
 
 ## Authority
 

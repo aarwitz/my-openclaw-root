@@ -181,7 +181,7 @@ Regime rules ingestion protocol:
 
 ## 8. Pre-flight checklist for live paper
 
-- Telegram routing: account `druck` → agent `trader` (persona displayed to Aaron: Druck). No other Telegram bindings for trading agents.
+- Telegram routing: account `druck` → agent `overseer` (human-facing Telegram persona displayed to Aaron: Druck). `trader` remains an internal desk lane, not the Telegram front door.
 - Executor (`executor`) is the only broker execution lane; trader never submits/cancels orders directly.
 - Legacy `druck` agent-id collision resolved (legacy id removed or renamed) to prevent routing/operator ambiguity.
 - `tools.agentToAgent.allow` includes `researcher`, `quant`, `critic`, `archivist`, `trader`, `executor`.

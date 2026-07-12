@@ -44,10 +44,10 @@ Linux is the control plane. The Mac is execution-only for iOS. Ask before spendi
 
 | Agent | Domain | Telegram routing |
 |-------|--------|-----------------|
-| Jerry | Platform ops, orchestration, GitHub admin | Default (all unrouted groups/DMs) |
+| Jerry | Platform ops, orchestration, GitHub admin | `@jerry_rsl_bot` DM; default fallback for unrouted chats |
 | Resi | AutoTap/AutoTap delivery: builds, tests, QA | AutoTap group + Manual Testing topic 975 |
-| Druck | Market/news research, stock trading analysis | TBD (dedicated group/topic) |
-| Dwight | Task Manager operations and maintenance | TBD (dedicated group/topic) |
+| Druck | Market/news research, stock trading analysis | `@druck_rsl_bot` DM and Trading Desk topic `641` ("Ask Druck"); internally routed to `overseer` with Druck as the human-facing persona |
+| Dwight | Task Manager operations and maintenance | `@dwight_rsl_bot` DM; oversight / task execution status |
 
 Escalate to the right agent when intent is clear rather than handling cross-domain work yourself.
 

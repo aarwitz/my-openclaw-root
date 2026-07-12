@@ -15,18 +15,19 @@ Machine source: reference/telegram_routing_matrix.json
 |---|---|---|---|---|---|
 | DM | jerry | @jerry_rsl_bot | main | Jerry | General OpenClaw operations and health checks |
 | DM | dwight | @dwight_rsl_bot | dwight | Dwight | Oversight and task execution status |
-| DM | druck | @druck_rsl_bot | trader | Druck | Chat front door and orchestration |
+| DM | druck | @druck_rsl_bot | overseer | Druck | Chat front door and orchestration |
 
 ## Group and topic routes
 
 | Surface | Group name | Chat ID | Topic name | Topic ID | Bot handle | Agent ID | Mention required |
 |---|---|---|---|---|---|---|---|
 | Group topic | Trading Desk | -1003846579956 | Infrastructure | 1 | @dwight_rsl_bot | dwight | yes |
-| Group topic | Trading Desk | -1003846579956 | Ask Druck | 641 | @druck_rsl_bot | trader | yes |
+| Group topic | Trading Desk | -1003846579956 | Ask Druck | 641 | @druck_rsl_bot | overseer | yes |
 
 ## Rules
 
 - Topic ids are scoped to their group chat id; never treat a topic id as globally unique.
 - DM routing uses account bindings, not group/topic routing.
+- The human-facing Telegram persona can differ from the internal agent id. `@druck_rsl_bot` presents as Druck, but the live routed agent is `overseer`.
 - In group topics, include explicit @mention to trigger mention-gated agents.
 - Routing changes must update reference/telegram_routing_matrix.json and pass scripts/audit_telegram_routing.py.
