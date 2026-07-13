@@ -186,7 +186,9 @@ def main():
 
     names = ([s.strip().upper() for s in a.names.split(",")] if getattr(a, "names", None)
              else _top_names(a.top_n))
-    cache, feat = _cache(), sqlite3.connect(FEAT_DB)
+    # 120s busy timeout: the 20:40 social_collect cron writes features.sqlite while
+    # the learning chain's llm-features step is mid-run (default 5s lost that race daily).
+    cache, feat = _cache(), sqlite3.connect(FEAT_DB, timeout=120)
     total = 0
     if a.cmd == "backfill":
         periods = list(_months(a.start, a.end))

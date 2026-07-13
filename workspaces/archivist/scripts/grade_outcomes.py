@@ -31,7 +31,18 @@ DEAD = 0.0                       # market-relative dead-band (excess beyond this
 
 
 def _series(sym):
-    px = fs._prices(sym, 4000)
+    # Grading runs right after the close and needs today's bar; fs._prices serves
+    # a morning-warmed 12h cache that still ends yesterday, silently deferring
+    # every maturity by a day. Demand near-fresh bars, fall back to the cache.
+    px = None
+    try:
+        from connectors import massive
+        if massive.available():
+            px = massive.daily_bars(sym, cache_h=0.25)
+    except Exception:
+        px = None
+    if not px:
+        px = fs._prices(sym, 4000)
     return [b["t"] for b in px], {b["t"]: b["c"] for b in px}
 
 
