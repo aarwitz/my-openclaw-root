@@ -45,16 +45,18 @@
           "gateway_path": "/home/aaron/.openclaw/mirrors/EWAG-dev-iosApp"
         }
       ],
-      "tm_assignee": "EWAG-Backend",
+      "tm_assignee": "Developer",
       "owner_agent": "dwight",
       "verify": [
         "ssh mac-dev: xcodebuild -scheme ResiLife -destination 'platform=iOS Simulator,name=iPhone 15' build"
       ],
       "qa": "openclaw-qa engine (see product autotap)",
       "deploy": "TestFlight via runbook APNS_DEPLOYMENT_RUNBOOK.md (human-gated)",
-      "status": "active",
+      "status": "paused",
       "notes": "Runner containers (lidi-task-manager-ewag-agent-*) handle branch/PR scaffolding; codegen goes through the gateway codex lane.",
-      "runner": "mac-dev"
+      "runner": "mac-dev",
+      "note_lane": "EWAG worker-container lane decommissioned 2026-07-14; standard coding lane only",
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
     },
     {
       "id": "montra",
@@ -79,9 +81,10 @@
         "web console: cd /home/aaron/repos/lidi-solutions && npm run build"
       ],
       "deploy": "npm run deploy:pages (human-gated)",
-      "status": "active",
+      "status": "paused",
       "notes": "iOS app repo found 2026-07-03: EWAG-dev/MONTRA on the mac node.",
-      "runner": "mac-dev"
+      "runner": "mac-dev",
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
     },
     {
       "id": "autotap",
@@ -109,9 +112,10 @@
       "verify": [
         "cd /home/aaron/repos/openclaw-qa/engine && npm test 2>&1 | tail -3"
       ],
-      "status": "active",
+      "status": "paused",
       "notes": "This is the org's QA arm \u2014 every iOS product's verification gate once wired.",
-      "runner": "mac-dev"
+      "runner": "mac-dev",
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
     },
     {
       "id": "robot",
@@ -129,9 +133,10 @@
       "tm_assignee": "Developer",
       "owner_agent": "dwight",
       "verify": [],
-      "status": "active",
+      "status": "paused",
       "notes": "RobotFirmware + Vision subdirs. Related research repos: Dockerized_GroundingSAM, OrbSlam, tracking-dataset. Embedded-agent runtime design TBD.",
-      "runner": "robot-orin"
+      "runner": "robot-orin",
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
     },
     {
       "id": "taskmanager",
@@ -150,8 +155,9 @@
         "cd /home/aaron/repos/lidi-task-manager && python3 -m pytest tests/ -q"
       ],
       "deploy": "npx wrangler deploy (human-gated)",
-      "status": "active",
-      "notes": "Dwight is sole maintainer per workspace contract."
+      "status": "paused",
+      "notes": "Dwight is sole maintainer per workspace contract.",
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
     }
   ],
   "runners": {

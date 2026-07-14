@@ -599,8 +599,41 @@ def run(argv: List[str]) -> int:
     parser.add_argument("--claim-token", default="", help="Pre-acquired Task Manager launch claim token")
     parser.add_argument("--claim-source", default="manual", help="Launch claim source label")
     parser.add_argument("--execute", action="store_true", help="Actually execute (default dry-run)")
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Re-exec in a detached session and return immediately. Required when the caller "
+        "runs inside an agent tool-call window (~100s kill), which SIGINTs a synchronous "
+        "coding-lane run mid-flight and strands the issue in launch_state=queued.",
+    )
     args = parser.parse_args(argv)
     args.tm_base = canonicalize_tm_base(args.tm_base)
+
+    if args.detach:
+        if not args.execute:
+            raise RuntimeError("--detach requires --execute (dry-runs are fast; run them inline)")
+        log_dir = os.path.expanduser("~/.openclaw/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f"launch-from-issue-{args.issue_id}-detached.log")
+        child_argv = [a for a in (argv if argv is not None else sys.argv[1:]) if a != "--detach"]
+        cmd = [
+            os.path.expanduser("~/.openclaw/scripts/run-with-trace.sh"),
+            "--tag",
+            "cron",
+            os.path.abspath(__file__),
+            *child_argv,
+        ]
+        with open(log_path, "ab") as log_fh:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_fh,
+                stderr=log_fh,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        print(f"Detached launch started: issueId={args.issue_id} pid={proc.pid} log={log_path}")
+        print("The detached run claims the launch, executes the coding lane, and posts the TM comment itself.")
+        return 0
 
     if not os.path.isfile(args.launcher):
         raise RuntimeError(f"Launcher not found: {args.launcher}")
