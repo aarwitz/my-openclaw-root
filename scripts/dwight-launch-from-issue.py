@@ -482,6 +482,67 @@ def summarize_pr_evidence(contract: Dict[str, Any]) -> str:
     return f"branch={branch} pr_status={pr_status}"
 
 
+def open_pr_and_handoff(repo: str, branch: str, issue: Dict[str, Any], task_id: str) -> tuple[Optional[str], List[str]]:
+    """Push the task branch and open a PR (deterministic completion step).
+
+    The coding agent's job ends at committed work on a branch; the launcher —
+    not the model — owns push + PR so completion is uniform. Returns
+    (pr_url, notes). pr_url is None when the handoff could not complete;
+    notes explain what happened either way.
+    """
+    notes: List[str] = []
+
+    def _git(*argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-C", repo, *argv], capture_output=True, text=True, check=False)
+
+    has_branch = _git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    if has_branch.returncode != 0:
+        notes.append(f"PR handoff skipped: local branch {branch} not found in {repo}")
+        return None, notes
+
+    base = _git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    base_branch = base.stdout.strip().split("/")[-1] if base.returncode == 0 and base.stdout.strip() else "main"
+    ahead = _git("rev-list", "--count", f"origin/{base_branch}..{branch}")
+    if ahead.returncode == 0 and ahead.stdout.strip() == "0":
+        notes.append(f"PR handoff skipped: branch {branch} has no commits beyond origin/{base_branch}")
+        return None, notes
+
+    push = _git("push", "-u", "origin", branch)
+    if push.returncode != 0:
+        notes.append(f"PR handoff failed at push: {(push.stderr or '').strip()[:300]}")
+        return None, notes
+    notes.append(f"Pushed {branch} to origin")
+
+    title = f"{task_id}: {str(issue.get('title') or '').strip()[:120]}"
+    body = (
+        f"Automated coding-lane completion for Task Manager issue #{issue.get('id')}.\n\n"
+        f"{str(issue.get('description') or '').strip()[:1000]}\n\n"
+        f"Acceptance criteria:\n{str(issue.get('acceptance_criteria') or '(none recorded)').strip()[:800]}\n\n"
+        f"Issue: {CANONICAL_TM_BASE}/issue?id={issue.get('id')}\n"
+        "Merge is human-gated — review before merging.\n\n"
+        "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    )
+    pr = subprocess.run(
+        ["gh", "pr", "create", "--head", branch, "--title", title, "--body", body],
+        capture_output=True, text=True, check=False, cwd=repo,
+    )
+    if pr.returncode != 0:
+        err = (pr.stderr or pr.stdout or "").strip()
+        existing = re.search(r"https://github\.com/\S+/pull/\d+", err)
+        if existing:
+            notes.append(f"PR already exists: {existing.group(0)}")
+            return existing.group(0), notes
+        notes.append(f"PR handoff failed at gh pr create: {err[:300]}")
+        return None, notes
+
+    url_match = re.search(r"https://github\.com/\S+/pull/\d+", pr.stdout or "")
+    if not url_match:
+        notes.append(f"gh pr create succeeded but no PR URL found in output: {(pr.stdout or '')[:200]}")
+        return None, notes
+    notes.append(f"Opened PR {url_match.group(0)}")
+    return url_match.group(0), notes
+
+
 def build_launch_comment(
     task_id: str,
     meta_path: str,
@@ -492,26 +553,36 @@ def build_launch_comment(
 ) -> tuple[str, str, Optional[str]]:
     if contract and contract.get("status") == "succeeded":
         evidence_lines = summarize_evidence_items(contract.get("evidence", []))
-        pr_summary = summarize_pr_evidence(contract)
+        pr = contract.get("pr") if isinstance(contract.get("pr"), dict) else {}
+        pr_url = str(pr.get("url") or "").strip()
+        branch = str(contract.get("branch") or "").strip()
         detail_lines = "\n".join(f"- evidence: {line}" for line in evidence_lines)
+        if pr_url:
+            headline = f"✅ {task_id} complete — PR awaiting your review: {pr_url}"
+            next_step = "- next step: Aaron reviews and merges the PR (merge is human-gated)."
+        else:
+            headline = f"✅ {task_id} work complete on branch `{branch or '?'}` — but NO PR was opened (see evidence for why)."
+            next_step = "- next step: resolve the PR blocker, then push the branch and open the PR."
         comment = (
-            "- changed: autonomous launcher received a structured success result from the assigned agent.\n"
+            f"{headline}\n\n"
             f"- evidence: lane=codex-subagent task_id={task_id} meta={meta_path or '<none>'}\n"
-            f"- evidence: {pr_summary}\n"
         )
         if detail_lines:
             comment += detail_lines + "\n"
-        comment += "- next step: continue on the active branch and update issue status only when the underlying work is actually complete."
+        comment += next_step
         return "launched", comment, None
 
     if contract and contract.get("status") == "failed":
         evidence_lines = summarize_evidence_items(contract.get("evidence", []))
-        pr_summary = summarize_pr_evidence(contract)
+        first_reason = next(
+            (line for line in evidence_lines if any(w in line.lower() for w in ("because", "failed", "blocked", "missing", "not available"))),
+            evidence_lines[0] if evidence_lines else "no reason recorded",
+        )
         detail_lines = "\n".join(f"- evidence: {line}" for line in evidence_lines)
         comment = (
-            "- changed: autonomous launcher received a structured failure result from the assigned agent.\n"
+            f"❌ {task_id} run failed — {first_reason[:200]}\n\n"
             f"- evidence: lane=codex-subagent task_id={task_id} meta={meta_path or '<none>'}\n"
-            f"- evidence: {pr_summary}\n"
+            f"- evidence: {summarize_pr_evidence(contract)}\n"
         )
         if detail_lines:
             comment += detail_lines + "\n"
@@ -522,7 +593,7 @@ def build_launch_comment(
     snippet = snippet[:800]
     if completed.returncode == 0:
         comment = (
-            "- changed: autonomous launcher completed without a structured Codex result contract.\n"
+            f"❌ {task_id} run produced no structured result — outcome unknown.\n\n"
             f"- evidence: task_id={task_id} meta={meta_path or '<none>'} return_code=0\n"
             f"- evidence: output_snippet={snippet}\n"
             "- next step: inspect launcher/runtime output because evidence postback was incomplete."
@@ -530,7 +601,7 @@ def build_launch_comment(
         return "failed", comment, "Structured codex result missing from launcher output"
 
     comment = (
-        "- changed: autonomous launcher run failed before a clean structured result was recorded.\n"
+        f"❌ {task_id} launcher crashed (exit {completed.returncode}) before any result was recorded.\n\n"
         f"- evidence: task_id={task_id} meta={meta_path or '<none>'} return_code={completed.returncode}\n"
         f"- evidence: output_snippet={snippet}\n"
         "- next step: inspect the launcher/runtime error, fix it, then retrigger by editing the issue."
@@ -762,6 +833,31 @@ def run(argv: List[str]) -> int:
             contract = execution["contract"]
         if contract is None:
             contract = extract_contract_result(output, task_id)
+
+        # Deterministic completion: on agent success, the LAUNCHER pushes the
+        # branch, opens the PR, and flips the issue to in_review — the visible
+        # handoff to the human. The agent's job ends at committed work.
+        if contract and contract.get("status") == "succeeded":
+            contract_branch = str(contract.get("branch") or "").strip()
+            contract_pr = contract.get("pr") if isinstance(contract.get("pr"), dict) else {}
+            if contract_branch and contract_branch not in ("main", "master") and not str(contract_pr.get("url") or "").strip():
+                pr_url, handoff_notes = open_pr_and_handoff(repo, contract_branch, issue, task_id)
+                contract.setdefault("evidence", [])
+                contract["evidence"] = list(contract["evidence"]) + handoff_notes
+                if pr_url:
+                    contract["pr"] = {"status": "opened", "url": pr_url}
+            final_pr_url = str((contract.get("pr") or {}).get("url") or "").strip() if isinstance(contract.get("pr"), dict) else ""
+            if final_pr_url:
+                try:
+                    http_json_request(
+                        f"{args.tm_base.rstrip('/')}/api/issues/{args.issue_id}",
+                        "PATCH",
+                        {"status": "in_review", "pr_url": final_pr_url, "actor": "Dwight"},
+                    )
+                    print(f"Issue {args.issue_id} moved to in_review with PR {final_pr_url}")
+                except RuntimeError as exc:
+                    print(f"WARNING: could not move issue to in_review: {exc}", file=sys.stderr)
+
         launch_state, comment_content, launch_error = build_launch_comment(
             task_id=task_id,
             meta_path=meta_path,
