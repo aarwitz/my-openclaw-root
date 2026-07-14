@@ -714,12 +714,44 @@ def run(argv: List[str]) -> int:
             build_issue_launch_signature(issue),
         )
 
+    def git_current_branch(repo_path: str) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ["git", "-C", repo_path, "branch", "--show-current"],
+                capture_output=True, text=True, check=False,
+            )
+            return result.stdout.strip() or None
+        except Exception:
+            return None
+
+    original_branch = git_current_branch(repo) if args.execute else None
+
     completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
     output = (completed.stdout or "") + (completed.stderr or "")
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:
         print(completed.stderr, end="", file=sys.stderr)
+
+    # The coding agent works on a task branch inside the LIVE checkout; never
+    # leave the repo sitting on that branch afterwards (TM-213 left
+    # lidi-solutions on its work branch — data-push crons then write against
+    # the wrong branch and the operator finds a surprise checkout).
+    if args.execute and original_branch:
+        now_branch = git_current_branch(repo)
+        if now_branch and now_branch != original_branch:
+            restore = subprocess.run(
+                ["git", "-C", repo, "checkout", original_branch],
+                capture_output=True, text=True, check=False,
+            )
+            if restore.returncode == 0:
+                print(f"Restored {repo} to branch {original_branch} (work preserved on {now_branch})")
+            else:
+                print(
+                    f"WARNING: could not restore {repo} to {original_branch}: "
+                    f"{(restore.stderr or '').strip()[:200]}",
+                    file=sys.stderr,
+                )
 
     if args.execute:
         meta_path = extract_meta_path(output)
