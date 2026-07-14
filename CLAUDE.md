@@ -100,8 +100,13 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
 Agents are defined in `openclaw.json` (`agents.list`): `jerry` (default assistant, bound to
 Telegram), `resi` (AutoTap, untouched), and the AutoTrade desk — `researcher`, `quant`, `critic`,
 `risk`, `trader` (PM), `executor`, `archivist`, `overseer` (CIO/orchestrator), `developer`. `dwight`
-(general dev/PM + code dispatcher) runs in the gateway but was **decoupled from the trading desk
-2026-06-17** — it is no longer a desk agent. Every agent (including `jerry`) runs through the
+was **decoupled from the desk pipeline 2026-06-17** and since **2026-07-14 is the PM of the ATS v6
+Trading Intel sprint** (Task Manager sprint_id=5, and ONLY that sprint): a daily cron pass grooms
+the sprint board, files at most one issue/day, dispatches ≤2 coding-lane runs/day (always
+`--detach`), and Telegrams Aaron a summary. Coding-lane completion is deterministic: the launcher
+(`scripts/dwight-launch-from-issue.py`) pushes the task branch, opens the PR via `gh`, and flips
+the issue to `in_review` — merge stays human-gated. The `developer` agent does the actual coding
+in per-issue Codex subagent sessions. Every agent (including `jerry`) runs through the
 Gateway inside `openclaw-gateway`. `jerry` works on the real filesystem via the container's bind
 mounts — `/home/aaron/repos` is mounted read-write, so it can create/edit real repos from
 Telegram — but host docker/systemd operations remain operator-owned (no `docker.sock` in the

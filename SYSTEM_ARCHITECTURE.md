@@ -89,11 +89,18 @@ decision) are separate and individually visible.
 | 9 | `developer` | 🔧 | Implements software improvements in git worktrees; opens PRs (human-gated). |
 |  – | `jerry` | 🦝 | Default assistant, bound to Telegram. Runs through the Gateway inside the container like every other agent; reaches the real filesystem via bind mounts (`/home/aaron/repos:rw`, `~/.openclaw`). Host docker/systemd ops stay operator-owned. Not part of the AutoTrade desk. |
 
-> **Decoupled 2026-06-17:** `dwight` (general dev/PM + code-task dispatcher for broader
-> work, e.g. RSL) is **no longer a desk agent**. It still runs in the gateway but is not
-> counted, snapshotted, run-controlled, or metered as part of the trading desk. The
-> desk's software-improvement backlog is mirrored deterministically (overseer priority
-> queue → `poll_priority_queue.py`); the `developer` agent does the desk's code work.
+> **Decoupled 2026-06-17:** `dwight` is **no longer a desk agent**. It still runs in the
+> gateway but is not counted, snapshotted, run-controlled, or metered as part of the
+> trading desk. **Since 2026-07-14 dwight is the PM of the ATS v6 Trading Intel sprint**
+> (Task Manager sprint_id=5, his only sprint): a daily 11:00 ET cron pass grooms the
+> board, reads the deterministic scoreboard for a P&L one-liner (never invents numbers),
+> files ≤1 issue/day, dispatches ≤2 coding-lane runs/day via
+> `scripts/dwight-launch-from-issue.py --execute --detach`, and Telegrams Aaron a
+> summary. The `developer` agent does the desk's actual code work in per-issue Codex
+> subagent sessions; on success the launcher pushes the task branch, opens the PR
+> (`gh`, human-gated merge), and flips the issue to `in_review`. Dwight PMs the
+> *product and sprint* only — the intraday pipeline stays overseer-orchestrated and
+> dwight never touches trading logic (rule_proposals only).
 >
 > `jerry` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
 > desk (`jerry` = default assistant, containerized with a `/home/aaron/repos:rw` bind mount;

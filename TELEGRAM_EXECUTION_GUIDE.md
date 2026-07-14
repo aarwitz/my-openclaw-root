@@ -138,10 +138,16 @@ Rules:
 ## 7) Task Manager automation boundary
 
 What should auto-start:
-- repo-backed coding issues
-- assigned to `Jerry`, `Resi`, `Druck`, or `Dwight`
+- repo-backed coding issues in the ATS v6 Trading Intel sprint (sprint_id=5 — Dwight's only sprint)
+- assigned to `Developer`, `Researcher`, `Quant`, `Jerry`, or `Dwight`
 - branch/repo/acceptance criteria present
 - ready to execute without another human clarification loop
+- dispatched with `--detach` (synchronous launches die inside agent tool-call windows)
+
+Completion contract (2026-07-14): on agent success the launcher pushes the task branch, opens the
+PR via `gh` (bot: aaronclawrsl-bot), sets the issue to `in_review` with `pr_url`, and posts a
+comment that leads with the outcome. Merge is always human (Aaron). If TM returns HTTP 423,
+automation is paused via the tm.lidisolutions.ai pause button — agents stop and report.
 
 What should not auto-start:
 - stories assigned to `Aaron`

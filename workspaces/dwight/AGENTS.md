@@ -81,8 +81,12 @@ When in doubt, assign and add a comment explaining why.
 
 ## PR Boundary
 
-- Ready code with evidence should proceed to PR creation automatically
-- Do not auto-merge
+- Completion is deterministic (2026-07-14): on agent success the LAUNCHER pushes the task
+  branch, opens the PR via `gh` (bot: aaronclawrsl-bot), sets the issue to `in_review` with
+  `pr_url`, and posts a comment leading with the outcome. Verify the comment + `in_review`
+  transition happened; if a run reports success without a PR, treat the stated blocker as a
+  bug to surface to Aaron.
+- Do not auto-merge — merge is always Aaron
 - Do not auto-deploy unless separately approved
 - Do not auto-run external/account-changing actions under the guise of task completion
 
