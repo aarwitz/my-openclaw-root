@@ -25,7 +25,9 @@
       ],
       "deploy": "~/.openclaw/scripts/run-with-trace.sh --tag manual ~/.openclaw/scripts/publish-trader-intel.sh",
       "status": "active",
-      "notes": "Trading logic changes flow as rule_proposals (human-gated); web/app code via normal PR lane."
+      "notes": "Trading logic changes flow as rule_proposals (human-gated); web/app code via normal PR lane.",
+      "sprint_id": 5,
+      "telemetry_cmd": "python3 /home/aaron/.openclaw/workspaces/trading-intel/scripts/drag_report.py"
     },
     {
       "id": "resilife",
@@ -56,7 +58,9 @@
       "notes": "Runner containers (lidi-task-manager-ewag-agent-*) handle branch/PR scaffolding; codegen goes through the gateway codex lane.",
       "runner": "mac-dev",
       "note_lane": "EWAG worker-container lane decommissioned 2026-07-14; standard coding lane only",
-      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
+      "sprint_id": null,
+      "telemetry_cmd": null
     },
     {
       "id": "montra",
@@ -84,7 +88,9 @@
       "status": "paused",
       "notes": "iOS app repo found 2026-07-03: EWAG-dev/MONTRA on the mac node.",
       "runner": "mac-dev",
-      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
+      "sprint_id": null,
+      "telemetry_cmd": null
     },
     {
       "id": "autotap",
@@ -115,7 +121,9 @@
       "status": "paused",
       "notes": "This is the org's QA arm \u2014 every iOS product's verification gate once wired.",
       "runner": "mac-dev",
-      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
+      "sprint_id": null,
+      "telemetry_cmd": null
     },
     {
       "id": "robot",
@@ -136,7 +144,9 @@
       "status": "paused",
       "notes": "RobotFirmware + Vision subdirs. Related research repos: Dockerized_GroundingSAM, OrbSlam, tracking-dataset. Embedded-agent runtime design TBD.",
       "runner": "robot-orin",
-      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
+      "sprint_id": null,
+      "telemetry_cmd": null
     },
     {
       "id": "taskmanager",
@@ -157,7 +167,27 @@
       "deploy": "npx wrangler deploy (human-gated)",
       "status": "paused",
       "notes": "Dwight is sole maintainer per workspace contract.",
-      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now"
+      "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
+      "sprint_id": null,
+      "telemetry_cmd": null
+    },
+    {
+      "name": "Platform",
+      "status": "paused",
+      "note": "The agentic system itself as a project (AGENTIC_SYSTEM.md). Activate by creating its TM sprint, setting sprint_id, and flipping status. Telemetry: health sweep + coding-lane failure stats.",
+      "tm_assignee": "Developer",
+      "repos": [
+        {
+          "slug": "aarwitz/my-openclaw-root",
+          "path": "/home/aaron/.openclaw"
+        },
+        {
+          "slug": "aarwitz/lidi-task-manager",
+          "path": "/home/aaron/repos/lidi-task-manager"
+        }
+      ],
+      "sprint_id": null,
+      "telemetry_cmd": null
     }
   ],
   "runners": {
