@@ -19,6 +19,9 @@ a Task Manager integration.
 
 1. **`SYSTEM_ARCHITECTURE.md`** — the single source of truth for AutoTrade (topology v4, DB schema
    v11/v12). **When any other doc disagrees, this one wins.**
+1b. **`AGENTIC_SYSTEM.md`** — the improvement kernel: how ALL projects (AutoTrade first,
+   CleaningRobot etc. later) get telemetry-driven, human-gated, recursively verified code
+   improvements. Authoritative for the PM/coding-lane loop; project registry is `projects.json`.
 2. **`TELEGRAM_EXECUTION_GUIDE.md`** — operator (human-over-Telegram) interface and the `run issue`
    coding command contract.
 3. **`cli_guide.md`** — bring the gateway up/down, Tailscale exposure, pairing.

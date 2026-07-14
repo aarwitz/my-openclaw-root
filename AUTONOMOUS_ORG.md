@@ -9,7 +9,7 @@ performance: an org that corrupts its own auth ships nothing).
 ## The model: one queue, one coding lane, product registry, owner loops
 
 ```
-   products.json ──────────────┐  (single source of truth: repo paths, slugs,
+   projects.json ──────────────┐  (single source of truth: repo paths, slugs,
                                │   verify/deploy commands, tm_assignee, owner)
                                ▼
   org-owner-daily (dwight) ── files/curates READY issues per product ──► TM
@@ -23,7 +23,7 @@ performance: an org that corrupts its own auth ships nothing).
 
 - **Queue**: Task Manager (tm.lidisolutions.ai, CF Worker + D1). Fixed 2026-07-03
   (init stalls, D1 param crash, scoping); one repo, one branch, one impl.
-- **Registry**: `~/.openclaw/products.json`. Add a product here → the repo
+- **Registry**: `~/.openclaw/projects.json`. Add a product here → the repo
   inference, TM allowlist, and org-owner loop all know it. This file is the
   org's hiring paperwork.
 - **Coding lane**: ONE lane writes code — the gateway codex-subagent lane
