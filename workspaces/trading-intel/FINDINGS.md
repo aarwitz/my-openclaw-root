@@ -19,6 +19,23 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-07-15 (pm) — the placeholder disease came back, because a cutover makes healthy organs vestigial
+
+- **D51.1's fix silently stopped working the day of the D52 cutover and nobody noticed for a
+  week.** Post-cutover, sim fills are instant, so orders are never non-terminal and
+  `sync_fills`' lineage-preserving position path had nothing to process — position creation
+  devolved back to reconcile's placeholder factory (GE/TMUS/ETN/ABBV on 2026-07-15, HIMS
+  earlier, fabricated hypotheses again). Root-fixed at the only correct place: the moment of
+  fill, where the intent's real hypothesis is in hand (`execute_intent` now books the desk
+  position with lineage; `sync_fills` relinks any surviving placeholder every pass).
+- The general lesson upgrades the 2026-07-06 one: it's not just "ask what happens when the
+  async thing completes after my window" — it's **"every architecture change silently
+  re-scopes which guards still fire; a guard that can no longer trigger is indistinguishable
+  from a guard that always passes."** A regression test must assert the OUTCOME (no filled
+  order ever yields a HYP-SYNC hypothesis), not the mechanism. TM issue drafted
+  (inbox/tm-issue-draft-vestigial-organ-audit.md) for the full post-cutover vestigial sweep
+  (shadow parity vs frozen Alpaca account is the next suspect).
+
 ## 2026-07-15 — the coin flip isn't fair: a long thesis's true base rate vs SPY is 46.6%, not 50%
 
 - **Measured, not assumed**: across 120 random universe names × monthly entries 2024-26

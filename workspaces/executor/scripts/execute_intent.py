@@ -218,14 +218,30 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
          # sim fills are instant — persist fill truth here or analytics read NULLs
          resp.get("filled_at"), _f(resp.get("filled_avg_price")), None),
     )
-    if (resp.get("status") == "filled") and resp.get("filled_avg_price") is not None:
+    instant_fill = (resp.get("status") == "filled") and resp.get("filled_avg_price") is not None
+    if instant_fill:
         conn.execute(
             "UPDATE trade_intents SET actual_price=?, actual_size=?, executed_at=? WHERE id=?",
             (_f(resp.get("filled_avg_price")), qty, resp.get("filled_at"), intent_id))
+        # Post-D52 the sim engine fills instantly, so THIS is the only moment the
+        # fill and its authoring hypothesis are in the same hands — book the desk
+        # position with real lineage NOW. Leaving it to reconcile re-created the
+        # POS-SYNC placeholder disease on 2026-07-15 (4 positions with fabricated
+        # hypotheses at the open) because sync_fills only handles orders that
+        # were non-terminal in the DB — which instant fills never are.
+        from sync_fills import _signed_delta, _upsert_position
+        pos_action = _upsert_position(
+            conn, ticker=intent_row["ticker"],
+            hypothesis_id=intent_row["hypothesis_id"],
+            delta=_signed_delta(side, qty),
+            fill_price=_f(resp.get("filled_avg_price")),
+            filled_at=resp.get("filled_at") or now_iso(), dry_run=False)
+        audit(conn, actor="executor", entity_type="position", entity_id=intent_row["ticker"],
+              action="fill_position", before_state=None, after_state="open",
+              rationale=f"instant sim fill booked with lineage {intent_row['hypothesis_id']}: {pos_action}")
     conn.execute(
-        "UPDATE trade_intents SET state='submitted', submitted_at=?, broker_order_id=? "
-        "WHERE id=?",
-        (submitted_at, broker_order_id, intent_id),
+        "UPDATE trade_intents SET state=?, submitted_at=?, broker_order_id=? WHERE id=?",
+        ("filled" if instant_fill else "submitted", submitted_at, broker_order_id, intent_id),
     )
     audit(conn, actor="executor", entity_type="trade_intent", entity_id=intent_id,
           action="submit", before_state="approved", after_state="submitted",

@@ -202,6 +202,8 @@ def relink_placeholders(conn, *, dry_run: bool = False) -> list[dict]:
         if intent is None:
             out.append({"position": p["id"], "ticker": p["ticker"], "action": "no_real_intent_found"})
             continue
+        if intent["hypothesis_id"] == p["hypothesis_id"]:
+            continue  # lineage already correct — no write, no audit noise
         if not dry_run:
             conn.execute("UPDATE positions SET hypothesis_id=? WHERE id=?",
                          (intent["hypothesis_id"], p["id"]))
@@ -223,8 +225,10 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = connect()
     report = {"synced": sync(conn, include_closed_unknown=args.backfill, dry_run=args.dry_run)}
-    if args.backfill:
-        report["relinked"] = relink_placeholders(conn, dry_run=args.dry_run)
+    # Relink EVERY run (cheap; targets only open POS-SYNC rows): defense in depth
+    # after the 2026-07-15 recurrence — any path that fabricates a placeholder
+    # gets its lineage restored on the next pass instead of waiting for a human.
+    report["relinked"] = relink_placeholders(conn, dry_run=args.dry_run)
     if not args.dry_run:
         conn.commit()
     changed = [r for r in report["synced"] if r.get("action") not in ("unchanged",)]
