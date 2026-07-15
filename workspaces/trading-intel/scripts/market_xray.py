@@ -65,6 +65,10 @@ KEYWORDS: dict[str, list[str]] = {
     "factor_mom_spread": ["momentum", "trend follow", "winners", "losers", "mom_12_1", "reversal"],
     "factor_sent_spread": ["sentiment", "news-driven", "news flow"],
     "spy_vol_21d": ["volatility", "vix", "vol regime", "calm", "drawdown"],
+    # second-loop metrics: high unexplained share = the ontology is missing a
+    # driver of OUR OWN P&L. Engagement = a debrief/hypothesis discussing it.
+    "unexplained_share_60d": ["unexplained", "residual", "attribution", "unknown driver"],
+    "desk_resid_z": ["unexplained", "residual", "attribution", "idiosyncratic"],
 }
 # Dimensions a dedicated observable already owns (engagement by construction).
 OWNED_BY_OBSERVABLE = {"avg_pairwise_corr_21d": "rotation_snapshots"}
@@ -230,6 +234,91 @@ def _engaged(conn, metric: str, d: str) -> bool:
         return False
 
 
+def _ols(y: list[float], xs: list[list[float]]) -> tuple[list[float], float] | None:
+    """Tiny OLS (intercept + k regressors) via normal equations. Returns
+    (betas, r2) or None if the system is singular/underdetermined."""
+    n, k = len(y), len(xs)
+    if n < 3 * (k + 1):
+        return None
+    X = [[1.0] + [xs[j][i] for j in range(k)] for i in range(n)]
+    m = k + 1
+    A = [[sum(X[r][i] * X[r][j] for r in range(n)) for j in range(m)] for i in range(m)]
+    b = [sum(X[r][i] * y[r] for r in range(n)) for i in range(m)]
+    for col in range(m):                      # gaussian elimination, partial pivot
+        piv = max(range(col, m), key=lambda r: abs(A[r][col]))
+        if abs(A[piv][col]) < 1e-12:
+            return None
+        A[col], A[piv] = A[piv], A[col]
+        b[col], b[piv] = b[piv], b[col]
+        for r in range(col + 1, m):
+            f = A[r][col] / A[col][col]
+            for c in range(col, m):
+                A[r][c] -= f * A[col][c]
+            b[r] -= f * b[col]
+    beta = [0.0] * m
+    for i in range(m - 1, -1, -1):
+        beta[i] = (b[i] - sum(A[i][j] * beta[j] for j in range(i + 1, m))) / A[i][i]
+    yhat = [sum(beta[j] * X[r][j] for j in range(m)) for r in range(n)]
+    my = sum(y) / n
+    ss_tot = sum((v - my) ** 2 for v in y)
+    ss_res = sum((y[r] - yhat[r]) ** 2 for r in range(n))
+    if ss_tot <= 0:
+        return None
+    return beta, 1.0 - ss_res / ss_tot
+
+
+def compute_residual(metrics: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    """The SECOND LOOP's fuel gauge: how much of the desk's own daily return the
+    system's ontology (SPY beta + its measured factor/breadth dimensions) fails
+    to explain. A persistently high unexplained share is measured evidence that
+    something OUTSIDE the current frame is driving our P&L — the trigger for
+    growing the frame, without knowing in advance what's missing."""
+    conn = sqlite3.connect(DB, timeout=60.0)
+    eq = dict(conn.execute(
+        "SELECT date, equity FROM book_equity WHERE book='desk' ORDER BY date"))
+    conn.close()
+    spy_px = fs._prices("SPY", LOOKBACK_D + 60)
+    spy_c = {b["t"][:10]: float(b["c"]) for b in spy_px}
+    spy_dts = [b["t"][:10] for b in spy_px]
+    spy_r = {spy_dts[i]: (spy_c[spy_dts[i]] / spy_c[spy_dts[i - 1]] - 1.0) * 100
+             for i in range(1, len(spy_dts)) if spy_c[spy_dts[i - 1]]}
+
+    eq_dates = sorted(eq)
+    desk_r = {}
+    for i in range(1, len(eq_dates)):
+        d0, d1 = eq_dates[i - 1], eq_dates[i]
+        if d1 in spy_r and eq[d0]:            # trading days only (weekend rows are flat)
+            desk_r[d1] = (eq[d1] / eq[d0] - 1.0) * 100
+
+    regressors = ["factor_mom_spread", "factor_sent_spread", "breadth_ew_minus_spy"]
+    dates = sorted(d for d in desk_r
+                   if d in spy_r and all(d in metrics[m] for m in regressors))
+    out: dict[str, dict[str, float]] = {"unexplained_share_60d": {}, "desk_resid_z": {}}
+    WIN = 60
+    for i in range(len(dates)):
+        win = dates[max(0, i - WIN + 1):i + 1]
+        if len(win) < 30:
+            continue
+        y = [desk_r[d] for d in win]
+        xs = [[spy_r[d] for d in win]] + [[metrics[m][d] for d in win] for m in regressors]
+        fit = _ols(y, xs)
+        if fit is None:
+            continue
+        beta, r2 = fit
+        out["unexplained_share_60d"][dates[i]] = round((1.0 - r2) * 100, 3)
+        # today's residual, standardized against the window's residuals
+        resids = []
+        for d in win:
+            pred = beta[0] + beta[1] * spy_r[d] + sum(
+                beta[2 + j] * metrics[m][d] for j, m in enumerate(regressors))
+            resids.append(desk_r[d] - pred)
+        mu = sum(resids) / len(resids)
+        sd = math.sqrt(sum((x - mu) ** 2 for x in resids) / (len(resids) - 1))
+        if sd > 0:
+            out["desk_resid_z"][dates[i]] = round(resids[-1] / sd, 3)
+    return out
+
+
 def _ensure_table(conn) -> None:
     conn.execute("""
       CREATE TABLE IF NOT EXISTS market_xray (
@@ -247,6 +336,7 @@ def _ensure_table(conn) -> None:
 
 def snapshot() -> dict:
     metrics = compute_metrics()
+    metrics.update(compute_residual(metrics))
     conn = sqlite3.connect(DB, timeout=60.0)
     _ensure_table(conn)
     summary = {}
