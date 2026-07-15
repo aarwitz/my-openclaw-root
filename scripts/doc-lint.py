@@ -104,6 +104,19 @@ def main() -> int:
                 findings.append({"check": "superseded", "doc": rel_doc, "line": line, "ref": m.group(0),
                                  "detail": "cites a retired doc without marking it archived"})
 
+    # Decision ids must be unique — two agents appending on different days
+    # re-used D52/D53 (caught 2026-07-15).
+    dlog = TI / "DECISION_LOG.md"
+    if dlog.exists():
+        ids: dict[str, int] = {}
+        text = dlog.read_text(errors="replace")
+        for m in re.finditer(r"^- (D[\d.]+)[ :(]", text, re.M):
+            ids[m.group(1)] = ids.get(m.group(1), 0) + 1
+        for did, n in sorted(ids.items()):
+            if n > 1:
+                findings.append({"check": "dup-decision-id", "doc": "workspaces/trading-intel/DECISION_LOG.md",
+                                 "ref": did, "detail": f"decision id used {n} times — renumber the later entry"})
+
     fnd = TI / "FINDINGS.md"
     if fnd.exists():
         text = fnd.read_text(errors="replace")

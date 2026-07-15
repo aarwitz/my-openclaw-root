@@ -58,7 +58,7 @@ incident postmortems) need no tag.
   completes AFTER my window?" — and never let a repair path *fabricate* lineage; a repair
   that invents a placeholder hypothesis converts missing data into wrong data, which is
   strictly worse for a learning system. Fixed via the `sync_fills` stage + lineage backfill
-  (D52); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
+  (D51.1); first prediction cohort (69 preds, 2026-06-19) matures ~2026-07-10 with clean
   lineage — barely in time.
 
 ## 2026-07-10 — the options question is now completely answered: even pre-earnings positioning carries nothing
