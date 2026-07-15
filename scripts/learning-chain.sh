@@ -68,6 +68,11 @@ step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
 # Non-zero exit = shadow diverged from the broker — exactly what shadow mode
 # exists to catch, so it flows into FAILED and pages via the chain alert.
 step "sim-parity"          "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
+# Market x-ray (D65): decompose what the tape did (breadth/dispersion/corr/
+# factor spreads/vol), flag |z|>=2 phenomena the desk never engaged = BLIND
+# SPOTS — reviewed weekly by the Sunday audit. Self-auditing beats waiting
+# for the operator to point at the market.
+step "market-xray"         "$PY" "$HOME/.openclaw/workspaces/trading-intel/scripts/market_xray.py" snapshot
 # D61: fundamental forecasting loop — grade FCF/EPS forecasts against newly
 # reported actuals daily; refresh forecasts for book names (cheap, cached).
 step "fund-grade"          "$PY" "$TI/fundamental_forecast.py" grade
