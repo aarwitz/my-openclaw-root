@@ -16,6 +16,7 @@ Effective: 2026-05-28; updated 2026-06-17.
 3. `docs/03_EXECUTION_STATE_MACHINE.md` — hypothesis, trade intent, order, position lifecycles and gates.
 4. `docs/04_SHARED_STATE_SCHEMA.md` — canonical entity model and SQLite contract.
 5. `docs/05_IMPLEMENTATION_POLICY.md` — schedules, runtime controls, build phases, validation gates.
+6. `docs/08_LEARNING_SYSTEMS_MAP.md` — every learning/memory/adaptive mechanism, one page (fast vs human-gated loops, live counts, known gaps).
 
 ## Reference
 
