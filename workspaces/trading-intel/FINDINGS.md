@@ -19,6 +19,22 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-07-15 — the coin flip isn't fair: a long thesis's true base rate vs SPY is 46.6%, not 50%
+
+- **Measured, not assumed**: across 120 random universe names × monthly entries 2024-26
+  (n=3,480 fifteen-trading-day windows), P(name beats SPY) = **0.4664**. The median stock
+  loses to the cap-weighted index (mega-cap skew), so `predict.py`'s `BASE_RATE = 0.5`
+  overstates every long's p_correct by ~3.4pts before any evidence arrives — and understates
+  shorts, which start *advantaged* at 53.4% under SPY-relative grading.
+- Reframes the exam: the desk's 42% hit rate is ~4.5pts below true chance, not 8; and a long
+  mechanism whose posterior sits at 0.46 is AT chance, not below it. Three rule proposals
+  filed (`rp-base-rate-empirical-20260715`, `rp-mechanism-family-dedup-20260715`,
+  `rp-payoff-aware-grading-20260715`) — base-rate fix, naive-Bayes overconfidence cap
+  (p=0.78 appeared within a week of first observations via correlated mechanism stacking),
+  and payoff-aware grading (hit-rate posteriors are blind to expectancy, which is where any
+  actual desk edge lives).
+- revalidate-by: 2026-10-15 (re-measure the base rate quarterly; it is regime-dependent)
+
 ## 2026-07-08 — one colliding audit id silently cost the desk a day of learning
 
 - **A batch-unsafe id scheme in a shared helper killed the learning chain the first time the
