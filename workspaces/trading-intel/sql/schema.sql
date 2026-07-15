@@ -413,7 +413,7 @@ CREATE INDEX IF NOT EXISTS idx_attribution_hypothesis     ON attribution(hypothe
 CREATE TABLE IF NOT EXISTS benchmarks (
   id                     TEXT PRIMARY KEY,
   captured_at            TEXT NOT NULL,
-  horizon                TEXT NOT NULL CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus','all')),
+  horizon                TEXT NOT NULL CHECK (horizon IN ('intraday','swing_1_5d','position_1_4w','trend_1_3m','long_6m_plus','all','system_era')),
   period_start           TEXT NOT NULL,
   period_end             TEXT NOT NULL,
   portfolio_return_pct   REAL,

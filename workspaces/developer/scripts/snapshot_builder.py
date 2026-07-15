@@ -408,7 +408,12 @@ def _benchmark_spy_comparison(conn: sqlite3.Connection) -> dict[str, Any] | None
         for h in ("intraday", "swing_1_5d", "position_1_4w", "trend_1_3m", "long_6m_plus")
         if h in latest_by_h
     ]
-    return {"available": True, "source": "benchmarks", "horizons": horizons}
+    # system_era = the autonomous track record (post 2026-07-07 cutover); the
+    # 'all' row includes the operator's manually ported pre-era portfolio and
+    # must never be presented as system alpha.
+    return {"available": True, "source": "benchmarks", "horizons": horizons,
+            "system_era": latest_by_h.get("system_era"),
+            "since_inception_incl_manual": latest_by_h.get("all")}
 
 
 def _snapshot_spy_comparison(points: list[dict[str, Any]]) -> dict[str, Any]:

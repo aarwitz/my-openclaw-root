@@ -50,6 +50,11 @@ HORIZON_DAYS = [
     ("all", None),
 ]
 
+# Attribution honesty (operator, 2026-07-15): equity before this date includes
+# Aaron's manually ported portfolio and operator-directed buys/sells — it is NOT
+# the system's record. The autonomous track record starts at the D52 sim cutover.
+SYSTEM_EPOCH = "2026-07-07"
+
 
 def _aligned_series() -> list[dict]:
     """[{date, equity, spy_close}] for trading dates present in both series."""
@@ -90,8 +95,13 @@ def _sharpe(window: list[dict]) -> float | None:
 def compute_rows(series: list[dict], run_id: str | None) -> list[dict]:
     captured_at = now_iso()
     rows = []
-    for horizon, days in HORIZON_DAYS:
-        window = series if days is None else series[-(days + 1):]
+    for horizon, days in HORIZON_DAYS + [("system_era", "epoch")]:
+        if days == "epoch":
+            window = [p for p in series if p["date"] >= SYSTEM_EPOCH]
+        elif days is None:
+            window = series
+        else:
+            window = series[-(days + 1):]
         if len(window) < 2:
             continue
         first, last = window[0], window[-1]
