@@ -154,6 +154,54 @@ def test_proceeds_guard():
         os.unlink(path)
 
 
+# ------------------------------------------------- 4b. fill lineage (2026-07-15 recurrence)
+def test_instant_fill_lineage():
+    """OUTCOME assertion, not mechanism: a filled desk order must never yield a
+    fabricated HYP-SYNC hypothesis. Post-D52 instant sim fills bypassed the
+    lineage path twice (2026-07-06 Alpaca-slow-fill variant, 2026-07-15
+    sim-instant-fill variant); this test fails if any future refactor
+    reintroduces either."""
+    from datetime import datetime, timezone
+    import execute_intent as EI
+    conn, path = scratch_db()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    orig = (EI.latest_trade, EI.daily_bars, EI.place_order)
+    try:
+        conn.execute("INSERT INTO hypotheses (id, created_at, created_by, tickers, thesis_summary, state) "
+                     "VALUES ('HYPO-TEST-LINEAGE', ?, 'researcher', '[\"TSTL\"]', 'long TSTL lineage test', 'active')", (now,))
+        conn.execute("INSERT INTO expression_candidates (id, hypothesis_id, vehicle, ticker, created_at) "
+                     "VALUES ('EXPR-TEST-L', 'HYPO-TEST-LINEAGE', 'direct_equity', 'TSTL', ?)", (now,))
+        conn.execute("INSERT INTO trade_intents (id, hypothesis_id, expression_candidate_id, created_by, "
+                     "created_at, action, ticker, vehicle, size, entry_price_target, state, direction) "
+                     "VALUES ('ti-test-lineage', 'HYPO-TEST-LINEAGE', 'EXPR-TEST-L', 'trader', ?, "
+                     "'open', 'TSTL', 'direct_equity', 5, '100.0', 'approved', 'long')", (now,))
+        conn.commit()
+        EI.latest_trade = lambda t: {"price": 100.0}
+        EI.daily_bars = lambda *a, **k: []
+        EI.place_order = lambda **kw: {"id": "sim-test-lineage", "status": "filled",
+                                       "submitted_at": now, "filled_at": now,
+                                       "filled_avg_price": 100.05}
+        row = conn.execute("SELECT * FROM trade_intents WHERE id='ti-test-lineage'").fetchone()
+        res = EI.process(row, dry_run=False, conn=conn)
+        check("instant fill submits", res.get("submitted") is True, str(res))
+        pos = conn.execute("SELECT hypothesis_id, qty FROM positions WHERE ticker='TSTL' "
+                           "AND state='open'").fetchone()
+        check("position booked with REAL lineage", pos is not None
+              and pos["hypothesis_id"] == "HYPO-TEST-LINEAGE",
+              str(dict(pos)) if pos else "no position row")
+        it = conn.execute("SELECT state, actual_price, actual_size FROM trade_intents "
+                          "WHERE id='ti-test-lineage'").fetchone()
+        check("intent filled with actuals", it["state"] == "filled"
+              and abs((it["actual_price"] or 0) - 100.05) < 1e-9 and it["actual_size"] == 5,
+              str(tuple(it)))
+        nsync = conn.execute("SELECT COUNT(*) FROM hypotheses WHERE id LIKE 'HYP-SYNC%'").fetchone()[0]
+        check("no HYP-SYNC hypothesis fabricated", nsync == 0, f"found {nsync}")
+    finally:
+        EI.latest_trade, EI.daily_bars, EI.place_order = orig
+        conn.close()
+        os.unlink(path)
+
+
 # ------------------------------------------------- 5. risk cap sanity
 def test_risk_caps():
     import gate_risk_intents as g
@@ -173,7 +221,8 @@ def test_risk_caps():
 if __name__ == "__main__":
     sys.path.insert(0, f"{OC}/workspaces/risk/scripts")
     sys.path.insert(0, f"{OC}/workspaces/trader/scripts")
-    for t in (test_fill_price, test_apply_fill_ledger, test_stop_breach, test_proceeds_guard, test_risk_caps):
+    for t in (test_fill_price, test_apply_fill_ledger, test_stop_breach, test_proceeds_guard,
+              test_instant_fill_lineage, test_risk_caps):
         print(f"== {t.__name__}")
         try:
             t()

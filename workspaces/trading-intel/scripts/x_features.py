@@ -20,11 +20,12 @@ FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
 def build(names, start, end, win=30):
     conn = sqlite3.connect(FEAT)
     total = 0
+    skipped = 0
     for sym in names:
         try:
             series = x.daily_mention_counts("$" + sym.lstrip("$"), start, end)
         except Exception as e:
-            print(f"  {sym}: skip ({str(e)[:60]})"); continue
+            print(f"  {sym}: skip ({str(e)[:60]})"); skipped += 1; continue
         dates = [d for d, _ in series]
         vals = [v for _, v in series]
         rows = []
@@ -41,7 +42,16 @@ def build(names, start, end, win=30):
         conn.commit()
         total += len(rows)
         print(f"  {sym}: {len(series)} days -> {len(rows)} feature rows", flush=True)
-    print(f"done: {total} x-feature rows across {len(names)} names")
+    print(f"done: {total} x-feature rows across {len(names)} names ({skipped} skipped)")
+    # Fail LOUDLY when the whole run produced nothing: from 2026-07-01 to -15
+    # the X API returned 402 credits-depleted on every call and this script
+    # kept exiting 0 ("ok: x-features") while the desk's top feature family
+    # silently froze. All-skip = broken intake, not a quiet day.
+    if names and skipped == len(names):
+        print("FATAL: every name skipped — X intake is down (auth/credits/API), not merely quiet",
+              file=sys.stderr)
+        return 2
+    return 0
 
 
 def main():
@@ -65,8 +75,8 @@ def main():
         conn.close()
     else:
         names = [s.strip().upper() for s in a.names.split(",") if s.strip()]
-    build(names, start, end, a.win)
+    return build(names, start, end, a.win)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

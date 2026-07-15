@@ -19,6 +19,21 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-07-15 (pm) — the desk's best feature spent two weeks dead while its collector reported "ok"
+
+- **X/Twitter intake died 2026-07-01 (HTTP 402 credits-depleted — month-boundary billing)
+  and `x_features.py` kept exiting 0** — the connector treats every failure as a per-name
+  "skip", so 100% skips looked identical to a quiet day. `x_mention_vol_z` (the top single
+  feature, IC 0.034-0.056) has been frozen at July-1 values in every nightly rank since.
+  The D57 freshness sweep DID flag it (that guard worked); the pipeline itself never
+  complained. Fixed: all-names-skipped now exits 2 with a FATAL line, so the signals chain
+  alerts on intake death instead of logging "ok: x-features".
+- Same shape as the morning's placeholder recurrence, in data form: a failure path that
+  degrades to "empty success" is a guard that cannot fire. **Operator decision needed:
+  top up X API credits (restores the #1 feature) or deliberately retire the family** —
+  ApeWisdom (Reddit) is the free partial substitute now collecting 4x/day (D60).
+- revalidate-by: 2026-08-01 (confirm intake alive after credits decision + next month boundary)
+
 ## 2026-07-15 (pm) — the placeholder disease came back, because a cutover makes healthy organs vestigial
 
 - **D51.1's fix silently stopped working the day of the D52 cutover and nobody noticed for a
