@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -48,7 +49,20 @@ LEGACY_HORIZON_MAP = {
     "6m+": "long_6m_plus", "1y": "long_6m_plus", "long": "long_6m_plus",
 }
 
-BASE_RATE = 0.5  # calibrated base rate for a thesis with no mechanism edge.
+# Direction-conditional base rate (rp-base-rate-empirical-20260715): measured on
+# 120 random universe names x monthly entries 2024-26 (n=3,480 15td windows),
+# P(name beats SPY) = 0.4664 — the median stock loses to the cap-weighted index,
+# so a long thesis's true "no-edge" chance is ~46.6% and a short's (under
+# SPY-relative grading) ~53.4%. Re-measure quarterly (FINDINGS 2026-07-15,
+# revalidate-by 2026-10-15).
+BASE_RATE = {"long": 0.466, "short": 0.534}
+
+# rp-mechanism-family-dedup-20260715: cap the total posterior shift from base
+# until at least one linked mechanism family has this many observations —
+# correlated generated mechanisms stacked as independent evidence produced
+# p=0.78 within a week of the first observation cohort.
+MAX_SHIFT_UNPROVEN = 0.15
+PROVEN_FAMILY_N = 30.0
 EXIT_OK = 0
 
 
@@ -100,12 +114,14 @@ def load_mechanisms(conn: sqlite3.Connection) -> dict[str, dict]:
     out = {}
     for r in conn.execute(
         "SELECT id, name, antecedent_class, consequent_class, direction, horizon, "
-        "posterior_mean, posterior_ci_low, posterior_ci_high, status FROM mechanisms"
+        "posterior_mean, posterior_ci_low, posterior_ci_high, status, "
+        "observed_hits + observed_misses FROM mechanisms"
     ):
         out[r[0]] = {
             "id": r[0], "name": r[1], "antecedent_class": r[2], "consequent_class": r[3],
             "direction": r[4], "horizon": r[5], "posterior_mean": r[6],
             "ci_low": r[7], "ci_high": r[8], "status": r[9],
+            "n_obs": float(r[10] or 0),
         }
     return out
 
@@ -184,9 +200,11 @@ def predict_one(
     eq = evidence_quality(conn, hyp_id)
     tdir = thesis_direction(thesis)
 
-    terms: list[tuple[float, float]] = []
-    used: list[str] = []
-    used_detail: list[dict] = []
+    # rp-mechanism-family-dedup-20260715: near-duplicate mechanisms (same
+    # antecedent/consequent/direction — e.g. three generated growth+momentum
+    # variants) share ONE vote; the most-observed family member casts it.
+    # Stacking them as independent log-odds evidence double-counts one signal.
+    fam_best: dict[tuple, dict] = {}
     for mid in mech_ids:
         m = mechs.get(mid)
         if not m or m["posterior_mean"] is None:
@@ -204,12 +222,35 @@ def predict_one(
             effective = posterior
             if align == 0:
                 weight *= 0.5  # neutral mechanism: mild support only
-        terms.append((effective, weight))
-        used.append(mid)
-        used_detail.append({"id": mid, "align": align, "eff": round(effective, 3),
-                            "w": round(weight, 3)})
+        fam = (m["antecedent_class"], m["consequent_class"], m["direction"])
+        cand = {"mid": mid, "align": align, "effective": effective,
+                "weight": weight, "n_obs": m["n_obs"]}
+        if fam not in fam_best or cand["n_obs"] > fam_best[fam]["n_obs"]:
+            fam_best[fam] = cand
 
-    p_correct, combined_lo = wm.combine_p(BASE_RATE, terms, eq)
+    terms: list[tuple[float, float]] = []
+    used: list[str] = []
+    used_detail: list[dict] = []
+    for cand in fam_best.values():
+        terms.append((cand["effective"], cand["weight"]))
+        used.append(cand["mid"])
+        used_detail.append({"id": cand["mid"], "align": cand["align"],
+                            "eff": round(cand["effective"], 3),
+                            "w": round(cand["weight"], 3),
+                            "n": round(cand["n_obs"], 1)})
+
+    base = BASE_RATE.get(tdir, 0.5)
+    p_correct, combined_lo = wm.combine_p(base, terms, eq)
+    # Cap total shift from base until the evidence has real depth: no linked
+    # family with n>=PROVEN_FAMILY_N observations means the posterior spread is
+    # mostly prior + a handful of noisy labels — not licence for p=0.78.
+    max_n = max((c["n_obs"] for c in fam_best.values()), default=0.0)
+    if max_n < PROVEN_FAMILY_N:
+        lo_b, hi_b = base - MAX_SHIFT_UNPROVEN, base + MAX_SHIFT_UNPROVEN
+        capped = min(max(p_correct, lo_b), hi_b)
+        if capped != p_correct:
+            p_correct = capped
+            combined_lo = math.log(p_correct / (1.0 - p_correct))
     # Name-aware band: width from the name's realized vol, P50 nudged toward fair
     # value by the (bounded, confidence-scaled) margin of safety. Degrades to the
     # generic band when no valuation exists for the ticker.

@@ -113,8 +113,12 @@ def grade(db, dry_run=False):
             conn.execute("UPDATE hypotheses SET resolved_state=?, resolved_at=?, archivist_grade=?, "
                          "state='resolved' WHERE id=?", (rs, f"{d_ex}T00:00:00Z", note, h["id"]))
             for pr in preds:
-                conn.execute("UPDATE predictions SET realized_return_pct=? WHERE id=?",
-                             (round(100 * t_ret, 3), pr["id"]))
+                # realized_excess_pct feeds calibrate's dead-band (|excess|<=50bps
+                # -> 'inconclusive', no mechanism observation) and per-mechanism
+                # expectancy (rp-payoff-aware-grading-20260715).
+                conn.execute("UPDATE predictions SET realized_return_pct=?, realized_excess_pct=? "
+                             "WHERE id=?",
+                             (round(100 * t_ret, 3), round(100 * excess, 3), pr["id"]))
             conn.commit()
         graded.append((h["id"], ticker, direction, rs, round(excess, 3)))
 

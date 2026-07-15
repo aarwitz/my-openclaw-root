@@ -132,16 +132,38 @@ def _mechanism_links(raw: str | None) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Stage 1 — resolve predictions into Brier + mechanism observations
 # --------------------------------------------------------------------------- #
+# rp-payoff-aware-grading-20260715: a resolution inside the dead-band is a push,
+# not evidence — it earns no Brier and emits no mechanism observations. A +1bp
+# excess is coin-flip noise; letting it grade a mechanism 'hit' polluted the
+# posteriors the whole learning loop runs on.
+EXCESS_DEADBAND_PCT = 0.5  # |SPY-relative excess| in percent
+
+
 def resolve_predictions(conn, now, exp, dry_run) -> list[dict]:
     rows = conn.execute(
         "SELECT p.id, p.hypothesis_id, p.p_correct, p.mechanism_ids_json, "
-        "p.regime_at_prediction, h.resolved_state, h.resolved_at "
+        "p.regime_at_prediction, p.realized_excess_pct, h.resolved_state, h.resolved_at "
         "FROM predictions p JOIN hypotheses h ON h.id = p.hypothesis_id "
         "WHERE p.resolved_at IS NULL AND h.resolved_state IS NOT NULL"
     ).fetchall()
 
     resolved: list[dict] = []
     for r in rows:
+        excess = r["realized_excess_pct"]
+        if excess is not None and abs(float(excess)) <= EXCESS_DEADBAND_PCT:
+            if not dry_run:
+                conn.execute(
+                    "UPDATE predictions SET realized_outcome='inconclusive', resolved_at=? WHERE id=?",
+                    (_now_iso(), r["id"]),
+                )
+                _audit(conn, entity_type="prediction", entity_id=r["id"],
+                       action="resolve", before="unresolved", after="inconclusive",
+                       rationale=f"dead-band push: excess {float(excess):+.2f}% within ±{EXCESS_DEADBAND_PCT}% — no Brier, no observations",
+                       exp=exp)
+            resolved.append({"prediction_id": r["id"], "hypothesis_id": r["hypothesis_id"],
+                             "outcome": "inconclusive", "brier": None,
+                             "observations_emitted": 0})
+            continue
         correct = str(r["resolved_state"]).startswith("correct")
         bit = 1.0 if correct else 0.0
         outcome = "correct" if correct else "incorrect"
@@ -355,6 +377,33 @@ def compute_calibration(conn) -> dict:
     return {"resolved_count": n, "mean_brier": mean}
 
 
+def mechanism_expectancy(conn) -> list[dict]:
+    """Per-mechanism EXPECTANCY (mean SPY-relative excess of its supporting
+    observations) alongside the hit-rate the Beta posterior sees. A mechanism
+    that wins +8% and loses -2% at a 45% hit rate is profitable — hit-rate-only
+    learning marks it down; this column is where that shows up
+    (rp-payoff-aware-grading-20260715). Supporting links only (align>=0 in the
+    obs note); needs predictions.realized_excess_pct (migration 0019)."""
+    try:
+        rows = conn.execute(
+            "SELECT o.mechanism_id, m.name, COUNT(*) n, "
+            "AVG(p.realized_excess_pct) mean_excess_pct, "
+            "AVG(CASE WHEN o.outcome='hit' THEN 1.0 ELSE 0.0 END) hit_rate "
+            "FROM mechanism_observations o "
+            "JOIN predictions p ON p.id = o.source_id "
+            "JOIN mechanisms m ON m.id = o.mechanism_id "
+            "WHERE o.source_type='prediction' AND p.realized_excess_pct IS NOT NULL "
+            "AND o.notes NOT LIKE '%align=-1%' "
+            "GROUP BY o.mechanism_id HAVING n >= 3 "
+            "ORDER BY mean_excess_pct DESC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [{"mechanism_id": r[0], "name": r[1], "n": r[2],
+             "expectancy_pct": round(r[3], 3) if r[3] is not None else None,
+             "hit_rate": round(r[4], 3)} for r in rows]
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dry-run", action="store_true")
@@ -375,6 +424,7 @@ def main(argv=None) -> int:
     resolved = [] if args.no_resolve else resolve_predictions(conn, now, exp, args.dry_run)
     mech_changes = [] if args.no_recompute else recompute_mechanisms(conn, now, exp, args.dry_run)
     calib = compute_calibration(conn)
+    expectancy = mechanism_expectancy(conn)
     proposals = [] if args.no_propose else propose_structural(
         conn, mech_changes, calib, exp, args.dry_run)
 
@@ -389,6 +439,7 @@ def main(argv=None) -> int:
         "mechanisms_total": len(mech_changes),
         "proposals_drafted": len(proposals),
         "calibration": calib,
+        "mechanism_expectancy": expectancy,
         "resolved": resolved,
         "mechanism_changes": mech_changes,
         "proposals": proposals,

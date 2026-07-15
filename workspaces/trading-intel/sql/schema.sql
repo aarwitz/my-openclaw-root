@@ -526,6 +526,7 @@ CREATE TABLE IF NOT EXISTS predictions (
   prior_log_odds        REAL,
   realized_outcome      TEXT CHECK (realized_outcome IN ('correct','incorrect','inconclusive') OR realized_outcome IS NULL),
   realized_return_pct   REAL,
+  realized_excess_pct   REAL,  -- SPY-relative excess (%), migration 0019
   brier_component       REAL,
   resolved_at           TEXT,
   experiment_id         TEXT
