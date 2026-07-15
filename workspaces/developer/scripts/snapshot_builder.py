@@ -770,6 +770,29 @@ def _load_capital_attribution(conn: sqlite3.Connection, spy_comparison: dict[str
         return {"available": False, "note": "attribution_query_failed"}
 
 
+def _load_rotation(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Latest basket-rotation snapshot per axis + 30d seesaw-day count (D64)."""
+    out: dict[str, Any] = {}
+    try:
+        for r in conn.execute(
+            "SELECT axis, date, corr_21d, spread_5d_pct, spread_21d_pct, spread_z, "
+            "corr_pctile, seesaw FROM rotation_snapshots WHERE (axis, date) IN "
+            "(SELECT axis, MAX(date) FROM rotation_snapshots GROUP BY axis)"):
+            axis = r[0]
+            days = conn.execute(
+                "SELECT COUNT(*) FROM rotation_snapshots WHERE axis=? AND seesaw=1 "
+                "AND date >= date(?, '-45 days')", (axis, r[1])).fetchone()[0]
+            out[axis] = {"date": r[1], "corr_21d": _safe_float(r[2], None),
+                         "spread_5d_pct": _safe_float(r[3], None),
+                         "spread_21d_pct": _safe_float(r[4], None),
+                         "spread_z": _safe_float(r[5], None),
+                         "corr_pctile": _safe_float(r[6], None),
+                         "seesaw": bool(r[7]), "seesaw_days_recent": days}
+    except sqlite3.Error:
+        return {}
+    return out
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -811,6 +834,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "audits": audits,
         "counts": counts,
         "simBooks": _load_sim_books(conn),
+        "rotation": _load_rotation(conn),
         "capital_attribution": _load_capital_attribution(conn, spy_comparison),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison

@@ -685,3 +685,20 @@ CREATE TABLE IF NOT EXISTS ml_evidence_tracking (
   resolved_outperformed  INTEGER,
   updated_at             TEXT NOT NULL
 );
+
+-- ----------------------------------------------------------------------------
+-- Basket rotation observable (migration 0020, D64) — intra-theme decoupling
+-- (e.g. AI hardware vs AI software seesaw) as a measured daily regime signal.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS rotation_snapshots (
+  axis           TEXT NOT NULL,
+  date           TEXT NOT NULL,
+  corr_21d       REAL,
+  spread_5d_pct  REAL,     -- basket A minus basket B, percent
+  spread_21d_pct REAL,
+  spread_z       REAL,
+  corr_pctile    REAL,
+  seesaw         INTEGER NOT NULL DEFAULT 0,
+  computed_at    TEXT NOT NULL,
+  PRIMARY KEY (axis, date)
+);

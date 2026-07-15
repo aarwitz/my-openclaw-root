@@ -155,6 +155,10 @@ run_step "exit_quality" 90 python3 workspaces/trading-intel/scripts/exit_quality
 # (both idempotent + cheap; pull-actuals writes a market_event on a big surprise).
 run_step "macro_seed" 30 python3 workspaces/trading-intel/scripts/macro_calendar.py seed --months 3
 run_step "macro_actuals" 45 python3 workspaces/trading-intel/scripts/macro_calendar.py pull-actuals
+# Basket rotation / seesaw observable (D64): corr + spread z per axis, so
+# intra-theme decoupling is a measured regime the agents reason over — not a
+# surprise the world model mislearns as "growth mechanisms missed".
+run_step "rotation" 120 python3 workspaces/trading-intel/scripts/rotation_monitor.py snapshot
 run_step "capital_efficiency" 45 python3 workspaces/trading-intel/scripts/capital_efficiency_audit.py
 if [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
   if [[ ! -d "$LIDI_REPO/public/solutions/trader_intel/app" ]]; then
