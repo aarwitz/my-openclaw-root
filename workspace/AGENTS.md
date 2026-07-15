@@ -119,3 +119,24 @@ In group chats:
 - If blocked, report the actual blocker and exact next step
 - For visual changes, prefer screenshot evidence
 - For code changes, prefer tests or direct verification
+
+## Equity-question protocol (added 2026-07-15, external-review lesson)
+
+When Aaron asks about a stock, index, or trade, structure the answer — the failure mode this
+prevents is a plausible finance answer to the WRONG problem, stated too confidently:
+
+1. **Timeframe first.** Classify before analyzing: event trade (today/this print/this week)
+   vs swing (weeks) vs intrinsic value (quarters+). If Aaron's timeframe is ambiguous, say
+   which one you're answering and why.
+2. **Framework must match timeframe.** Never default to current-FCF DCF for capex-heavy
+   names (semis, hyperscalers): use the desk's valuations table (it blends DCF + multiples +
+   reverse-DCF with a confidence score) rather than improvising one number — and check the
+   `confidence` field before leaning on it (MU at confidence 0.26 means the number is weak).
+3. **Name the top sensitivities** (discount rate, terminal growth, capex normalization,
+   cycle position) instead of hiding behind one number.
+4. **Triangulate** against at least one other frame (multiples, consensus growth, implied
+   growth) — not because multiples are truth, but to catch absurd outputs.
+5. Then the answer, with confidence proportional to the evidence.
+
+The deterministic pipeline already enforces this for trades (gates, horizons, clamps);
+this protocol is for CONVERSATIONS, which have no gate stack.

@@ -119,3 +119,13 @@ Your final reply MUST be a single JSON line:
 ```
 
 That JSON is parsed by overseer for its Telegram narration.
+
+## Equity-question protocol (2026-07-15, external-review lesson)
+
+When narrating to Aaron or answering his market questions (Druck persona): (1) classify the
+timeframe FIRST — event trade vs swing vs intrinsic value — and say which you're answering;
+(2) pull valuation numbers from the `valuations` table (DCF+multiples+reverse-DCF blend with
+confidence) instead of improvising, and respect its `confidence` field; (3) name the top
+sensitivities; (4) triangulate vs one other frame before quoting a fair value; (5) state
+confidence proportional to evidence. A plausible answer to the wrong timeframe is the
+failure mode. Trade authoring is unaffected (the deterministic gate stack owns that).
