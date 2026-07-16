@@ -509,7 +509,17 @@ def open_pr_and_handoff(repo: str, branch: str, issue: Dict[str, Any], task_id: 
         return None, notes
 
     base = _git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    base_branch = base.stdout.strip().split("/")[-1] if base.returncode == 0 and base.stdout.strip() else "main"
+    if base.returncode == 0 and base.stdout.strip():
+        base_branch = base.stdout.strip().split("/")[-1]
+    else:
+        # origin/HEAD is often unset in older clones (it is in ~/.openclaw),
+        # and assuming "main" breaks the ahead-check on master-based repos.
+        # Probe for the base branch that actually exists.
+        base_branch = "main"
+        for candidate in ("main", "master"):
+            if _git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{candidate}").returncode == 0:
+                base_branch = candidate
+                break
     ahead = _git("rev-list", "--count", f"origin/{base_branch}..{branch}")
     if ahead.returncode == 0 and ahead.stdout.strip() == "0":
         notes.append(f"PR handoff skipped: branch {branch} has no commits beyond origin/{base_branch}")
@@ -530,8 +540,14 @@ def open_pr_and_handoff(repo: str, branch: str, issue: Dict[str, Any], task_id: 
         "Merge is human-gated — review before merging.\n\n"
         "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     )
+    # Route gh through the account router: it injects the rsl-bot token via
+    # GH_TOKEN/GITHUB_TOKEN, which matters because the gateway container's
+    # baked-in GITHUB_TOKEN env has gone stale before (TM-238: gh pr create
+    # failed on auth with no visible trace).
+    router = os.path.expanduser("~/.openclaw/scripts/gh-account-router.sh")
+    gh_prefix = [router, "--agent", "dwight"] if os.path.exists(router) else ["gh"]
     pr = subprocess.run(
-        ["gh", "pr", "create", "--head", branch, "--title", title, "--body", body],
+        [*gh_prefix, "pr", "create", "--head", branch, "--title", title, "--body", body],
         capture_output=True, text=True, check=False, cwd=repo,
     )
     if pr.returncode != 0:
@@ -850,8 +866,13 @@ def run(argv: List[str]) -> int:
             contract_pr = contract.get("pr") if isinstance(contract.get("pr"), dict) else {}
             if contract_branch and contract_branch not in ("main", "master") and not str(contract_pr.get("url") or "").strip():
                 pr_url, handoff_notes = open_pr_and_handoff(repo, contract_branch, issue, task_id)
+                for note in handoff_notes:
+                    print(f"PR handoff: {note}")
                 contract.setdefault("evidence", [])
-                contract["evidence"] = list(contract["evidence"]) + handoff_notes
+                # Front-insert: the TM comment caps evidence at 5 items, so
+                # tail-appended handoff notes were silently truncated — TM-238's
+                # failed push/PR left no trace in the log OR the comment.
+                contract["evidence"] = handoff_notes + list(contract["evidence"])
                 if pr_url:
                     contract["pr"] = {"status": "opened", "url": pr_url}
             final_pr_url = str((contract.get("pr") or {}).get("url") or "").strip() if isinstance(contract.get("pr"), dict) else ""
