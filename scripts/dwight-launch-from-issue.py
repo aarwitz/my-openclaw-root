@@ -234,21 +234,29 @@ def infer_repo(issue: Dict[str, Any], override: str) -> str:
 
         repo_slug = get_first_nonempty(issue, ["repo_slug", "repoSlug", "project_slug"])
         if repo_slug:
-            # Product registry first: ~/.openclaw/products.json maps slug -> local
-            # path authoritatively (handles paths outside ~/repos, e.g. the robot
-            # at ~/CleaningRobot and the openclaw tree itself).
+            # Project registry first: ~/.openclaw/projects.json (renamed from
+            # products.json 2026-07-14) maps slug -> local path authoritatively
+            # (handles paths outside ~/repos, e.g. the robot at ~/CleaningRobot
+            # and the openclaw tree itself). If the registry is missing or a
+            # slug has no entry, that must surface in the launch log — a silent
+            # miss here stranded issue TM-239.
+            registry_path = os.path.expanduser("~/.openclaw/projects.json")
             try:
-                reg = json.load(open(os.path.expanduser("~/.openclaw/products.json")))
-                for prod in reg.get("products", []):
+                reg = json.load(open(registry_path))
+                matched = False
+                for prod in reg.get("projects", reg.get("products", [])):
                     for r in prod.get("repos", []):
                         if r.get("slug", "").lower() == repo_slug.strip().lower():
+                            matched = True
                             # gateway_path first: it's inside the container mount
                             # (~/.openclaw/mirrors); host-only paths don't exist there.
                             for key in ("gateway_path", "path"):
                                 if r.get(key):
                                     candidates.insert(0, r[key])
-            except Exception:
-                pass
+                if not matched:
+                    print(f"WARNING: slug '{repo_slug}' not found in {registry_path}", file=sys.stderr)
+            except Exception as exc:
+                print(f"WARNING: could not read registry {registry_path}: {exc}", file=sys.stderr)
             add_repo_candidate(repo_slug)
 
         expanded_candidates: List[str] = []
