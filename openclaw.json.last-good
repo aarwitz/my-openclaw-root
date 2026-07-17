@@ -117,19 +117,19 @@
       "sandbox": {
         "mode": "off"
       },
-      "bootstrapMaxChars": 8000,
-      "bootstrapTotalMaxChars": 24000,
+      "bootstrapMaxChars": 4000,
+      "bootstrapTotalMaxChars": 12000,
       "bootstrapPromptTruncationWarning": "once",
       "contextLimits": {
-        "memoryGetMaxChars": 12000,
+        "memoryGetMaxChars": 8000,
         "memoryGetDefaultLines": 350,
-        "toolResultMaxChars": 12000,
-        "postCompactionMaxChars": 8000
+        "toolResultMaxChars": 8000,
+        "postCompactionMaxChars": 6000
       },
-      "maxConcurrent": 4,
+      "maxConcurrent": 2,
       "subagents": {
         "delegationMode": "prefer",
-        "maxConcurrent": 8,
+        "maxConcurrent": 3,
         "allowAgents": [
           "researcher",
           "quant",

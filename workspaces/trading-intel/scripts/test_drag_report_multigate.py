@@ -23,6 +23,9 @@ def _make_conn() -> sqlite3.Connection:
         "CREATE TABLE trade_intents (id TEXT, action TEXT, state TEXT, created_at TEXT, blocked_reason TEXT)"
     )
     cur.execute(
+        "CREATE TABLE positions (ticker TEXT, state TEXT)"
+    )
+    cur.execute(
         "CREATE TABLE predictions (resolved_at TEXT, brier_component REAL, realized_outcome TEXT, predicted_at TEXT)"
     )
     return conn
@@ -160,6 +163,26 @@ class GateAttributionTests(unittest.TestCase):
         self.assertTrue(any("same class: gates_failed:evidence_freshness,counterargument_quality" in s for s in summaries))
         matching = next(signal for signal in signals if "same class: gates_failed:evidence_freshness,counterargument_quality" in signal["summary"])
         self.assertTrue(any("counterargument_quality -> no_critic_review" in item for item in matching["evidence"]))
+
+    def test_collect_signals_marks_legacy_concurrent_name_blocks_non_active(self):
+        conn = _make_conn()
+        cur = conn.cursor()
+        for idx in range(4):
+            cur.execute(
+                "INSERT INTO trade_intents VALUES (?, 'open', 'blocked', '2099-01-01T00:00:00Z', ?)",
+                (f"ti-concurrent-{idx}", "risk:concurrent_names=24 >= cap=24"),
+            )
+        for ticker in ("ABBV", "BAC", "BK", "BLK"):
+            cur.execute("INSERT INTO positions VALUES (?, 'open')", (ticker,))
+        conn.commit()
+
+        signals = drag_report.collect_signals(conn.cursor())
+        conn.close()
+
+        summaries = [signal["summary"] for signal in signals]
+        self.assertFalse(any("same class: risk:concurrent_names=N >= cap=N" in s for s in summaries))
+        legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
+        self.assertTrue(any("live concurrent_names=4/48" in item for item in legacy["evidence"]))
 
 
 if __name__ == "__main__":

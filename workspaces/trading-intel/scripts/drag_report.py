@@ -17,10 +17,13 @@ import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 
 import gate_evaluator
 
 DB_PATH = "/home/aaron/.openclaw/state/trading-intel.sqlite"
+RISK_GATE_PATH = Path("/home/aaron/.openclaw/workspaces/risk/scripts/gate_risk_intents.py")
 
 # Coin-flip Brier for a binary outcome is 0.25; the desk should beat it.
 BRIER_COINFLIP = 0.25
@@ -28,6 +31,9 @@ BLOCK_LOOKBACK_DAYS = 14
 BRIER_LOOKBACK_DAYS = 30
 STALE_PREDICTION_DAYS = 21
 RISK_REDUCING_ACTIONS = {"exit", "trim"}
+OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
+PENDING_INTENT_STATES = ("approved", "submitted", "partial")
+EXITING_INTENT_STATES = ("proposed", "critic_review", "risk_review", "approved", "submitted", "partial")
 
 
 def normalize_block_reason(reason: str) -> str:
@@ -98,6 +104,132 @@ def slugify(text: str) -> str:
     return slug[:60] or "unknown"
 
 
+@lru_cache(maxsize=1)
+def current_max_positions() -> int | None:
+    try:
+        text = RISK_GATE_PATH.read_text()
+    except OSError:
+        return None
+    match = re.search(r"^MAX_POSITIONS\s*=\s*(\d+)", text, flags=re.MULTILINE)
+    return int(match.group(1)) if match else None
+
+
+def concurrent_name_snapshot(conn: sqlite3.Connection) -> dict:
+    contributors: dict[str, set[str]] = {}
+    try:
+        for row in conn.execute(
+            "SELECT UPPER(ticker) AS ticker, state FROM positions "
+            f"WHERE state IN ({','.join('?' * len(OPEN_POSITION_STATES))})",
+            OPEN_POSITION_STATES,
+        ):
+            ticker = row["ticker"]
+            if not ticker:
+                continue
+            contributors.setdefault(ticker, set()).add(f"position:{row['state']}")
+    except sqlite3.Error:
+        pass
+    try:
+        for row in conn.execute(
+            "SELECT UPPER(ticker) AS ticker, state, action FROM trade_intents "
+            f"WHERE state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
+            PENDING_INTENT_STATES,
+        ):
+            ticker = row["ticker"]
+            if not ticker:
+                continue
+            contributors.setdefault(ticker, set()).add(f"intent:{row['state']}:{(row['action'] or '').lower()}")
+    except sqlite3.Error:
+        pass
+    try:
+        exiting = {
+            row["ticker"]
+            for row in conn.execute(
+                "SELECT DISTINCT UPPER(ticker) AS ticker FROM trade_intents "
+                "WHERE action IN ('exit','trim') "
+                f"AND state IN ({','.join('?' * len(EXITING_INTENT_STATES))})",
+                EXITING_INTENT_STATES,
+            )
+            if row["ticker"]
+        }
+    except sqlite3.Error:
+        exiting = set()
+    active_slots = [
+        {"ticker": ticker, "sources": sorted(sources)}
+        for ticker, sources in sorted(contributors.items())
+        if ticker not in exiting
+    ]
+    return {"count": len(active_slots), "active_slots": active_slots, "exiting_tickers": sorted(exiting)}
+
+
+def summarize_slots(slots: list[dict], limit: int = 4) -> str:
+    if not slots:
+        return "none"
+    shown = []
+    for slot in slots[:limit]:
+        shown.append(f"{slot['ticker']}[{','.join(slot.get('sources', []))}]")
+    remaining = len(slots) - len(shown)
+    if remaining > 0:
+        shown.append(f"+{remaining} more")
+    return ", ".join(shown)
+
+
+def parse_concurrent_name_reason(reason: str) -> tuple[int | None, int | None]:
+    match = re.search(r"concurrent_names=(\d+)\s*>=\s*cap=(\d+)", reason or "")
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def classify_risk_block(row: sqlite3.Row) -> dict:
+    reason = (row["blocked_reason"] or "").strip()
+    historical_count, historical_cap = parse_concurrent_name_reason(reason)
+    if not reason.startswith("risk:concurrent_names="):
+        return {
+            "active": True,
+            "class_key": normalize_block_reason(reason),
+            "summary_key": normalize_block_reason(reason),
+            "evidence": f"intent {row['id']} action={row['action']} blocked as {reason}",
+        }
+
+    try:
+        snapshot = concurrent_name_snapshot(row["conn"])
+    except sqlite3.Error as exc:
+        return {
+            "active": True,
+            "class_key": normalize_block_reason(reason),
+            "summary_key": normalize_block_reason(reason),
+            "evidence": f"intent {row['id']} action={row['action']} blocked as {reason}; attribution_unavailable={exc}",
+        }
+
+    current_cap = current_max_positions()
+    slot_summary = summarize_slots(snapshot["active_slots"])
+    if current_cap is not None and snapshot["count"] < current_cap:
+        return {
+            "active": False,
+            "class_key": f"legacy_false_positive:{normalize_block_reason(reason)}",
+            "summary_key": normalize_block_reason(reason),
+            "evidence": (
+                f"intent {row['id']} action={row['action']} blocked as {reason} "
+                f"but live concurrent_names={snapshot['count']}/{current_cap}; slots={slot_summary}"
+            ),
+        }
+
+    current_label = (
+        f"live concurrent_names={snapshot['count']}/{current_cap}"
+        if current_cap is not None
+        else f"live concurrent_names={snapshot['count']}"
+    )
+    return {
+        "active": True,
+        "class_key": normalize_block_reason(reason),
+        "summary_key": normalize_block_reason(reason),
+        "evidence": (
+            f"intent {row['id']} action={row['action']} blocked as {reason}; "
+            f"{current_label}; slots={slot_summary}; historical={historical_count}/{historical_cap}"
+        ),
+    }
+
+
 def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     signals: list[dict] = []
 
@@ -114,9 +246,13 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
         for row in rows:
             reason = (row["blocked_reason"] or "").strip()
             reevaluated = None
-            if reason.startswith("gates_failed:"):
+            if reason.startswith("risk:"):
+                classified = classify_risk_block({"id": row["id"], "action": row["action"], "blocked_reason": reason, "conn": cur.connection})
+            elif reason.startswith("gates_failed:"):
                 reevaluated = gate_evaluator.evaluate(cur.connection, row["id"])
-            classified = classify_gate_block(row, reevaluated)
+                classified = classify_gate_block(row, reevaluated)
+            else:
+                classified = classify_gate_block(row, reevaluated)
             bucket_set = active_classes if classified["active"] else legacy_false_positives
             bucket = bucket_set.setdefault(
                 classified["class_key"],

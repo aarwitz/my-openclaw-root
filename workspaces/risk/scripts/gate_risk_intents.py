@@ -111,6 +111,7 @@ EXIT_FAIL_LOUD = 2
 
 PENDING_INTENT_STATES = ("approved", "submitted", "partial")
 OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
+EXITING_INTENT_STATES = ("proposed", "critic_review", "risk_review", "approved", "submitted", "partial")
 
 
 def _now_iso() -> str:
@@ -401,25 +402,73 @@ def _name_exposure(conn, ticker: str) -> float:
 
 
 def _concurrent_name_count(conn) -> int:
-    names = set()
+    return _concurrent_name_snapshot(conn)["count"]
+
+
+def _concurrent_name_snapshot(conn) -> dict:
+    contributors: dict[str, dict[str, object]] = {}
+
     for r in conn.execute(
-        f"SELECT DISTINCT UPPER(ticker) AS t FROM positions "
+        "SELECT UPPER(ticker) AS ticker, state FROM positions "
         f"WHERE state IN ({','.join('?' * len(OPEN_POSITION_STATES))})",
         OPEN_POSITION_STATES,
     ):
-        names.add(r["t"])
+        ticker = r["ticker"]
+        if not ticker:
+            continue
+        slot = contributors.setdefault(ticker, {"ticker": ticker, "sources": set()})
+        slot["sources"].add(f"position:{r['state']}")
+
     for r in conn.execute(
-        f"SELECT DISTINCT UPPER(ticker) AS t FROM trade_intents "
+        "SELECT UPPER(ticker) AS ticker, state, action FROM trade_intents "
         f"WHERE state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
         PENDING_INTENT_STATES,
     ):
-        names.add(r["t"])
-    # Names with a pending EXIT/TRIM are leaving the book — don't count them against the max-concurrent
-    # cap, so a ranked SWAP can free a slot for its higher-conviction replacement in the same pass.
-    exiting = {r["t"] for r in conn.execute(
-        "SELECT DISTINCT UPPER(ticker) AS t FROM trade_intents WHERE action IN ('exit','trim') "
-        "AND state IN ('proposed','critic_review','risk_review','approved','submitted','partial')")}
-    return len(names - exiting)
+        ticker = r["ticker"]
+        if not ticker:
+            continue
+        slot = contributors.setdefault(ticker, {"ticker": ticker, "sources": set()})
+        slot["sources"].add(f"intent:{r['state']}:{(r['action'] or '').lower()}")
+
+    exiting = {
+        r["ticker"]
+        for r in conn.execute(
+            "SELECT DISTINCT UPPER(ticker) AS ticker FROM trade_intents "
+            "WHERE action IN ('exit','trim') "
+            f"AND state IN ({','.join('?' * len(EXITING_INTENT_STATES))})",
+            EXITING_INTENT_STATES,
+        )
+        if r["ticker"]
+    }
+
+    active_slots, exiting_slots = [], []
+    for ticker in sorted(contributors):
+        row = {
+            "ticker": ticker,
+            "sources": sorted(contributors[ticker]["sources"]),
+        }
+        if ticker in exiting:
+            exiting_slots.append(row)
+        else:
+            active_slots.append(row)
+    return {
+        "count": len(active_slots),
+        "active_slots": active_slots,
+        "exiting_slots": exiting_slots,
+    }
+
+
+def _summarize_concurrent_slots(slots: list[dict], limit: int = 4) -> str:
+    if not slots:
+        return "none"
+    shown = []
+    for slot in slots[:limit]:
+        sources = ",".join(slot.get("sources", []))
+        shown.append(f"{slot['ticker']}[{sources}]")
+    remaining = len(slots) - len(shown)
+    if remaining > 0:
+        shown.append(f"+{remaining} more")
+    return ", ".join(shown)
 
 
 def gate(conn, intent, equity, day_pl, regime) -> dict:
@@ -454,7 +503,8 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
     gross_headroom = max(0.0, gross_cap - current_gross)
     name_existing = _name_exposure(conn, sym)
     name_headroom = max(0.0, name_cap - name_existing)
-    concurrent = _concurrent_name_count(conn)
+    concurrent_snapshot = _concurrent_name_snapshot(conn)
+    concurrent = concurrent_snapshot["count"]
     dd_limit = -abs(DAILY_DD_HALT_PCT * equity)
 
     limits = {
@@ -464,6 +514,9 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
         "max_gross_pct": MAX_GROSS_PCT, "gross_cap": round(gross_cap, 2),
         "current_gross": round(current_gross, 2), "gross_headroom": round(gross_headroom, 2),
         "max_positions": MAX_POSITIONS, "concurrent_names": concurrent,
+        "concurrent_name_slots": concurrent_snapshot["active_slots"],
+        "concurrent_exiting_slots": concurrent_snapshot["exiting_slots"],
+        "candidate_is_new_name": name_existing <= 0,
         "daily_dd_halt_pct": DAILY_DD_HALT_PCT, "day_pl": (None if day_pl is None else round(day_pl, 2)),
         "requested_qty": req_qty, "requested_notional": round(req_notional, 2),
         "regime": regime,
@@ -488,9 +541,13 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
     # New-name capacity (only if this name is not already held/pending).
     if name_existing <= 0 and concurrent >= MAX_POSITIONS:
         breaches.append("max_positions")
+        slot_summary = _summarize_concurrent_slots(concurrent_snapshot["active_slots"])
         return {"verdict": "blocked", "approved_qty": 0, "limits": limits,
                 "breaches": breaches,
-                "reason": f"concurrent_names={concurrent} >= cap={MAX_POSITIONS}"}
+                "reason": (
+                    f"concurrent_names={concurrent} >= cap={MAX_POSITIONS} "
+                    f"[slots: {slot_summary}]"
+                )[:500]}
 
     # --- sizing caps (resize down to the binding limit) -------------------
     approved_notional = req_notional
