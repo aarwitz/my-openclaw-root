@@ -30,6 +30,7 @@ STALE_PREDICTION_DAYS = 21
 def normalize_block_reason(reason: str) -> str:
     """Collapse per-intent detail so identical failure classes group together."""
     reason = (reason or "").strip()
+    reason = re.sub(r"\[[^\]]*\]", "", reason)
     reason = re.sub(r"\d+(\.\d+)?", "N", reason)
     return reason[:90] or "(no reason recorded)"
 
