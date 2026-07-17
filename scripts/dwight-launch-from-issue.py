@@ -522,7 +522,20 @@ def open_pr_and_handoff(repo: str, branch: str, issue: Dict[str, Any], task_id: 
                 break
     ahead = _git("rev-list", "--count", f"origin/{base_branch}..{branch}")
     if ahead.returncode == 0 and ahead.stdout.strip() == "0":
-        notes.append(f"PR handoff skipped: branch {branch} has no commits beyond origin/{base_branch}")
+        note = f"PR handoff skipped: branch {branch} has no commits beyond origin/{base_branch}"
+        dirty = _git("status", "--porcelain")
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            # TM-239 signature: the agent did the work, created the branch,
+            # validated — and never committed. Don't auto-commit here: the
+            # live checkout can hold unrelated operator edits (cron/jobs.json
+            # was dirty when this happened), so a bulk commit would sweep
+            # them into the task branch.
+            note += (
+                " — but the working tree HAS uncommitted changes. The agent likely"
+                " forgot to commit. Salvage: commit ONLY the task's files on the"
+                " branch, push, and open the PR manually."
+            )
+        notes.append(note)
         return None, notes
 
     push = _git("push", "-u", "origin", branch)

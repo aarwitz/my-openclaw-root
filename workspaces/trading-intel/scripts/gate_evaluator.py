@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -192,6 +193,35 @@ def _load_latest_critic_review(conn, intent_id: str, hypothesis_id: str) -> dict
     except json.JSONDecodeError:
         challenges = []
     return {"challenges": challenges, "all_addressed": bool(row["all_challenges_addressed"])}
+
+
+def _compact_gate_detail(detail: str) -> str:
+    text = (detail or "").strip()
+    text = re.sub(r"\s+", "", text)
+    text = text.replace(",", "&")
+    return text[:64] or "none"
+
+
+def _format_blocked_reason(result: dict) -> str:
+    failed = result.get("failed_gates", [])
+    if not failed:
+        return "gates_failed:"
+    failed_gates = [g for g in result.get("gates", []) if not g.get("pass")]
+    label_map = {}
+    for gate in failed_gates:
+        label = gate["name"]
+        if gate["name"] == "evidence_freshness" and gate.get("attribution_code"):
+            label = f"{label}[{gate['attribution_code']}]"
+        label_map[gate["name"]] = label
+    prefix = "gates_failed:" + ",".join(label_map.get(n, n) for n in failed)
+    detail_map = {
+        gate["name"]: _compact_gate_detail(str(gate.get("detail", "")))
+        for gate in failed_gates
+    }
+    detail_suffix = ";".join(
+        f"{name}={detail_map.get(name, 'none')}" for name in failed
+    )
+    return f"{prefix}|inputs={detail_suffix}"[:240]
 
 
 def evaluate(conn, intent_id: str) -> dict:
@@ -350,16 +380,7 @@ def apply(conn, intent_id: str, result: dict) -> None:
     before_state = before_row["state"] if before_row else None
     blocked_reason = None
     if result["next_state"] == "blocked":
-        failed_gate_reasons = []
-        for gate in result["gates"]:
-            if gate["pass"]:
-                continue
-            label = gate["name"]
-            if gate["name"] == "evidence_freshness" and gate.get("attribution_code"):
-                label = f"{label}[{gate['attribution_code']}]"
-            failed_gate_reasons.append(label)
-        blocked_reason = "gates_failed:" + ",".join(failed_gate_reasons)
-        blocked_reason = blocked_reason[:240]
+        blocked_reason = _format_blocked_reason(result)
     conn.execute(
         "UPDATE trade_intents SET evidence_freshness_status=?, factor_overlap_status=?, "
         "provenance_completeness_pct=?, counterargument_quality_score=?, "

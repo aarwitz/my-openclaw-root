@@ -190,7 +190,7 @@ def main() -> int:
         )
         check(
             "blocked_reason persists freshness attribution",
-            blocked_reason == "gates_failed:evidence_freshness[stale:EVID-1]",
+            blocked_reason.startswith("gates_failed:evidence_freshness[stale:EVID-1]"),
             blocked_reason,
         )
     finally:
