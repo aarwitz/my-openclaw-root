@@ -550,7 +550,9 @@ def open_pr_and_handoff(repo: str, branch: str, issue: Dict[str, Any], task_id: 
         f"{str(issue.get('description') or '').strip()[:1000]}\n\n"
         f"Acceptance criteria:\n{str(issue.get('acceptance_criteria') or '(none recorded)').strip()[:800]}\n\n"
         f"Issue: {CANONICAL_TM_BASE}/issue?id={issue.get('id')}\n"
-        "Merge is human-gated — review before merging.\n\n"
+        "Merge policy: routine changes auto-merge after deterministic gates; "
+        "protected paths and oversized diffs hold for human review "
+        "(scripts/merge-policy.json).\n\n"
         "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     )
     # Route gh through the account router: it injects the rsl-bot token via
@@ -595,8 +597,9 @@ def build_launch_comment(
         branch = str(contract.get("branch") or "").strip()
         detail_lines = "\n".join(f"- evidence: {line}" for line in evidence_lines)
         if pr_url:
-            headline = f"✅ {task_id} complete — PR awaiting your review: {pr_url}"
-            next_step = "- next step: Aaron reviews and merges the PR (merge is human-gated)."
+            headline = f"✅ {task_id} complete — PR: {pr_url}"
+            next_step = ("- next step: auto-merge gate decides — routine+green merges and flips"
+                         " this issue to done; protected/oversized/red holds here and pages Aaron.")
         else:
             headline = f"✅ {task_id} work complete on branch `{branch or '?'}` — but NO PR was opened (see evidence for why)."
             next_step = "- next step: resolve the PR blocker, then push the branch and open the PR."
@@ -899,6 +902,33 @@ def run(argv: List[str]) -> int:
                     print(f"Issue {args.issue_id} moved to in_review with PR {final_pr_url}")
                 except RuntimeError as exc:
                     print(f"WARNING: could not move issue to in_review: {exc}", file=sys.stderr)
+
+                # Auto-merge gate (operator decision 2026-07-17): routine PRs
+                # merge without human review; protected paths / oversized diffs
+                # / red gates hold in in_review and page Aaron. The gate script
+                # owns merge + TM done-flip + Telegram digest.
+                if contract_branch and not os.environ.get("OPENCLAW_NO_AUTOMERGE"):
+                    try:
+                        automerge = subprocess.run(
+                            [os.path.expanduser("~/.openclaw/scripts/auto-merge-pr.py"),
+                             "--repo", repo, "--pr-url", final_pr_url,
+                             "--branch", contract_branch,
+                             "--issue-id", str(args.issue_id), "--task-id", task_id],
+                            capture_output=True, text=True, check=False, timeout=1800,
+                        )
+                    except subprocess.TimeoutExpired:
+                        automerge = subprocess.CompletedProcess(
+                            args=[], returncode=98, stdout="", stderr="auto-merge gate timed out after 1800s")
+                    for line in (automerge.stdout or "").splitlines():
+                        print(f"auto-merge: {line}")
+                    if automerge.returncode == 0:
+                        contract["evidence"] = ["Auto-merged after deterministic gates (see merge digest on Telegram)."] + list(contract["evidence"])
+                    elif automerge.returncode == 3:
+                        contract["evidence"] = ["Auto-merge HELD for human review (protected path / size / gate failure — Aaron paged)."] + list(contract["evidence"])
+                    else:
+                        err = (automerge.stderr or "").strip()[:200]
+                        print(f"WARNING: auto-merge gate errored: {err}", file=sys.stderr)
+                        contract["evidence"] = [f"Auto-merge gate errored (PR stays open in in_review): {err}"] + list(contract["evidence"])
 
         launch_state, comment_content, launch_error = build_launch_comment(
             task_id=task_id,

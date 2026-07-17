@@ -91,10 +91,13 @@ and this **slow loop** that changes *code* through the human gate. The kernel is
   PM's daily pass, the registry gains a `pm` field and a second PM agent — a PR, not a rewrite.
 - **Execution lane.** `scripts/dwight-launch-from-issue.py --execute --detach` (see
   TELEGRAM_EXECUTION_GUIDE.md §7 for the full contract): claim → ephemeral coder session →
-  commit on task branch → push → PR → `in_review` → outcome-first TM comment → original branch
-  restored. Dispatch caps live in the PM instructions (currently 2/day) and are a throughput
+  commit on task branch → push → PR → `in_review` → auto-merge gate → outcome-first TM comment →
+  original branch restored. Dispatch caps live in the PM instructions (currently 2/day) and are a throughput
   knob, not architecture.
-- **Gates.** Merge = Aaron. rule_proposals (AutoTrade) = Aaron. TM pause button = instant global
+- **Gates.** Merge = `scripts/auto-merge-pr.py` (2026-07-17: routine green PRs auto-merge
+  with a Telegram digest; protected paths / oversized diffs / red gates hold in `in_review` and
+  page Aaron — policy in `scripts/merge-policy.json`, which agents may not widen).
+  rule_proposals (AutoTrade) = Aaron. TM pause button = instant global
   agent lockout (HTTP 423; agents stop and report, never retry around it). Robot-class projects
   add a hardware-safety tier: nothing that moves physical actuators ships without explicit
   per-change human sign-off, regardless of test results.

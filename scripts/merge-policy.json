@@ -1,0 +1,42 @@
+{
+  "$comment": "Auto-merge policy for the coding lane (operator decision 2026-07-17: PR review is no longer human-gated for routine changes). Consumed by scripts/auto-merge-pr.py, which dwight-launch-from-issue.py invokes after opening a PR. A PR auto-merges only if it passes deterministic gates AND touches no protected path AND stays under the size caps; otherwise it holds in in_review and pages Aaron with the reason. Protected paths are the blast-radius set: trading risk/execution logic, live config, credentials, schema migrations, and the merge machinery itself (agents must never be able to auto-merge changes to the thing that decides auto-merges).",
+  "version": 1,
+  "max_changed_files": 15,
+  "max_changed_lines": 1500,
+  "protected_paths": [
+    "workspaces/risk/**",
+    "workspaces/executor/**",
+    "openclaw.json",
+    "openclaw.json.*",
+    "cron/**",
+    "credentials/**",
+    "sql/schema.sql",
+    "sql/migrations/**",
+    "workspaces/trading-intel/sql/**",
+    "scripts/safe-restart.sh",
+    "scripts/token-backup.sh",
+    "scripts/token-restore.sh",
+    "scripts/merge-policy.json",
+    "scripts/auto-merge-pr.py",
+    "scripts/dwight-launch-from-issue.py",
+    "scripts/dwight-assign-coding-task.sh",
+    "scripts/launch-coding-task.sh",
+    "scripts/gh-account-router.sh",
+    "scripts/page-operator.sh",
+    "scripts/run-with-trace.sh",
+    "scripts/lib/**",
+    "scripts/policy.json",
+    "docker-compose*",
+    ".claude/**",
+    ".gitignore",
+    ".github/**",
+    "CLAUDE.md",
+    "AGENTIC_SYSTEM.md",
+    "SYSTEM_ARCHITECTURE.md"
+  ],
+  "repo_checks": {
+    "/home/aaron/.openclaw": [
+      "bash scripts/scripts-policy-lint.sh"
+    ]
+  }
+}

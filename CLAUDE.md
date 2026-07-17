@@ -45,10 +45,16 @@ These are the rules most likely to cause real damage if violated:
   need a restart. If one is truly unavoidable, use **`~/.openclaw/scripts/safe-restart.sh`** only.
 - **Paper account only** — this is not live trading capital, but treat broker/order paths as
   outward-facing.
-- **Human-gated boundaries:** auto-merge, deploy, external sends, account changes, and destructive
-  ops are always approval-gated. Structural/parameter changes to the trading logic flow as
+- **Human-gated boundaries:** deploy, external sends, account changes, and destructive ops are
+  always approval-gated. Structural/parameter changes to the trading logic flow as
   `rule_proposals` that a human approves; **agents never self-approve.** Task Manager state must
   never auto-launch non-code work or anything assigned to Aaron.
+- **Coding-lane merges are policy-gated, not human-gated** (operator decision 2026-07-17):
+  `scripts/auto-merge-pr.py` merges routine PRs after deterministic gates (py-compile, changed
+  tests, repo checks) and Telegrams Aaron a digest with a revert command. PRs touching protected
+  paths (`scripts/merge-policy.json`: risk/executor workspaces, live config, credentials, schema,
+  and the merge machinery itself) or oversized diffs HOLD in `in_review` and page Aaron. Agents
+  must never widen the policy or auto-merge changes to the gate itself.
 - Host Docker/root actions are **operator-owned** (terminal / Claude Code session on the host) —
   the gateway container has no `docker.sock` mounted and every agent, including `jerry`, executes
   inside it. `jerry` (the one default-assistant agent, bound to Telegram) gets real-filesystem
@@ -108,7 +114,9 @@ Trading Intel sprint** (Task Manager sprint_id=5, and ONLY that sprint): a daily
 the sprint board, files at most one issue/day, dispatches ≤2 coding-lane runs/day (always
 `--detach`), and Telegrams Aaron a summary. Coding-lane completion is deterministic: the launcher
 (`scripts/dwight-launch-from-issue.py`) pushes the task branch, opens the PR via `gh`, and flips
-the issue to `in_review` — merge stays human-gated. The `developer` agent does the actual coding
+the issue to `in_review`, then runs the auto-merge gate (`scripts/auto-merge-pr.py`) — routine
+green PRs merge and flip to `done`; protected/oversized/red PRs hold and page Aaron. The
+`developer` agent does the actual coding
 in per-issue Codex subagent sessions. Every agent (including `jerry`) runs through the
 Gateway inside `openclaw-gateway`. `jerry` works on the real filesystem via the container's bind
 mounts — `/home/aaron/repos` is mounted read-write, so it can create/edit real repos from
