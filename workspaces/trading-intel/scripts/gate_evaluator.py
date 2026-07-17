@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -125,6 +126,29 @@ def _load_latest_critic_review(conn, intent_id: str, hypothesis_id: str) -> dict
     except json.JSONDecodeError:
         challenges = []
     return {"challenges": challenges, "all_addressed": bool(row["all_challenges_addressed"])}
+
+
+def _compact_gate_detail(detail: str) -> str:
+    text = (detail or "").strip()
+    text = re.sub(r"\s+", "", text)
+    text = text.replace(",", "&")
+    return text[:64] or "none"
+
+
+def _format_blocked_reason(result: dict) -> str:
+    failed = result.get("failed_gates", [])
+    prefix = "gates_failed:" + ",".join(failed)
+    if not failed:
+        return prefix
+    detail_map = {
+        gate["name"]: _compact_gate_detail(str(gate.get("detail", "")))
+        for gate in result.get("gates", [])
+        if not gate.get("pass")
+    }
+    detail_suffix = ";".join(
+        f"{name}={detail_map.get(name, 'none')}" for name in failed
+    )
+    return f"{prefix}|inputs={detail_suffix}"
 
 
 def evaluate(conn, intent_id: str) -> dict:
@@ -276,7 +300,7 @@ def apply(conn, intent_id: str, result: dict) -> None:
     before_state = before_row["state"] if before_row else None
     blocked_reason = None
     if result["next_state"] == "blocked":
-        blocked_reason = "gates_failed:" + ",".join(result["failed_gates"])[:240]
+        blocked_reason = _format_blocked_reason(result)
     conn.execute(
         "UPDATE trade_intents SET evidence_freshness_status=?, factor_overlap_status=?, "
         "provenance_completeness_pct=?, counterargument_quality_score=?, "
