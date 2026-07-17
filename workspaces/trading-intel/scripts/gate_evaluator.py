@@ -40,7 +40,7 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
@@ -75,6 +75,73 @@ def _hours_since(s: str | None) -> float | None:
     if dt is None:
         return None
     return (_now() - dt).total_seconds() / 3600.0
+
+
+def _weekend_discount_hours(start: datetime, end: datetime) -> float:
+    """Count weekend hours between two timestamps.
+
+    The freshness threshold stays fixed; this only avoids charging evidence for
+    hours when the market was shut and no session-level update was even possible.
+    """
+    if end <= start:
+        return 0.0
+    total = 0.0
+    day = datetime(start.year, start.month, start.day, tzinfo=start.tzinfo)
+    while day < end:
+        next_day = day + timedelta(days=1)
+        if day.weekday() >= 5:
+            seg_start = max(start, day)
+            seg_end = min(end, next_day)
+            if seg_end > seg_start:
+                total += (seg_end - seg_start).total_seconds() / 3600.0
+        day = next_day
+    return total
+
+
+def _evidence_freshness_artifacts(
+    evid: list[sqlite3.Row], *, as_of: datetime
+) -> tuple[bool, list[dict], str | None]:
+    if not evid:
+        return False, [], "no_evidence"
+
+    stale: list[dict] = []
+    stale_codes: list[str] = []
+    for e in evid:
+        retrieved_at = _parse_iso(e["retrieved_at"])
+        artifact = {
+            "id": e["id"],
+            "source": e["source"],
+            "source_url": e["source_url"],
+            "retrieved_at": e["retrieved_at"],
+        }
+        if retrieved_at is None:
+            artifact.update({
+                "cause": "missing_retrieved_at",
+                "raw_hours_old": None,
+                "weekend_hours_discount": None,
+                "adjusted_hours_old": None,
+            })
+            stale.append(artifact)
+            stale_codes.append(f"missing_ts:{e['id']}")
+            continue
+
+        raw_hours = (as_of - retrieved_at).total_seconds() / 3600.0
+        weekend_hours = _weekend_discount_hours(retrieved_at, as_of)
+        adjusted_hours = max(0.0, raw_hours - weekend_hours)
+        if adjusted_hours > FRESHNESS_MAX_HOURS:
+            artifact.update({
+                "cause": "stale_after_weekend_discount",
+                "raw_hours_old": round(raw_hours, 1),
+                "weekend_hours_discount": round(weekend_hours, 1),
+                "adjusted_hours_old": round(adjusted_hours, 1),
+            })
+            stale.append(artifact)
+            stale_codes.append(f"stale:{e['id']}")
+
+    attribution = "|".join(stale_codes[:4])
+    if len(stale_codes) > 4:
+        attribution += f"|+{len(stale_codes) - 4}more"
+    return not stale, stale, attribution or None
 
 
 def connect() -> sqlite3.Connection:
@@ -137,21 +204,28 @@ def _compact_gate_detail(detail: str) -> str:
 
 def _format_blocked_reason(result: dict) -> str:
     failed = result.get("failed_gates", [])
-    prefix = "gates_failed:" + ",".join(failed)
     if not failed:
-        return prefix
+        return "gates_failed:"
+    failed_gates = [g for g in result.get("gates", []) if not g.get("pass")]
+    label_map = {}
+    for gate in failed_gates:
+        label = gate["name"]
+        if gate["name"] == "evidence_freshness" and gate.get("attribution_code"):
+            label = f"{label}[{gate['attribution_code']}]"
+        label_map[gate["name"]] = label
+    prefix = "gates_failed:" + ",".join(label_map.get(n, n) for n in failed)
     detail_map = {
         gate["name"]: _compact_gate_detail(str(gate.get("detail", "")))
-        for gate in result.get("gates", [])
-        if not gate.get("pass")
+        for gate in failed_gates
     }
     detail_suffix = ";".join(
         f"{name}={detail_map.get(name, 'none')}" for name in failed
     )
-    return f"{prefix}|inputs={detail_suffix}"
+    return f"{prefix}|inputs={detail_suffix}"[:240]
 
 
 def evaluate(conn, intent_id: str) -> dict:
+    evaluated_at = _now()
     intent = conn.execute(
         "SELECT id, hypothesis_id, action, tranche_type, ticker, vehicle, size, "
         "entry_price_target, stop_rule, time_horizon, edge_scorecard_json, "
@@ -185,14 +259,20 @@ def evaluate(conn, intent_id: str) -> dict:
 
     # 2. evidence_freshness — idea-quality; exempt for risk-reducing intents
     evid = _load_evidence(conn, intent["hypothesis_id"])
-    stale = []
-    for e in evid:
-        h = _hours_since(e["retrieved_at"])
-        if h is None or h > FRESHNESS_MAX_HOURS:
-            stale.append({"id": e["id"], "hours_old": round(h, 1) if h is not None else None})
-    ef_ok = risk_reducing or (bool(evid) and not stale)
-    gates.append({"name": "evidence_freshness", "pass": ef_ok,
-                  "detail": f"evidence={len(evid)} stale={len(stale)} max_h={FRESHNESS_MAX_HOURS}"})
+    freshness_ok, stale_artifacts, freshness_attr = _evidence_freshness_artifacts(
+        evid, as_of=evaluated_at
+    )
+    ef_ok = risk_reducing or freshness_ok
+    ef_detail = f"evidence={len(evid)} stale={len(stale_artifacts)} max_h={FRESHNESS_MAX_HOURS}"
+    if freshness_attr:
+        ef_detail += f" attr={freshness_attr}"
+    gates.append({
+        "name": "evidence_freshness",
+        "pass": ef_ok,
+        "detail": ef_detail,
+        "artifacts": stale_artifacts,
+        "attribution_code": freshness_attr,
+    })
 
     # 3. factor_overlap (ticker overlap proxy)
     open_tix = _load_open_position_tickers(conn)
@@ -273,7 +353,7 @@ def evaluate(conn, intent_id: str) -> dict:
     return {
         "intent_id": intent_id,
         "hypothesis_id": intent["hypothesis_id"],
-        "evaluated_at": _now_iso(),
+        "evaluated_at": evaluated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "all_pass": all_pass,
         "failed_gates": failed,
         "gates": gates,

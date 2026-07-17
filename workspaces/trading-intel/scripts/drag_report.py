@@ -33,6 +33,7 @@ RISK_REDUCING_ACTIONS = {"exit", "trim"}
 def normalize_block_reason(reason: str) -> str:
     """Collapse per-intent detail so identical failure classes group together."""
     reason = (reason or "").strip()
+    reason = re.sub(r"\[[^\]]*\]", "", reason)
     reason = re.sub(r"\d+(\.\d+)?", "N", reason)
     return reason[:90] or "(no reason recorded)"
 
@@ -42,6 +43,7 @@ def parse_failed_gates(reason: str) -> list[str]:
     if not reason.startswith("gates_failed:"):
         return []
     core = reason.split("|", 1)[0]
+    core = re.sub(r"\[[^\]]*\]", "", core)
     gates = core.removeprefix("gates_failed:").split(",")
     return [gate.strip() for gate in gates if gate.strip()]
 
