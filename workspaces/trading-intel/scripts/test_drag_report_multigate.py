@@ -3,7 +3,9 @@ import sqlite3
 import sys
 import unittest
 
-sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import drag_report  # noqa: E402
 import gate_evaluator  # noqa: E402
