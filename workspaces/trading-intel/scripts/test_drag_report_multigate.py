@@ -3,7 +3,9 @@ import sqlite3
 import sys
 import unittest
 
-sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import drag_report  # noqa: E402
 import gate_evaluator  # noqa: E402
@@ -26,7 +28,10 @@ def _make_conn() -> sqlite3.Connection:
         "CREATE TABLE positions (ticker TEXT, state TEXT)"
     )
     cur.execute(
-        "CREATE TABLE predictions (resolved_at TEXT, brier_component REAL, realized_outcome TEXT, predicted_at TEXT)"
+        "CREATE TABLE hypotheses (id TEXT, tickers TEXT)"
+    )
+    cur.execute(
+        "CREATE TABLE predictions (id TEXT, hypothesis_id TEXT, horizon TEXT, resolved_at TEXT, brier_component REAL, realized_outcome TEXT, predicted_at TEXT)"
     )
     return conn
 
@@ -183,6 +188,28 @@ class GateAttributionTests(unittest.TestCase):
         self.assertFalse(any("same class: risk:concurrent_names=N >= cap=N" in s for s in summaries))
         legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
         self.assertTrue(any("live concurrent_names=4/48" in item for item in legacy["evidence"]))
+
+    def test_stale_prediction_signal_ignores_not_yet_matured_trading_day_windows(self):
+        conn = _make_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO hypotheses VALUES ('hyp-1', '[\"ABC\"]')")
+        cur.execute(
+            "INSERT INTO predictions VALUES ('pred-1', 'hyp-1', 'position_1_4w', NULL, NULL, NULL, '2099-01-01T00:00:00Z')"
+        )
+        conn.commit()
+
+        original_prices = drag_report.feature_store._prices
+        drag_report.feature_store._prices = lambda _symbol, _days: [
+            {"t": "2099-01-02", "c": 100.0},
+            {"t": "2099-01-03", "c": 101.0},
+        ]
+        try:
+            signals = drag_report.collect_signals(conn.cursor())
+        finally:
+            drag_report.feature_store._prices = original_prices
+            conn.close()
+
+        self.assertFalse(any(signal["id"] == "predictions-unresolved-backlog" for signal in signals))
 
 
 if __name__ == "__main__":

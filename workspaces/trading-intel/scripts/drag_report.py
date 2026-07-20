@@ -20,7 +20,9 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+import feature_store
 import gate_evaluator
+import worldmodel
 
 DB_PATH = "/home/aaron/.openclaw/state/trading-intel.sqlite"
 RISK_GATE_PATH = Path("/home/aaron/.openclaw/workspaces/risk/scripts/gate_risk_intents.py")
@@ -178,6 +180,61 @@ def parse_concurrent_name_reason(reason: str) -> tuple[int | None, int | None]:
     if not match:
         return None, None
     return int(match.group(1)), int(match.group(2))
+
+
+def _first_ticker(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not data or not isinstance(data, list):
+        return None
+    ticker = data[0]
+    return str(ticker).upper() if ticker else None
+
+
+def _window_available(prices: list[dict], entry_iso: str, horizon_days: int) -> bool:
+    dates = [bar["t"] for bar in prices]
+    index = 0
+    while index < len(dates) and dates[index] < entry_iso:
+        index += 1
+    return index < len(dates) and index + horizon_days < len(dates)
+
+
+def count_stale_predictions(cur: sqlite3.Cursor) -> int:
+    rows = cur.execute(
+        "SELECT p.id, p.predicted_at, p.horizon, h.tickers "
+        "FROM predictions p JOIN hypotheses h ON h.id = p.hypothesis_id "
+        "WHERE p.realized_outcome IS NULL AND p.resolved_at IS NULL "
+        "AND p.predicted_at < datetime('now', ?) "
+        "ORDER BY p.predicted_at ASC",
+        (f"-{STALE_PREDICTION_DAYS} days",),
+    ).fetchall()
+    if not rows:
+        return 0
+    spy_prices = feature_store._prices("SPY", 4000)
+    ticker_cache: dict[str, list[dict]] = {}
+    stale = 0
+    for row in rows:
+        horizon_days = worldmodel.HORIZON_DAYS.get(row["horizon"], 15)
+        if not _window_available(spy_prices, row["predicted_at"][:10], horizon_days):
+            continue
+        ticker = _first_ticker(row["tickers"])
+        if not ticker:
+            stale += 1
+            continue
+        if ticker not in ticker_cache:
+            try:
+                ticker_cache[ticker] = feature_store._prices(ticker, 4000)
+            except Exception:
+                ticker_cache[ticker] = []
+        if _window_available(ticker_cache[ticker], row["predicted_at"][:10], horizon_days):
+            stale += 1
+        else:
+            stale += 1
+    return stale
 
 
 def classify_risk_block(row: sqlite3.Row) -> dict:
@@ -345,19 +402,18 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
 
     # --- Unresolved predictions past horizon: the learning loop starving.
     try:
-        row = cur.execute(
-            """SELECT COUNT(*) FROM predictions
-               WHERE realized_outcome IS NULL AND resolved_at IS NULL
-                 AND predicted_at < datetime('now', ?)""",
-            (f"-{STALE_PREDICTION_DAYS} days",),
-        ).fetchone()
-        stale = int(row[0] or 0)
+        stale = count_stale_predictions(cur)
         if stale >= 10:
             signals.append({
                 "id": "predictions-unresolved-backlog",
                 "severity": min(80, 30 + stale),
-                "summary": f"{stale} predictions older than {STALE_PREDICTION_DAYS}d never resolved — the fast learning loop is starving",
-                "evidence": [f"predictions with NULL realized_outcome older than {STALE_PREDICTION_DAYS}d: {stale}"],
+                "summary": (
+                    f"{stale} predictions older than {STALE_PREDICTION_DAYS}d are past horizon and still unresolved "
+                    "— the fast learning loop is starving"
+                ),
+                "evidence": [
+                    f"predictions with NULL realized_outcome older than {STALE_PREDICTION_DAYS}d and past horizon: {stale}"
+                ],
                 "suggested_issue": {
                     "title": "Resolve or expire the stale-prediction backlog",
                     "acceptance_criteria": (
