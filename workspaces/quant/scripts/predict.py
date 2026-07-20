@@ -157,6 +157,122 @@ def mechanism_alignment(thesis_dir: str, mech_dir: str) -> int:
     return -1 if mech_for_long else 1
 
 
+def _family_terms(
+    mech_ids: list[str],
+    mechs: dict[str, dict],
+    thesis_dir: str,
+    horizon: str,
+    *,
+    prefer_horizon: bool,
+) -> tuple[list[tuple[float, float]], list[str], list[dict]]:
+    """Collapse linked mechanisms to one sibling per family.
+
+    Family siblings share the same antecedent/consequent/direction triplet. The
+    old selector always took the most-observed sibling, which let a longer-dated
+    family member override the exact-horizon sibling on a shorter forecast. When
+    prefer_horizon=True, exact horizon match wins before observation count.
+    """
+    fam_best: dict[tuple, dict] = {}
+    for mid in mech_ids:
+        m = mechs.get(mid)
+        if not m or m["posterior_mean"] is None:
+            continue
+        status_mult = 1.0 if m["status"] == "active" else 0.6
+        weight = wm.confidence_weight(m["ci_low"], m["ci_high"]) * status_mult
+        align = mechanism_alignment(thesis_dir, m["direction"])
+        posterior = m["posterior_mean"]
+        if align < 0:
+            # Opposing mechanism: reflect the posterior so a strong opposing
+            # mechanism pushes p_correct DOWN.
+            effective = 1.0 - posterior
+        else:
+            effective = posterior
+            if align == 0:
+                weight *= 0.5  # neutral mechanism: mild support only
+        fam = (m["antecedent_class"], m["consequent_class"], m["direction"])
+        cand = {
+            "mid": mid,
+            "align": align,
+            "effective": effective,
+            "weight": weight,
+            "n_obs": m["n_obs"],
+            "mech_horizon": normalize_horizon(m["horizon"]),
+        }
+        horizon_match = int(cand["mech_horizon"] == horizon)
+        cand_rank = (horizon_match, cand["n_obs"]) if prefer_horizon else (cand["n_obs"],)
+        if fam not in fam_best:
+            fam_best[fam] = cand | {"rank": cand_rank}
+            continue
+        if cand_rank > fam_best[fam]["rank"]:
+            fam_best[fam] = cand | {"rank": cand_rank}
+
+    terms: list[tuple[float, float]] = []
+    used: list[str] = []
+    used_detail: list[dict] = []
+    for cand in fam_best.values():
+        terms.append((cand["effective"], cand["weight"]))
+        used.append(cand["mid"])
+        used_detail.append({
+            "id": cand["mid"],
+            "align": cand["align"],
+            "eff": round(cand["effective"], 3),
+            "w": round(cand["weight"], 3),
+            "n": round(cand["n_obs"], 1),
+            "horizon": cand["mech_horizon"],
+        })
+    return terms, used, used_detail
+
+
+def build_prediction(
+    conn: sqlite3.Connection,
+    hyp: sqlite3.Row,
+    mech_ids: list[str],
+    mechs: dict[str, dict],
+    regime: str | None,
+    *,
+    prefer_horizon: bool = True,
+) -> dict:
+    hyp_id, thesis, time_horizon = hyp[0], hyp[2], hyp[3]
+    horizon = normalize_horizon(time_horizon)
+    eq = evidence_quality(conn, hyp_id)
+    tdir = thesis_direction(thesis)
+    terms, used, used_detail = _family_terms(
+        mech_ids, mechs, tdir, horizon, prefer_horizon=prefer_horizon
+    )
+
+    base = BASE_RATE.get(tdir, 0.5)
+    p_correct, combined_lo = wm.combine_p(base, terms, eq)
+    max_n = max((d["n"] for d in used_detail), default=0.0)
+    if max_n < PROVEN_FAMILY_N:
+        lo_b, hi_b = base - MAX_SHIFT_UNPROVEN, base + MAX_SHIFT_UNPROVEN
+        capped = min(max(p_correct, lo_b), hi_b)
+        if capped != p_correct:
+            p_correct = capped
+            combined_lo = math.log(p_correct / (1.0 - p_correct))
+    ticker = _first_ticker(hyp[5] if len(hyp) > 5 else None)
+    mos, vconf, rvol = _valuation_for(conn, ticker)
+    p10, p50, p90 = wm.return_band_v2(
+        p_correct, horizon, realized_vol_annual=rvol,
+        margin_of_safety=mos, val_confidence=vconf or 0.0,
+    )
+    return {
+        "id": f"pred_{uuid.uuid4().hex[:12]}",
+        "hypothesis_id": hyp_id,
+        "predicted_at": _now(),
+        "horizon": horizon,
+        "thesis_direction": tdir,
+        "p_correct": round(p_correct, 4),
+        "return_p10": round(p10, 3),
+        "return_p50": round(p50, 3),
+        "return_p90": round(p90, 3),
+        "mechanism_ids": used,
+        "mechanism_detail": used_detail,
+        "regime": regime,
+        "evidence_quality": eq,
+        "prior_log_odds": round(combined_lo, 4),
+    }
+
+
 def _first_ticker(tickers_json: str | None) -> str | None:
     if not tickers_json:
         return None
@@ -195,88 +311,7 @@ def predict_one(
     experiment_id: str | None,
     dry_run: bool,
 ) -> dict:
-    hyp_id, thesis, time_horizon = hyp[0], hyp[2], hyp[3]
-    horizon = normalize_horizon(time_horizon)
-    eq = evidence_quality(conn, hyp_id)
-    tdir = thesis_direction(thesis)
-
-    # rp-mechanism-family-dedup-20260715: near-duplicate mechanisms (same
-    # antecedent/consequent/direction — e.g. three generated growth+momentum
-    # variants) share ONE vote; the most-observed family member casts it.
-    # Stacking them as independent log-odds evidence double-counts one signal.
-    fam_best: dict[tuple, dict] = {}
-    for mid in mech_ids:
-        m = mechs.get(mid)
-        if not m or m["posterior_mean"] is None:
-            continue
-        # Active mechanisms count fully; candidates are additionally discounted.
-        status_mult = 1.0 if m["status"] == "active" else 0.6
-        weight = wm.confidence_weight(m["ci_low"], m["ci_high"]) * status_mult
-        align = mechanism_alignment(tdir, m["direction"])
-        posterior = m["posterior_mean"]
-        if align < 0:
-            # Opposing mechanism: reflect the posterior so a strong opposing
-            # mechanism pushes p_correct DOWN.
-            effective = 1.0 - posterior
-        else:
-            effective = posterior
-            if align == 0:
-                weight *= 0.5  # neutral mechanism: mild support only
-        fam = (m["antecedent_class"], m["consequent_class"], m["direction"])
-        cand = {"mid": mid, "align": align, "effective": effective,
-                "weight": weight, "n_obs": m["n_obs"]}
-        if fam not in fam_best or cand["n_obs"] > fam_best[fam]["n_obs"]:
-            fam_best[fam] = cand
-
-    terms: list[tuple[float, float]] = []
-    used: list[str] = []
-    used_detail: list[dict] = []
-    for cand in fam_best.values():
-        terms.append((cand["effective"], cand["weight"]))
-        used.append(cand["mid"])
-        used_detail.append({"id": cand["mid"], "align": cand["align"],
-                            "eff": round(cand["effective"], 3),
-                            "w": round(cand["weight"], 3),
-                            "n": round(cand["n_obs"], 1)})
-
-    base = BASE_RATE.get(tdir, 0.5)
-    p_correct, combined_lo = wm.combine_p(base, terms, eq)
-    # Cap total shift from base until the evidence has real depth: no linked
-    # family with n>=PROVEN_FAMILY_N observations means the posterior spread is
-    # mostly prior + a handful of noisy labels — not licence for p=0.78.
-    max_n = max((c["n_obs"] for c in fam_best.values()), default=0.0)
-    if max_n < PROVEN_FAMILY_N:
-        lo_b, hi_b = base - MAX_SHIFT_UNPROVEN, base + MAX_SHIFT_UNPROVEN
-        capped = min(max(p_correct, lo_b), hi_b)
-        if capped != p_correct:
-            p_correct = capped
-            combined_lo = math.log(p_correct / (1.0 - p_correct))
-    # Name-aware band: width from the name's realized vol, P50 nudged toward fair
-    # value by the (bounded, confidence-scaled) margin of safety. Degrades to the
-    # generic band when no valuation exists for the ticker.
-    ticker = _first_ticker(hyp[5] if len(hyp) > 5 else None)
-    mos, vconf, rvol = _valuation_for(conn, ticker)
-    p10, p50, p90 = wm.return_band_v2(
-        p_correct, horizon, realized_vol_annual=rvol,
-        margin_of_safety=mos, val_confidence=vconf or 0.0,
-    )
-
-    pred = {
-        "id": f"pred_{uuid.uuid4().hex[:12]}",
-        "hypothesis_id": hyp_id,
-        "predicted_at": _now(),
-        "horizon": horizon,
-        "thesis_direction": tdir,
-        "p_correct": round(p_correct, 4),
-        "return_p10": round(p10, 3),
-        "return_p50": round(p50, 3),
-        "return_p90": round(p90, 3),
-        "mechanism_ids": used,
-        "mechanism_detail": used_detail,
-        "regime": regime,
-        "evidence_quality": eq,
-        "prior_log_odds": round(combined_lo, 4),
-    }
+    pred = build_prediction(conn, hyp, mech_ids, mechs, regime, prefer_horizon=True)
     if dry_run:
         return pred
 
@@ -286,9 +321,10 @@ def predict_one(
         "regime_at_prediction, evidence_quality, prior_log_odds, experiment_id) "
         "VALUES (?, ?, ?, 'quant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            pred["id"], hyp_id, pred["predicted_at"], horizon, pred["p_correct"],
+            pred["id"], pred["hypothesis_id"], pred["predicted_at"], pred["horizon"], pred["p_correct"],
             pred["return_p10"], pred["return_p50"], pred["return_p90"],
-            json.dumps(used_detail), regime, eq, pred["prior_log_odds"], experiment_id,
+            json.dumps(pred["mechanism_detail"]), pred["regime"], pred["evidence_quality"],
+            pred["prior_log_odds"], experiment_id,
         ),
     )
     conn.execute(
@@ -296,9 +332,10 @@ def predict_one(
         "before_state, after_state, rationale_concise, journal_ref, experiment_id) "
         "VALUES (?, ?, 'quant', 'hypothesis', ?, 'prediction', NULL, NULL, ?, NULL, ?)",
         (
-            f"audit_{uuid.uuid4().hex[:12]}", pred["predicted_at"], hyp_id,
+            f"audit_{uuid.uuid4().hex[:12]}", pred["predicted_at"], pred["hypothesis_id"],
             f"p={pred['p_correct']:.2f} band=[{pred['return_p10']:.1f},{pred['return_p50']:.1f},"
-            f"{pred['return_p90']:.1f}]% mech={','.join(used) or 'none'} eq={eq:.2f}"[:500],
+            f"{pred['return_p90']:.1f}]% mech={','.join(pred['mechanism_ids']) or 'none'} "
+            f"eq={pred['evidence_quality']:.2f}"[:500],
             experiment_id,
         ),
     )
@@ -368,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
             import link_mechanisms as _lm
             _text = _lm.hypothesis_text(conn, hyp[0], hyp[2])
-            mech_ids = [e["id"] for e in _lm.link(_text, list(mechs.values()))]
+            mech_ids = [e["id"] for e in _lm.link(_text, list(mechs.values()), hyp[3])]
         pred = predict_one(conn, hyp, mech_ids, mechs, regime, args.experiment_id, args.dry_run)
         emitted.append(pred)
 

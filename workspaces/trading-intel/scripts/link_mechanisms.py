@@ -30,6 +30,25 @@ import sys
 from datetime import datetime, timezone
 
 DB_PATH = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
+HORIZON_ALIASES = {
+    "1d": "intraday",
+    "intraday": "intraday",
+    "1-3d": "swing_1_5d",
+    "1-5d": "swing_1_5d",
+    "swing": "swing_1_5d",
+    "1w": "swing_1_5d",
+    "1-4w": "position_1_4w",
+    "weeks": "position_1_4w",
+    "1m": "position_1_4w",
+    "position": "position_1_4w",
+    "1-3m": "trend_1_3m",
+    "months": "trend_1_3m",
+    "3m": "trend_1_3m",
+    "trend": "trend_1_3m",
+    "6m+": "long_6m_plus",
+    "1y": "long_6m_plus",
+    "long": "long_6m_plus",
+}
 
 # tokens in mechanism ids that are structure, not features
 _STRUCT = {"gen", "multi", "long", "short", "hi", "lo", "quarter", "month",
@@ -50,6 +69,13 @@ def _class_tokens(mech: dict) -> set[str]:
     return toks
 
 
+def _normalize_horizon(horizon: str | None) -> str | None:
+    if not horizon:
+        return None
+    norm = horizon.strip().lower()
+    return HORIZON_ALIASES.get(norm, norm)
+
+
 def load_mechanisms(conn) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT id, name, antecedent_class, consequent_class, direction, horizon, status "
@@ -65,9 +91,10 @@ def hypothesis_text(conn, hyp_id: str, thesis: str | None = None) -> str:
     return f"{thesis} {ev}".lower()
 
 
-def link(text: str, mechanisms: list[dict]) -> list[dict]:
+def link(text: str, mechanisms: list[dict], hypothesis_horizon: str | None = None) -> list[dict]:
     """Return [{'id','align','src'}] — align=1 (linked mechanisms support the thesis)."""
     out, seen = [], set()
+    norm_horizon = _normalize_horizon(hypothesis_horizon)
     for m in mechanisms:
         mid = m["id"]
         if mid in seen:
@@ -82,13 +109,21 @@ def link(text: str, mechanisms: list[dict]) -> list[dict]:
             src = "class"
         if src:
             seen.add(mid)
-            out.append({"id": mid, "align": 1, "src": src})
+            out.append({
+                "id": mid,
+                "align": 1,
+                "src": src,
+                "horizon_match": _normalize_horizon(m.get("horizon")) == norm_horizon,
+            })
     # cap: over-linking pollutes learning with false attribution. Keep the
     # most-specific 6 (name matches are exact, feature matches structural,
     # class matches fuzzy).
     rank = {"name": 0, "feature": 1, "class": 2}
-    out.sort(key=lambda e: rank[e["src"]])
-    return out[:6]
+    out.sort(key=lambda e: (rank[e["src"]], -int(e["horizon_match"]), e["id"]))
+    trimmed = out[:6]
+    for entry in trimmed:
+        entry.pop("horizon_match", None)
+    return trimmed
 
 
 def backfill(dry_run: bool = False) -> dict:
@@ -142,7 +177,11 @@ def main(argv=None) -> int:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         text = hypothesis_text(conn, argv[1])
-        print(json.dumps({"text": text[:300], "links": link(text, load_mechanisms(conn))}, indent=2))
+        hrow = conn.execute("SELECT time_horizon FROM hypotheses WHERE id=?", (argv[1],)).fetchone()
+        print(json.dumps({
+            "text": text[:300],
+            "links": link(text, load_mechanisms(conn), hrow[0] if hrow else None),
+        }, indent=2))
         return 0
     print(__doc__)
     return 2
