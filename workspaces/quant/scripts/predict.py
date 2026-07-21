@@ -48,6 +48,11 @@ LEGACY_HORIZON_MAP = {
     "1-3m": "trend_1_3m", "months": "trend_1_3m", "3m": "trend_1_3m", "trend": "trend_1_3m",
     "6m+": "long_6m_plus", "1y": "long_6m_plus", "long": "long_6m_plus",
 }
+_ROOT_STRUCT_TOKENS = {
+    "gen", "multi", "long", "short", "hi", "lo",
+    "quarter", "month", "63d", "21d", "5d",
+    "chg", "level", "ttm", "yoy", "2m", "12", "1",
+}
 
 # Direction-conditional base rate (rp-base-rate-empirical-20260715): measured on
 # 120 random universe names x monthly entries 2024-26 (n=3,480 15td windows),
@@ -157,6 +162,23 @@ def mechanism_alignment(thesis_dir: str, mech_dir: str) -> int:
     return -1 if mech_for_long else 1
 
 
+def _mechanism_root_family_key(mech_id: str, mech_dir: str) -> tuple[tuple[str, ...], str]:
+    """Group mirrored generated mechanisms that share the same feature root.
+
+    TM-243: the 30d worst linked Brier bucket came from "growth + momentum"
+    signals where the deterministic linker attached both hi/lo variants of the
+    same generated family. Treating those siblings as independent evidence kept
+    p_correct too high for a weak cohort. Collapse them to one root family so
+    one feature stack contributes one posterior shift.
+    """
+    base = (mech_id or "").split("__", 1)[0]
+    tokens = tuple(
+        token for token in base.split("_")
+        if token and token not in _ROOT_STRUCT_TOKENS
+    )
+    return tokens, mech_dir
+
+
 def _family_terms(
     mech_ids: list[str],
     mechs: dict[str, dict],
@@ -164,6 +186,7 @@ def _family_terms(
     horizon: str,
     *,
     prefer_horizon: bool,
+    family_mode: str = "root",
 ) -> tuple[list[tuple[float, float]], list[str], list[dict]]:
     """Collapse linked mechanisms to one sibling per family.
 
@@ -189,7 +212,10 @@ def _family_terms(
             effective = posterior
             if align == 0:
                 weight *= 0.5  # neutral mechanism: mild support only
-        fam = (m["antecedent_class"], m["consequent_class"], m["direction"])
+        if family_mode == "legacy_class":
+            fam = (m["antecedent_class"], m["consequent_class"], m["direction"])
+        else:
+            fam = _mechanism_root_family_key(mid, m["direction"])
         cand = {
             "mid": mid,
             "align": align,
@@ -231,13 +257,19 @@ def build_prediction(
     regime: str | None,
     *,
     prefer_horizon: bool = True,
+    family_mode: str = "root",
 ) -> dict:
     hyp_id, thesis, time_horizon = hyp[0], hyp[2], hyp[3]
     horizon = normalize_horizon(time_horizon)
     eq = evidence_quality(conn, hyp_id)
     tdir = thesis_direction(thesis)
     terms, used, used_detail = _family_terms(
-        mech_ids, mechs, tdir, horizon, prefer_horizon=prefer_horizon
+        mech_ids,
+        mechs,
+        tdir,
+        horizon,
+        prefer_horizon=prefer_horizon,
+        family_mode=family_mode,
     )
 
     base = BASE_RATE.get(tdir, 0.5)
