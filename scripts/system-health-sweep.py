@@ -143,6 +143,28 @@ def check_cron():
     return finding("cron", sev, detail)
 
 
+def check_config_drift():
+    """D2026-07-21: openclaw.json + .last-good were both silently overwritten
+    with a stale June-03 snapshot (id main, host-exec commands gone, halved
+    context limits) — root cause traced to the openclaw CLI's own built-in
+    config clobber-detection/self-heal (vendor code, not our scripts), which
+    can promote a stale .last-good over live state (or vice versa) when its
+    size/meta heuristics misfire. That drift sat undetected until a human
+    happened to read the diff. This check makes git the independent source of
+    truth: any uncommitted change to the live config is surfaced immediately
+    instead of silently compounding."""
+    path = f"{ROOT}/openclaw.json"
+    rc, out = _run(["git", "-C", ROOT, "diff", "--stat", "--", "openclaw.json", "openclaw.json.last-good"], timeout=15)
+    out = out.strip()
+    if rc != 0:
+        return finding("config_drift", "warn", f"git diff check failed (rc={rc}): {out[:200]}")
+    if not out:
+        return finding("config_drift", "ok", "openclaw.json + .last-good match committed git state")
+    return finding("config_drift", "crit",
+                    "openclaw.json and/or .last-good have UNCOMMITTED drift from git HEAD — "
+                    "verify this is intentional, not a clobber-self-heal regression: " + out.replace("\n", " | "))
+
+
 def check_tokens():
     ocl = _resolve_openclaw()
     if not ocl:
@@ -497,7 +519,7 @@ def check_offsite_backup():
 
 
 CHECKS = [
-    check_gateway, check_telegram, check_cron, check_tokens,
+    check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
     check_taskmanager, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
