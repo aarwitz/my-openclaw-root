@@ -23,6 +23,7 @@ from pathlib import Path
 import feature_store
 import gate_evaluator
 import worldmodel
+import brier_contributors
 
 DB_PATH = "/home/aaron/.openclaw/state/trading-intel.sqlite"
 RISK_GATE_PATH = Path("/home/aaron/.openclaw/workspaces/risk/scripts/gate_risk_intents.py")
@@ -381,11 +382,45 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
         ).fetchone()
         count, brier = int(row[0] or 0), row[1]
         if count >= 20 and brier is not None and brier >= BRIER_COINFLIP - 0.01:
+            evidence = [f"predictions resolved {BRIER_LOOKBACK_DAYS}d: n={count}, mean brier_component={brier:.4f}"]
+            try:
+                report = brier_contributors.build_report(cur.connection, BRIER_LOOKBACK_DAYS)
+                selected = report.get("selected_contributor") or {}
+                delta = report.get("replay", {}).get("delta_mean_brier")
+                if selected:
+                    evidence.append(
+                        "worst contributor: "
+                        f"{selected.get('mechanism')} / {selected.get('regime')} / {selected.get('horizon')} "
+                        f"count={selected.get('count')} total_brier={selected.get('total_brier')} "
+                        f"mean_brier={selected.get('mean_brier')}"
+                    )
+                if delta is not None:
+                    baseline = report["replay"].get("baseline_class_family_most_observed", {}).get("mean_brier")
+                    fixed = report["replay"].get("fixed_root_family_horizon_preferred", {}).get("mean_brier")
+                    evidence.append(
+                        "post-fix replay delta: "
+                        f"before={baseline} after={fixed} delta={delta}"
+                    )
+                selected_delta = report.get("replay", {}).get("selected_contributor_delta")
+                if selected and selected_delta is not None:
+                    base_means = report["replay"].get("baseline_class_family_most_observed", {}).get("mechanism_means", {})
+                    fix_means = report["replay"].get("fixed_root_family_horizon_preferred", {}).get("mechanism_means", {})
+                    mech = selected.get("mechanism")
+                    evidence.append(
+                        "selected contributor replay delta: "
+                        f"mechanism={mech} before={base_means.get(mech)} "
+                        f"after={fix_means.get(mech)} delta={selected_delta}"
+                    )
+                reason = report.get("selection_reason")
+                if reason:
+                    evidence.append(f"selection_reason: {reason}")
+            except Exception as exc:
+                evidence.append(f"brier_contributor_breakdown_unavailable: {exc}")
             signals.append({
                 "id": "calibration-brier-at-coinflip",
                 "severity": min(90, int(55 + (brier - BRIER_COINFLIP) * 400)),
                 "summary": f"Mean Brier {brier:.4f} over {count} resolved predictions ({BRIER_LOOKBACK_DAYS}d) — at/near coin-flip (0.25)",
-                "evidence": [f"predictions resolved {BRIER_LOOKBACK_DAYS}d: n={count}, mean brier_component={brier:.4f}"],
+                "evidence": evidence,
                 "suggested_issue": {
                     "title": "Calibration: identify and fix the largest Brier contributor",
                     "acceptance_criteria": (

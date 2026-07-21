@@ -7,7 +7,7 @@ contributors by total Brier mass, and surfaces both:
   * the worst linked mechanism bucket (the largest actionable named mechanism).
 
 It can also replay the resolved cohort under the pre-fix family selector and
-the post-fix horizon-preferred selector to measure the targeted delta.
+the post-fix root-family dedup selector to measure the targeted delta.
 """
 from __future__ import annotations
 
@@ -145,6 +145,7 @@ def replay_mean_brier(
     mechs: dict[str, dict],
     *,
     prefer_horizon: bool,
+    family_mode: str,
 ) -> dict:
     total = 0.0
     bucket_totals: dict[str, list[float]] = defaultdict(list)
@@ -164,6 +165,7 @@ def replay_mean_brier(
             mechs,
             row["regime_at_prediction"],
             prefer_horizon=prefer_horizon,
+            family_mode=family_mode,
         )
         bit = 1.0 if row["realized_outcome"] == "correct" else 0.0
         brier = (pred["p_correct"] - bit) ** 2
@@ -185,8 +187,14 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
     ranked = rank_contributors(rows)
     breakdown = dimension_breakdown(rows)
     mechs = predict.load_mechanisms(conn)
-    baseline = replay_mean_brier(conn, rows, mechs, prefer_horizon=False) if rows else {"mean_brier": None, "mechanism_means": {}}
-    fixed = replay_mean_brier(conn, rows, mechs, prefer_horizon=True) if rows else {"mean_brier": None, "mechanism_means": {}}
+    baseline = (
+        replay_mean_brier(conn, rows, mechs, prefer_horizon=False, family_mode="legacy_class")
+        if rows else {"mean_brier": None, "mechanism_means": {}}
+    )
+    fixed = (
+        replay_mean_brier(conn, rows, mechs, prefer_horizon=True, family_mode="root")
+        if rows else {"mean_brier": None, "mechanism_means": {}}
+    )
 
     worst_overall = ranked[0] if ranked else None
     worst_linked = next((item for item in ranked if item["mechanism"] != "(none)"), None)
@@ -214,8 +222,8 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
         "selected_contributor": selected,
         "selection_reason": selection_reason,
         "replay": {
-            "baseline_family_most_observed": baseline,
-            "fixed_family_horizon_preferred": fixed,
+            "baseline_class_family_most_observed": baseline,
+            "fixed_root_family_horizon_preferred": fixed,
             "delta_mean_brier": (
                 None
                 if baseline["mean_brier"] is None or fixed["mean_brier"] is None
