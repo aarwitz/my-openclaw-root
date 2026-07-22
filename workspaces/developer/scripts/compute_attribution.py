@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, emit, now_iso  # noqa: E402
 
-from connectors.alpaca import ConnectorError, daily_bars  # noqa: E402
+from connectors.marketdata import ConnectorError, daily_bars  # noqa: E402
 
 HORIZON_DAYS = {
     "intraday": 1,

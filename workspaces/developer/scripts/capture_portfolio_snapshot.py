@@ -23,7 +23,7 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, emit, now_iso  # noqa: E402
-from connectors.alpaca import ConnectorError, daily_bars  # noqa: E402
+from connectors.marketdata import ConnectorError, daily_bars  # noqa: E402
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import get_account  # noqa: E402  (adapter, D52)
 

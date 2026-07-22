@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import ConnectorError  # noqa: E402
+from connectors.marketdata import ConnectorError  # noqa: E402
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import get_account, list_orders, list_positions  # noqa: E402  (adapter, D52)
 

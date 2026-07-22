@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import daily_bars  # noqa: E402
+from connectors.marketdata import daily_bars  # noqa: E402
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 PREMATURE_PCT = float(os.environ.get("EXIT_PREMATURE_PCT", "0.03"))
