@@ -36,8 +36,8 @@ from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import alpaca  # noqa: E402
-from connectors._http import ConnectorError  # noqa: E402
+from connectors import massive  # noqa: E402
+from connectors._http import ConnectorError  # noqa: E402  (still re-exported for callers)
 
 CORR_THRESHOLD = 0.70       # pairwise corr at/above this = "same bet"
 MAX_CLUSTER_PCT = 0.25      # cluster combined exposure cap (gate)
@@ -95,7 +95,7 @@ def _returns_for(tickers: list[str], days: int = RET_DAYS) -> dict[str, list[flo
     out: dict[str, list[float]] = {}
     for t in tickers:
         try:
-            bars = alpaca.daily_bars(t, days=days)
+            bars = massive.daily_bars(t)[-days:]
             closes = [float(b["c"]) for b in bars if b.get("c") is not None]
             r = _log_returns(closes)
             if len(r) >= MIN_OBS:
@@ -322,7 +322,7 @@ def snapshot(write: bool = True, experiment_id: str | None = None) -> dict:
         "factor_betas": factor_betas,
         "top_risk_contributors": [{"ticker": t, "risk_share_pct": round(100 * s, 1)} for t, s in top_rc],
         "clusters": cluster_detail,
-        "source": "desk-book (canonical positions) + alpaca-bars",
+        "source": "desk-book (canonical positions) + massive-bars",
     }
     if write:
         _write(conn, out, experiment_id)
