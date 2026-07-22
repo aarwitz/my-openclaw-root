@@ -152,6 +152,23 @@ def tm_patch(issue_id, payload):
         return resp.status
 
 
+def tm_comment(issue_id, content):
+    with open(TM_CRED) as fh:
+        token = json.load(fh)["session_token"]
+    req = urllib.request.Request(
+        f"{TM_BASE}/api/issues/{issue_id}/comments",
+        data=json.dumps({"content": content, "username": "Dwight"}).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.status
+
+
 def page(key, msg):
     if not os.path.exists(PAGER):
         print(f"WARNING: pager missing, message dropped: {msg}", file=sys.stderr)
@@ -227,6 +244,13 @@ def main() -> int:
         page(f"pr-held-{pr_num}",
              f"⏸ {task} {args.pr_url} held for your review — {why}. "
              f"Merge it yourself or say the word and an agent can address the blockers.")
+        if args.issue_id:
+            try:  # verdict belongs on the issue page too; TM failure never changes the decision
+                tm_comment(args.issue_id,
+                           f"⏸ Auto-merge HELD — {args.pr_url}\n\nReasons: {why}\n\n"
+                           "Gate notes:\n" + "\n".join(f"- {n}" for n in gate_notes))
+            except Exception:
+                pass
         print(json.dumps(result, indent=1))
         return 3
 
@@ -263,6 +287,16 @@ def main() -> int:
          f"files ({len(files)}): {file_list}\n"
          f"{total_lines} lines changed · gates green · {live}\n"
          f"revert: git revert -m 1 {merge_sha} && git push")
+    if args.issue_id:
+        try:
+            tm_comment(args.issue_id,
+                       f"🤖 Auto-merged — {args.pr_url} (merge {merge_sha})\n\n"
+                       f"files ({len(files)}): {file_list}\n"
+                       f"{total_lines} lines changed · {live}\n\n"
+                       "Gate notes:\n" + "\n".join(f"- {n}" for n in gate_notes) +
+                       f"\n\nrevert: `git revert -m 1 {merge_sha} && git push`")
+        except Exception:
+            pass
     result["decision"] = "merged"
     result["merge_sha"] = merge_sha
     result["deployed"] = deployed

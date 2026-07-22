@@ -440,6 +440,37 @@ def check_jerry_poll():
     return finding("jerry_poll", "ok", f"last {len(recent)} runs: {len(recent) - len(fails)} ok")
 
 
+def check_project_registry():
+    """Registry drift silently poisons agent planning. Flag missing local repo
+    paths and the specific MONTRA host-checkout mapping that recent sessions
+    needed but old docs/registry entries lacked."""
+    registry_path = os.path.expanduser("~/.openclaw/projects.json")
+    try:
+        raw = json.load(open(registry_path, "r", encoding="utf-8"))
+    except FileNotFoundError:
+        return finding("project_registry", "crit", "projects.json missing")
+    except Exception as e:
+        return finding("project_registry", "crit", f"projects.json unreadable: {e}")
+
+    projects = raw.get("projects", raw.get("products", []))
+    missing_local = []
+    montra_host_repo_present = False
+    for project in projects:
+        for repo in project.get("repos", []):
+            slug = str(repo.get("slug") or "").strip()
+            path = str(repo.get("path") or "").strip()
+            if slug == "EWAG-dev/MONTRA" and path == "/home/aaron/repos/MONTRA":
+                montra_host_repo_present = True
+            if path and not os.path.isdir(path):
+                missing_local.append(f"{slug or project.get('name')}: {path}")
+
+    if missing_local:
+        return finding("project_registry", "warn", "missing local repo path(s): " + "; ".join(missing_local[:4]))
+    if not montra_host_repo_present:
+        return finding("project_registry", "warn", "MONTRA host checkout missing from projects.json; TM/repo reasoning can drift")
+    return finding("project_registry", "ok", "registry local repo paths resolve; MONTRA host checkout present")
+
+
 def check_options_freshness():
     """options_daily (thetadata audition data) lives in its own table — was 4td
     stale with no monitor when the 2026-07-09 audit looked."""
@@ -520,7 +551,7 @@ def check_offsite_backup():
 
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
-    check_taskmanager, check_disk, check_pipeline, check_data_freshness,
+    check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
 ]

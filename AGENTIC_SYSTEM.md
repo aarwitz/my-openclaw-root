@@ -69,9 +69,11 @@ and this **slow loop** that changes *code* through the human gate. The kernel is
 ## Components
 
 - **Project registry — `~/.openclaw/projects.json`.** One entry per project:
-  `name`, `status` (active|paused), `repos[]`, `sprint_id` (its TM board), `tm_assignee` default,
-  and `telemetry_cmd` (the plugin). The PM pass loops over `status=active` — activating a project
-  is a one-field flip, not a prompt rewrite.
+  `name`, `status` (active|paused), `repos[]`, `sprint_id` (its intended TM board), `tm_assignee`
+  default, and `telemetry_cmd` (the plugin). The PM pass loops over `status=active` — activating
+  a project is a one-field flip, not a prompt rewrite. The registry is authoritative for **scope
+  and repo resolution**, but **not** for live TM sprint existence or mutation safety: any
+  sprint-scoped write must preflight live TM first.
 - **Telemetry plugin contract.** `telemetry_cmd` is any deterministic command printing JSON:
   ```json
   { "project": "<name>", "generated_at": "<iso>", "signals": [

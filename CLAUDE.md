@@ -101,6 +101,11 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
   model selection**. ACP is disabled by policy.
 - **Task Manager** runtime is hosted at **`https://tm.lidisolutions.ai`**. All TM client scripts honor
   `TASK_MANAGER_URL`; local host-port aliases are retired and forbidden.
+- **For any Task Manager mutation in this repo, live TM state outranks local context.**
+  `projects.json`, old commits, and docs may define project scope/repo mapping, but they are
+  never authority for sprint existence. Before any sprint-scoped TM write, run
+  `~/.openclaw/scripts/run-with-trace.sh --tag verify ~/.openclaw/scripts/tm-preflight-guard.py --project <NAME> --intent <INTENT>`
+  and stop if it returns non-zero.
 - Exposure: localhost-only gateway, fronted by Tailscale serve, controlled over Telegram (paired,
   allowlisted users). See `cli_guide.md`.
 
