@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
-from connectors.alpaca import daily_bars, latest_trade  # noqa: E402  (market data)
+from connectors.marketdata import daily_bars, latest_trade  # noqa: E402  (market data)
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 STOP_PCT = float(os.environ.get("TRADER_STOP_PCT", "0.08"))

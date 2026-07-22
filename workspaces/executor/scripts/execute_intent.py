@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
 
-from connectors.alpaca import ConnectorError, daily_bars, latest_trade, market_clock  # noqa: E402  (market DATA)
+from connectors.marketdata import ConnectorError, daily_bars, latest_trade, market_clock  # noqa: E402  (market DATA)
 from broker import place_order  # noqa: E402  (trading state -> adapter, D52)
 
 # ---- freshness gate: never execute on stale reasoning or a price that moved since the signal priced it.
