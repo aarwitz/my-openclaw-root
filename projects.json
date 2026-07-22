@@ -1,5 +1,5 @@
 {
-  "$comment": "Product registry \u2014 single source of truth for the autonomous dev org. Consumed by dwight-launch-from-issue.py (repo resolution), the org-owner cron (backlog health), and TM issue routing. Add a product here and every lane knows it.",
+  "$comment": "Product registry \u2014 single source of truth for project scope, repo resolution, and lane defaults. Live Task Manager remains authoritative for sprint existence and sprint-targeted mutations.",
   "version": 1,
   "products": [
     {
@@ -65,11 +65,17 @@
     {
       "id": "montra",
       "name": "MONTRA",
-      "description": "Montra Dev Console (web) \u2014 lives inside lidi-solutions",
+      "description": "MONTRA app + website product surfaces",
       "repos": [
         {
           "slug": "EWAG-dev/MONTRA",
-          "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/MONTRA"
+          "path": "/home/aaron/repos/MONTRA",
+          "note": "authoritative host checkout for gateway and Claude/Codex sessions"
+        },
+        {
+          "slug": "EWAG-dev/MONTRA",
+          "path_on": "mac-dev:/Users/taylorolsen-vogt/repos/MONTRA",
+          "note": "mac node checkout for iOS build/test work"
         },
         {
           "slug": "aarwitz/lidi-solutions",
@@ -86,7 +92,7 @@
       ],
       "deploy": "npm run deploy:pages (human-gated)",
       "status": "paused",
-      "notes": "iOS app repo found 2026-07-03: EWAG-dev/MONTRA on the mac node.",
+      "notes": "MONTRA has a real host checkout at /home/aaron/repos/MONTRA; registry scope is authoritative for project activation, not for inferring live TM sprint existence.",
       "runner": "mac-dev",
       "paused_note": "Paused 2026-07-14 (Aaron): Dwight works ONLY the ATS v6 Trading Intel sprint for now",
       "sprint_id": null,
@@ -132,9 +138,8 @@
       "repos": [
         {
           "slug": "aarwitz/CleaningRobot",
-          "path": "/home/aaron/CleaningRobot",
           "path_on": "robot-orin:~/workspaces/CleaningRobot",
-          "note": "linux checkout at /home/aaron/CleaningRobot; LIVE dev happens on the orin",
+          "note": "LIVE dev happens on the orin",
           "gateway_path": "/home/aaron/.openclaw/mirrors/CleaningRobot"
         }
       ],
