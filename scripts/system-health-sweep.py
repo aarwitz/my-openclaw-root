@@ -549,11 +549,33 @@ def check_offsite_backup():
     return finding("offsite_backup", "ok", f"offsite copy {age_h:.1f}h old")
 
 
+def check_integrity():
+    """Fail-fast loop-closure + data-reality verifier (integrity_check.py). A broken
+    loop or silently-NULL column is CRIT (pages) — those are the holes that looked green
+    for a month. 'No edge' is surfaced as WARN: an honest strategy verdict, never hidden
+    behind 'be patient', but not a machine failure that should page."""
+    rc, out = _run(["python3", f"{ROOT}/workspaces/trading-intel/scripts/integrity_check.py"], timeout=90)
+    try:
+        rep = json.loads(out[out.index("{"):])
+    except Exception:
+        return finding("integrity", "warn", f"integrity_check unreadable (rc={rc}): {out[:160]}")
+    integ = rep.get("integrity", {})
+    edge = rep.get("edge", {})
+    if integ.get("red", 0):
+        broken = [c["detail"] for c in integ.get("checks", []) if c["status"] == "RED"][:4]
+        return finding("integrity", "crit", f"{integ['red']} broken loops/data holes: " + " | ".join(broken))
+    if edge.get("status") == "NO_EDGE":
+        er = [c["detail"] for c in edge.get("checks", []) if c["status"] == "RED"][:2]
+        return finding("integrity", "warn", "loops OK, but NO EDGE (honest — do not scale): " + " | ".join(er))
+    return finding("integrity", "ok", rep.get("headline", "loops closed + edge present"))
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
+    check_integrity,
 ]
 
 
