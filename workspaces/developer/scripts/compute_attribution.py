@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,12 +36,16 @@ HORIZON_DAYS = {
 
 
 def _parse(d: str | None) -> datetime | None:
+    """Parse to a NAIVE-UTC datetime. Bars now come from Massive with date-only `t`
+    ('YYYY-MM-DD', naive) while position timestamps are tz-aware ('...Z'); normalizing
+    both to naive-UTC keeps the nearest-bar comparison from mixing aware/naive."""
     if not d:
         return None
     try:
-        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
 
 def _spy_return(open_dt: datetime, close_dt: datetime) -> float | None:
@@ -90,8 +95,11 @@ def process(conn) -> list[dict]:
         "pnl_slippage_adjusted, unrealized_pnl_pct, cost_basis, current_value "
         "FROM positions WHERE state='closed' AND closed_at IS NOT NULL"
     ).fetchall()
+    # Only skip positions already attributed WITH a realized edge; rows left NULL by the
+    # pre-mark_positions era get recomputed now that positions carry realized returns.
     existing = {r["position_id"] for r in conn.execute(
-        "SELECT position_id FROM attribution WHERE position_id IS NOT NULL"
+        "SELECT position_id FROM attribution "
+        "WHERE position_id IS NOT NULL AND realized_edge_vs_spy_bps IS NOT NULL"
     )}
     out = []
     for r in rows:
@@ -119,7 +127,8 @@ def process(conn) -> list[dict]:
 
 def write(conn, rows: list[dict]) -> None:
     for r in rows:
-        rid = "ATTR-" + now_iso().replace(":", "").replace("-", "") + "-" + r["position_id"][:16]
+        rid = "ATTR-" + uuid.uuid4().hex[:20]  # unique regardless of same-second / shared-hypothesis position ids
+        conn.execute("DELETE FROM attribution WHERE position_id=?", (r["position_id"],))  # replace any stale NULL-edge row
         conn.execute(
             "INSERT INTO attribution (id, hypothesis_id, position_id, horizon, "
             "opened_at, closed_at, portfolio_return_pct, spy_return_pct, "
