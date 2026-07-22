@@ -62,6 +62,30 @@ def daily_bars(symbol: str, frm: str = "2015-01-01", to: str | None = None,
     return out
 
 
+def latest_trade(symbol: str) -> dict | None:
+    """Most-recent trade price via the snapshot endpoint (Polygon-compatible), for live marks.
+
+    Returns {"price": float, "ts": <ns epoch|None>, "source": "massive"} or None. Falls back
+    lastTrade -> day close -> prevDay close so a quiet/closed tape still yields a mark. Shape
+    matches the prior `alpaca.latest_trade` consumers ({"price": ...}). Deliberately UNCACHED —
+    marks must be fresh (daily_bars is the cached historical path). ~15-min delayed on this tier,
+    equivalent to the Alpaca free feed it replaces.
+    """
+    try:
+        d = _get(f"{BASE}/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}")
+    except ConnectorError:
+        return None
+    t = d.get("ticker") or {}
+    price = (
+        (t.get("lastTrade") or {}).get("p")
+        or (t.get("day") or {}).get("c")
+        or (t.get("prevDay") or {}).get("c")
+    )
+    if not price:
+        return None
+    return {"price": float(price), "ts": t.get("updated"), "source": "massive"}
+
+
 def short_interest(ticker: str, cache_h: float = 24.0) -> list[dict]:
     """Point-in-time short-interest history (FINRA, bi-monthly settlement dates).
 
