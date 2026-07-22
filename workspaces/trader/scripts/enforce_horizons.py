@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import latest_trade  # noqa: E402
+from connectors.marketdata import latest_trade  # noqa: E402
 import worldmodel as wm  # noqa: E402
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
@@ -67,7 +67,7 @@ def _parse_opened_at(ts: str | None) -> datetime | None:
 def _spy_return(since_iso: str) -> float | None:
     """SPY close-to-latest return since a date (market-relative grading)."""
     try:
-        from connectors.alpaca import daily_bars
+        from connectors.marketdata import daily_bars
         bars = daily_bars("SPY", days=400)
         past = [b for b in bars if b["t"][:10] >= since_iso[:10]]
         if len(past) >= 2 and float(past[0]["c"]) > 0:

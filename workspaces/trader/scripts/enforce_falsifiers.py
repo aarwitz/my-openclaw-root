@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import latest_trade  # noqa: E402
+from connectors.marketdata import latest_trade  # noqa: E402
 
 DB = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 

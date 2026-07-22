@@ -44,7 +44,7 @@ DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
 # Connector path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors.alpaca import (  # noqa: E402
+from connectors.marketdata import (  # noqa: E402
     ConnectorError,
     daily_bars,
     latest_trade,
