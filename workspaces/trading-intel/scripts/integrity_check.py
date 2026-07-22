@@ -158,12 +158,66 @@ def edge(conn) -> list[dict]:
     return out
 
 
+BIG_MOVE_PCT = 2.0
+_INDEX = {"SPY", "QQQ", "SOXX", "IWM", "DIA", "VIX", "GLD", "TLT"}
+_BEAR_WORDS = ("short", "bear", "downside", "de-rat", "sell", "avoid", "overvalued")
+
+
+def research_coverage(conn) -> list[dict]:
+    """Were we on the RIGHT SIDE of the biggest single-name stories? Missed/wrong-side
+    opportunities are invisible to trade-outcome grading (you only grade trades you made),
+    so this reads market_events' own recorded moves and asks: on each big move, did we hold
+    a timely, correct-DIRECTION thesis? Consensus-long-into-a-rotation lights up here.
+    RED = poor research, a quality verdict (WARN), not a machine break."""
+    import json as _json
+    events = _rows(conn, "SELECT event_date, observed_moves_json FROM market_events "
+                         "WHERE event_date >= date('now','-30 days') AND observed_moves_json IS NOT NULL")
+    big: dict[str, tuple[str, float]] = {}
+    for e in events:
+        try:
+            moves = _json.loads(e["observed_moves_json"])
+        except (ValueError, TypeError):
+            continue
+        for tk, mv in (moves or {}).items():
+            if tk in _INDEX or not isinstance(mv, (int, float)):
+                continue
+            if abs(mv) >= BIG_MOVE_PCT and (tk not in big or abs(mv) > abs(big[tk][1])):
+                big[tk] = (e["event_date"], float(mv))
+    if len(big) < 3:
+        return []
+    covered = correct = 0
+    misses = []
+    for tk, (dt, mv) in sorted(big.items(), key=lambda x: -abs(x[1][1])):
+        h = conn.execute(
+            "SELECT thesis_summary, state FROM hypotheses WHERE tickers LIKE ? "
+            "AND date(created_at) <= date(?, '+2 days') ORDER BY created_at DESC LIMIT 1",
+            (f'%"{tk}"%', dt),
+        ).fetchone()
+        if not h:
+            misses.append(f"{tk} {mv:+.1f}% {dt}: no thesis (missed story)")
+            continue
+        covered += 1
+        th = (h["thesis_summary"] or "").lower()
+        our_short = any(w in th for w in _BEAR_WORDS)
+        if (mv < 0) == our_short:
+            correct += 1
+        else:
+            misses.append(f"{tk} {mv:+.1f}% {dt}: we were {'short' if our_short else 'long'} ({h['state']}) — wrong side")
+    n = len(big)
+    return [{
+        "family": "research", "id": "research:big_story_direction",
+        "status": "RED" if (n and correct / n < 0.4) else "OK",
+        "detail": f"direction-correct on {correct}/{n} of the biggest single-name stories (30d), "
+                  f"coverage {covered}/{n}" + ("; " + " | ".join(misses[:4]) if misses else ""),
+    }]
+
+
 def main() -> int:
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         integrity = data_reality(conn) + loop_closure(conn)
-        edge_checks = edge(conn)
+        edge_checks = edge(conn) + research_coverage(conn)
     finally:
         conn.close()
     integ_red = [c for c in integrity if c["status"] == "RED"]
@@ -173,11 +227,11 @@ def main() -> int:
         "integrity": {"status": "BROKEN" if integ_red else "OK",
                       "red": len(integ_red), "checks": integrity},
         "edge": {"status": "NO_EDGE" if edge_red else "OK",
-                 "note": "RED = honest 'no alpha yet', not a bug — but never hide it behind 'be patient'",
+                 "note": "RED = honest 'no alpha/poor research yet', not a bug — never hide it behind 'be patient'",
                  "checks": edge_checks},
         "headline": (
             f"INTEGRITY {'BROKEN' if integ_red else 'OK'} ({len(integ_red)} broken loops/data holes); "
-            f"EDGE {'NONE' if edge_red else 'present'}"
+            f"EDGE/RESEARCH {'FAILING' if edge_red else 'ok'} ({len(edge_red)} red)"
         ),
     }
     print(json.dumps(report, indent=1))
