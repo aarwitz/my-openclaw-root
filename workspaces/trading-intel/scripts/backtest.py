@@ -25,7 +25,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import alpaca  # noqa: E402
+from connectors import massive  # noqa: E402
 import worldmodel as wm  # noqa: E402
 import worldmodel_stats as st  # noqa: E402
 
@@ -82,8 +82,7 @@ def load_aligned(universe, days, end=None):
     raw = {}
     for s in syms:
         try:
-            raw[s] = alpaca.daily_bars(s, days=days, adjustment="split")
-            time.sleep(0.25)
+            raw[s] = massive.daily_bars(s)[-days:]
         except Exception as e:
             print(f"  WARN: no bars for {s}: {str(e)[:80]}", file=sys.stderr)
     if "SPY" not in raw:
