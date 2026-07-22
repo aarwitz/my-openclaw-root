@@ -36,8 +36,8 @@ from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import alpaca  # noqa: E402
-from connectors._http import ConnectorError  # noqa: E402
+from connectors import massive  # noqa: E402
+from connectors._http import ConnectorError  # noqa: E402  (still re-exported for callers)
 
 CORR_THRESHOLD = 0.70       # pairwise corr at/above this = "same bet"
 MAX_CLUSTER_PCT = 0.25      # cluster combined exposure cap (gate)
@@ -95,7 +95,7 @@ def _returns_for(tickers: list[str], days: int = RET_DAYS) -> dict[str, list[flo
     out: dict[str, list[float]] = {}
     for t in tickers:
         try:
-            bars = alpaca.daily_bars(t, days=days)
+            bars = massive.daily_bars(t)[-days:]
             closes = [float(b["c"]) for b in bars if b.get("c") is not None]
             r = _log_returns(closes)
             if len(r) >= MIN_OBS:
@@ -202,24 +202,51 @@ def _clusters(names: list[str], series: list[list[float]]) -> list[list[str]]:
     return out
 
 
+def _desk_book(conn) -> tuple[dict[str, float], float | None]:
+    """The LIVE desk book from the canonical store — the internal paper engine's
+    book since the 2026-07-07 (D52) cutover.
+
+    Before this, snapshot() read `alpaca.list_positions()`, but the D52 cutover
+    removed Alpaca from the money path and nothing syncs desk fills to it, so the
+    broker account is frozen at cutover (a stale ~24-name subset). Reading the
+    canonical `positions` (+ `book_equity`) makes the risk/beta/exposure view
+    reflect the real ~46-name desk book. Holdings are signed market values
+    (shorts negative), matching the gate's own exposure accounting.
+    """
+    holdings: dict[str, float] = {}
+    for r in conn.execute(
+        f"SELECT UPPER(ticker) t, COALESCE(current_value, qty*cost_basis) v "
+        f"FROM positions WHERE state IN ({','.join('?' * len(OPEN_POSITION_STATES))})",
+        OPEN_POSITION_STATES,
+    ):
+        if r["t"] is None:
+            continue
+        holdings[r["t"]] = holdings.get(r["t"], 0.0) + float(r["v"] or 0.0)
+    holdings = {t: v for t, v in holdings.items() if abs(v) > 0}
+
+    eq_row = conn.execute(
+        "SELECT equity FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1"
+    ).fetchone()
+    equity = float(eq_row["equity"]) if eq_row and eq_row["equity"] is not None else None
+    if equity is None:  # fall back to the capital-efficiency snapshot's equity
+        ce = conn.execute(
+            "SELECT equity FROM capital_efficiency_snapshots ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        equity = float(ce["equity"]) if ce and ce["equity"] is not None else None
+    return holdings, equity
+
+
 def snapshot(write: bool = True, experiment_id: str | None = None) -> dict:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    try:
-        positions = alpaca.list_positions()
-        acct = alpaca.get_account()
-        equity = float(acct.get("equity") or acct.get("portfolio_value") or 0.0)
-    except ConnectorError as e:
-        return {"error": f"alpaca: {e}"}
+    holdings, equity = _desk_book(conn)
+    if not equity:
+        return {"error": "no desk equity available (book_equity/capital_efficiency both empty)"}
 
-    holdings = {}
-    for p in positions:
-        mv = float(p.get("market_value") or 0)
-        if abs(mv) > 0:
-            holdings[p["symbol"].upper()] = mv
     if len(holdings) < 2:
-        out = {"as_of": _now_iso(), "n_positions": len(holdings),
+        out = {"as_of": _now_iso(), "equity": round(equity, 2), "n_positions": len(holdings),
+               "gross_exposure": round(sum(abs(v) for v in holdings.values()), 2),
                "note": "need >=2 positions for a covariance view"}
         if write:
             _write(conn, out, experiment_id)
@@ -280,9 +307,14 @@ def snapshot(write: bool = True, experiment_id: str | None = None) -> dict:
                                "equity_pct": round(100 * val / equity, 1) if equity else None})
 
     top_rc = sorted(risk_contrib.items(), key=lambda kv: -kv[1])[:5]
+    modeled_gross = sum(abs(holdings[t]) for t in names)
     out = {
-        "as_of": _now_iso(), "equity": round(equity, 2), "n_positions": len(names),
-        "gross_exposure": round(gross, 2), "gross_pct": round(100 * gross / equity, 1) if equity else None,
+        "as_of": _now_iso(), "equity": round(equity, 2),
+        "n_positions": len(holdings),                    # whole desk book
+        "n_positions_modeled": len(names),               # covariance/beta-eligible subset (needs price history)
+        "modeled_coverage_pct": round(100 * modeled_gross / gross, 1) if gross else None,
+        "gross_exposure": round(gross, 2),               # whole desk book
+        "gross_pct": round(100 * gross / equity, 1) if equity else None,
         "portfolio_vol_annual": round(port_vol_ann, 4),
         "var_1d_95": var_1d_95, "var_1d_99": var_1d_99, "cvar_1d_95": cvar_1d_95,
         "var_1d_95_pct": round(100 * var_1d_95 / equity, 2) if equity else None,
@@ -290,7 +322,7 @@ def snapshot(write: bool = True, experiment_id: str | None = None) -> dict:
         "factor_betas": factor_betas,
         "top_risk_contributors": [{"ticker": t, "risk_share_pct": round(100 * s, 1)} for t, s in top_rc],
         "clusters": cluster_detail,
-        "source": "alpaca-bars",
+        "source": "desk-book (canonical positions) + massive-bars",
     }
     if write:
         _write(conn, out, experiment_id)
