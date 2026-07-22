@@ -80,6 +80,7 @@ step "fund-forecast"       "$PY" "$TI/fundamental_forecast.py" forecast --book
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
 step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
+step "mark_positions"      "$PY" "$DEV/mark_positions.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
 step "extract_patterns"    "$PY" "$AR/extract_patterns.py"
 log "===== learning chain end (failed: ${FAILED:-none}) ====="

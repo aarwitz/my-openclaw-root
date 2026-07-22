@@ -682,6 +682,47 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     except Exception as exc:
         print(f"WARN: factor-tilt signal skipped: {exc}", file=sys.stderr)
 
+    # --- Selection alpha: are the desk's actual CLOSED trades beating the market?
+    # Now measurable per-trade (attribution.realized_edge_vs_spy_bps, populated once
+    # mark_positions + compute_attribution run). The truest "do our picks have edge?".
+    try:
+        row = cur.execute(
+            "SELECT COUNT(*) n, AVG(realized_edge_vs_spy_bps) avg_bps, "
+            "SUM(CASE WHEN realized_edge_vs_spy_bps > 0 THEN 1 ELSE 0 END) win "
+            "FROM attribution WHERE realized_edge_vs_spy_bps IS NOT NULL "
+            "AND closed_at >= datetime('now', '-60 days')"
+        ).fetchone()
+        n = int(row["n"] or 0)
+        avg_bps = row["avg_bps"]
+        if n >= 8 and avg_bps is not None and avg_bps <= -50.0:
+            win_rate = (int(row["win"] or 0) / n) if n else 0.0
+            signals.append({
+                "id": "selection-alpha-negative",
+                "severity": min(85, int(45 + min(40, -avg_bps / 20))),
+                "summary": (
+                    f"Closed trades are LOSING to SPY: avg {avg_bps:.0f} bps market-relative "
+                    f"over {n} trades (60d), win rate {win_rate:.0%}"
+                ),
+                "evidence": [
+                    f"attribution.realized_edge_vs_spy_bps: n={n}, avg={avg_bps:.0f}bps, winners={int(row['win'] or 0)}",
+                    "this is per-trade REALIZED market-relative edge (now measurable via mark_positions "
+                    "-> compute_attribution); negative = the deployed sleeve has no selection edge yet",
+                    "cross-reference the factor-tilt and calibration signals for the driver; single-regime caveat applies",
+                ],
+                "suggested_issue": {
+                    "title": "Selection alpha negative: attribute per-trade losses to their driver",
+                    "acceptance_criteria": (
+                        "- Break down realized_edge_vs_spy_bps by mechanism family / factor / regime (script, not prose)\n"
+                        "- Identify the worst driver and whether it is regime-specific (factor_regime) or mechanism decay\n"
+                        "- Any origination/sizing/mechanism change ships as a rule_proposal, backtested (invariant #4)\n"
+                        "- Do NOT overfit to the current single adverse regime"
+                    ),
+                    "assignee": "Quant",
+                },
+            })
+    except sqlite3.Error as exc:
+        print(f"WARN: selection-alpha signal skipped: {exc}", file=sys.stderr)
+
     signals.sort(key=lambda s: -s["severity"])
     return signals
 
