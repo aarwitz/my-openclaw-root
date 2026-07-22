@@ -127,6 +127,16 @@ def loop_closure(conn) -> list[dict]:
                     "detail": f"{stale} predictions >30d old still unresolved"})
     except sqlite3.Error:
         pass
+
+    # Challenged->resolve loop: 'challenged' theses that rot un-resolved = the research-decision
+    # loop is open (the desk notices it's wrong and does nothing). resolve_challenged should drain it.
+    try:
+        ch = conn.execute("SELECT COUNT(*) FROM hypotheses WHERE state='challenged'").fetchone()[0]
+        out.append({"family": "loop", "id": "research:challenged_rot",
+                    "status": "RED" if ch > 40 else ("WARN" if ch > 15 else "OK"),
+                    "detail": f"{ch} theses stuck 'challenged' (flagged wrong, never resolved)"})
+    except sqlite3.Error:
+        pass
     return out
 
 

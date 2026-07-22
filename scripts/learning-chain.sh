@@ -79,6 +79,9 @@ step "fund-grade"          "$PY" "$TI/fundamental_forecast.py" grade
 step "fund-forecast"       "$PY" "$TI/fundamental_forecast.py" forecast --book
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
 step "calibrate"           "$PY" "$AR/calibrate.py"
+# Close the challenged->resolve loop: deep second-order LLM resolution of stale challenged
+# theses (HOLD/CLOSE/FLIP). Bounded per run; flips flow through quant->critic->risk gated.
+step "resolve_challenged"  "$PY" "$TI/resolve_challenged.py" --max "${RESOLVE_MAX:-8}"
 step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
 step "mark_positions"      "$PY" "$DEV/mark_positions.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
