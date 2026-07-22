@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import alpaca, fmp, massive  # noqa: E402
+from connectors import fmp, massive  # noqa: E402
 
 OUT = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 
@@ -245,8 +245,9 @@ def _short_interest(symbol):
 
 
 def _prices(symbol, days):
-    """Split-adjusted daily prices. Prefer MASSIVE (unthrottled, ~10yr, incl. delisted) → FMP
-    (deeper 20yr fallback) → Alpaca (last resort). Shape {t,c,h,v}, oldest first."""
+    """Split-adjusted daily prices. MASSIVE (unthrottled, ~10yr, incl. delisted) → FMP
+    (deeper 20yr fallback); returns [] if both miss. Shape {t,c,h,v}, oldest first.
+    (Alpaca removed from the price backbone — D52 cutover completion, 2026-07-22.)"""
     try:
         from connectors import massive
         if massive.available():
@@ -265,8 +266,7 @@ def _prices(symbol, days):
                 return out
     except Exception as e:
         print(f"  {symbol}: FMP price fallback ({str(e)[:50]})", file=sys.stderr)
-    ab = alpaca.daily_bars(symbol, days=days, adjustment="split")
-    return [{"t": b["t"][:10], "c": b["c"], "h": b["h"], "v": b.get("v", 0)} for b in ab]
+    return []  # Massive -> FMP only; Alpaca removed from the price backbone (D52 cutover completion)
 
 
 def _emit(rows, ticker, as_of, knowable_at, source, feats: dict):

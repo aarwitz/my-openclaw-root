@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
-from connectors import alpaca, edgar, fred, yahoo  # noqa: E402
+from connectors import edgar, fred, massive, yahoo  # noqa: E402
 from connectors._http import ConnectorError  # noqa: E402
 
 # Tunables (could later flow through rule_proposals like HORIZON_PROFILE).
@@ -54,10 +54,10 @@ def _daily_log_returns(closes: list[float]) -> list[float]:
 
 
 def price_history(ticker: str, days: int = 260) -> list[float]:
-    """Daily closes (oldest first). Alpaca first (broker data, keyed, reliable),
-    then Yahoo, then yfinance — Yahoo aggressively blocks stdlib/curl on this host."""
+    """Daily closes (oldest first). Massive first (the price backbone), then Yahoo,
+    then yfinance — Yahoo aggressively blocks stdlib/curl on this host."""
     try:
-        bars = alpaca.daily_bars(ticker, days=days)
+        bars = massive.daily_bars(ticker)[-days:]
         cl = [float(b["c"]) for b in bars if b.get("c") is not None]
         if len(cl) >= 30:
             return cl
