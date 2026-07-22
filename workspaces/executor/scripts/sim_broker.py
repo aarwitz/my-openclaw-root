@@ -35,7 +35,9 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
-from connectors import alpaca, fmp  # noqa: E402
+from connectors import alpaca, fmp, massive  # noqa: E402
+# alpaca is retained ONLY for the legacy shadow/parity paths (run when backend=='alpaca').
+# All live-book pricing/marks now go through `massive` (D52 cutover completion, 2026-07-22).
 
 # Fill model (P2 'model' book; the shadow book mirrors real fill prices instead):
 SPREAD_K = 8.0          # half-spread bps ≈ max(1, K/sqrt(ADV$ millions))
@@ -83,7 +85,7 @@ def _sgov_proxy_apy() -> float:
     Falls back to a conservative env-configured APY when SGOV data is missing.
     """
     try:
-        bars = alpaca.daily_bars("SGOV", days=45)
+        bars = massive.daily_bars("SGOV")[-45:]
         if len(bars) >= 22:
             c0 = float(bars[-22]["c"])
             c1 = float(bars[-1]["c"])
@@ -368,7 +370,7 @@ def _latest_ranks(conn_feat) -> tuple[str, list[str]]:
 def _adv_dollars(sym: str) -> float | None:
     """Trailing-21d average daily dollar volume (for the spread/participation model)."""
     try:
-        bars = alpaca.daily_bars(sym, days=30)[-21:]
+        bars = massive.daily_bars(sym)[-21:]
         if not bars:
             return None
         return sum(float(b["c"]) * float(b.get("v") or 0) for b in bars) / len(bars)
@@ -475,14 +477,13 @@ def rebalance_model_book(conn, *, force: bool = False) -> dict:
 # ---------------------------------------------------------------- marks / parity
 
 def _mark_price(sym: str) -> float | None:
+    # Live marks via Massive realtime snapshot, then Massive daily close as fallback.
+    # (Alpaca removed from the money path — D52 cutover completion.)
+    t = massive.latest_trade(sym)
+    if t and t.get("price"):
+        return float(t["price"])
     try:
-        t = alpaca.latest_trade(sym)
-        if t and t.get("price"):
-            return float(t["price"])
-    except Exception:
-        pass
-    try:
-        bars = alpaca.daily_bars(sym, days=5)
+        bars = massive.daily_bars(sym)
         if bars:
             return float(bars[-1]["c"])
     except Exception:

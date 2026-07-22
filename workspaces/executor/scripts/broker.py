@@ -26,7 +26,8 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from connectors import alpaca as _alpaca  # noqa: E402
+from connectors import alpaca as _alpaca  # noqa: E402  (legacy alpaca backend only)
+from connectors import massive as _massive  # noqa: E402  (data feed for the sim backend)
 from connectors.alpaca import ConnectorError  # noqa: E402  (re-export for callers)
 
 _BACKEND_FILE = Path(os.path.expanduser("~/.openclaw/config/broker-backend"))
@@ -165,7 +166,7 @@ def place_order(symbol: str, qty: float, side: str, order_type: str = "market",
                                    client_order_id=client_order_id)
     sb = _sim()
     conn = _conn()
-    live = _alpaca.latest_trade(symbol)  # data feed, not broker state
+    live = _massive.latest_trade(symbol)  # data feed (Massive), not broker state
     ref = float(live["price"]) if live and live.get("price") else None
     if ref is None and limit_price is not None:
         ref = float(limit_price)
