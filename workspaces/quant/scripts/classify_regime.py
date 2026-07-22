@@ -153,7 +153,7 @@ def _safe(fn, name: str, source: str) -> SignalReading:
 
 
 def read_spy_trend() -> SignalReading:
-    from connectors.alpaca import spy_trend
+    from connectors.marketdata import spy_trend
     return _safe(spy_trend, "spy_trend", "alpaca_market_data:SPY:1Day")
 
 
