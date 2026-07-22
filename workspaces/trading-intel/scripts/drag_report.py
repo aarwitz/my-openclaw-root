@@ -38,6 +38,22 @@ OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
 PENDING_INTENT_STATES = ("approved", "submitted", "partial")
 EXITING_INTENT_STATES = ("proposed", "critic_review", "risk_review", "approved", "submitted", "partial")
 
+# --- Money-awareness (the objective) --------------------------------------
+# The report was blind to P&L/deployment/SPY-alpha, so the improvement loop
+# could only file pipeline-hygiene issues. These make the objective a measured,
+# always-present part of the report (the `objective` block) plus ONE
+# code-actionable signal (idle-cash-drag). Per the 2026-07-22 decisions we
+# MEASURE the alpha/selection numbers (visible, not auto-filed) and only file
+# the idle-cash drag, whose dominant cause is idea-supply (an origination
+# throughput code gap), not a reason to loosen risk.
+OBJECTIVE_HORIZONS = ("position_1_4w", "system_era", "all")  # trailing month, system era, inception
+# book_return_attribution only begins at the 2026-07-07 system epoch, so a 30d
+# inclusive window currently captures the entire history — reported whole, rather
+# than an arbitrary shorter cut that is sensitive to a single outlier day.
+ATTR_WINDOW_DAYS = 30
+IDLE_DRAG_PCT_FLOOR = 25.0         # only surface idle cash when it is structurally material
+IDLE_DRAG_USD_FLOOR = 5_000.0      # ...and a material dollar amount
+
 
 def normalize_block_reason(reason: str) -> str:
     """Collapse per-intent detail so identical failure classes group together."""
@@ -288,6 +304,164 @@ def classify_risk_block(row: sqlite3.Row) -> dict:
     }
 
 
+def _latest_benchmarks(cur: sqlite3.Cursor) -> dict[str, sqlite3.Row]:
+    """Latest captured row per horizon (the SPY scoreboard)."""
+    out: dict[str, sqlite3.Row] = {}
+    try:
+        rows = cur.execute(
+            """SELECT horizon, period_start, period_end, portfolio_return_pct,
+                      spy_return_pct, alpha_pct, sharpe_estimate
+               FROM benchmarks b
+               WHERE captured_at = (
+                   SELECT MAX(captured_at) FROM benchmarks b2 WHERE b2.horizon = b.horizon)"""
+        ).fetchall()
+        out = {row["horizon"]: row for row in rows}
+    except sqlite3.Error as exc:
+        print(f"WARN: benchmarks read skipped: {exc}", file=sys.stderr)
+    return out
+
+
+def _latest_capital_efficiency(cur: sqlite3.Cursor) -> sqlite3.Row | None:
+    try:
+        return cur.execute(
+            "SELECT * FROM capital_efficiency_snapshots ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        print(f"WARN: capital_efficiency read skipped: {exc}", file=sys.stderr)
+        return None
+
+
+def _trailing_book_attribution(cur: sqlite3.Cursor, days: int = ATTR_WINDOW_DAYS, book: str = "desk") -> dict | None:
+    """Deterministic split of the deployed sleeve's realized P&L (trading vs cash-yield)."""
+    try:
+        row = cur.execute(
+            """SELECT COUNT(*) n, MIN(date) start, MAX(date) end,
+                      SUM(trading_pl) trading_pl, SUM(cash_yield_pl) cash_yield_pl,
+                      SUM(total_pl) total_pl
+               FROM book_return_attribution
+               WHERE book = ? AND date >= date('now', ?)""",
+            (book, f"-{days} days"),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        print(f"WARN: book_return_attribution read skipped: {exc}", file=sys.stderr)
+        return None
+    if not row or not row["n"]:
+        return None
+    return {
+        "days": row["n"],
+        "start": row["start"],
+        "end": row["end"],
+        "trading_pl": round(row["trading_pl"] or 0.0, 2),
+        "cash_yield_pl": round(row["cash_yield_pl"] or 0.0, 2),
+        "total_pl": round(row["total_pl"] or 0.0, 2),
+    }
+
+
+def build_objective(cur: sqlite3.Cursor) -> dict:
+    """Always-present, measured money scoreboard so the loop is never P&L-blind.
+
+    Pure measurement — never auto-filed as an issue. Makes 'are we beating SPY,
+    how deployed are we, is the deployed sleeve earning its keep' first-class in
+    the telemetry the PM/health-sweep reads.
+    """
+    obj: dict = {}
+    bench = _latest_benchmarks(cur)
+    obj["alpha_by_horizon"] = {
+        h: {
+            "period": f"{bench[h]['period_start']}..{bench[h]['period_end']}",
+            "portfolio_return_pct": bench[h]["portfolio_return_pct"],
+            "spy_return_pct": bench[h]["spy_return_pct"],
+            "alpha_pct": bench[h]["alpha_pct"],
+            "sharpe": bench[h]["sharpe_estimate"],
+        }
+        for h in OBJECTIVE_HORIZONS
+        if h in bench
+    }
+
+    cap = _latest_capital_efficiency(cur)
+    if cap is not None:
+        try:
+            loss = json.loads(cap["loss_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            loss = {}
+        obj["deployment"] = {
+            "as_of": cap["as_of"],
+            "equity": cap["equity"],
+            "pct_deployed": cap["pct_deployed"],
+            "pct_idle": cap["pct_idle"],
+            "usd_idle": cap["usd_idle"],
+            "dollar_bottlenecks": dict(sorted(loss.items(), key=lambda kv: -(kv[1] or 0))),
+        }
+
+    attr = _trailing_book_attribution(cur)
+    if attr is not None:
+        obj["selection_vs_yield"] = attr
+
+    # One honest, non-alarmist read for humans skimming the report.
+    trailing = obj.get("alpha_by_horizon", {}).get("position_1_4w")
+    notes = []
+    if trailing:
+        notes.append(
+            f"trailing-month alpha {trailing['alpha_pct']:+.2f}% "
+            f"(desk {trailing['portfolio_return_pct']:+.2f}% vs SPY {trailing['spy_return_pct']:+.2f}%)"
+        )
+    if obj.get("deployment"):
+        notes.append(f"{obj['deployment']['pct_idle']:.0f}% idle cash")
+    if attr:
+        notes.append(f"deployed sleeve trading P&L {attr['trading_pl']:+.0f} vs cash-yield {attr['cash_yield_pl']:+.0f} over {attr['days']}d")
+    obj["read"] = "; ".join(notes) if notes else "no benchmark/attribution rows yet"
+    return obj
+
+
+def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
+    """Code-actionable: idle cash whose dominant cause is idea supply, not risk.
+
+    The fix is origination throughput (more qualified ideas that pass the EXISTING
+    gates), never loosening the risk budget — consistent with the protect-first
+    posture. Fires only when idle cash is structurally material.
+    """
+    cap = _latest_capital_efficiency(cur)
+    if cap is None:
+        return None
+    pct_idle = cap["pct_idle"] or 0.0
+    usd_idle = cap["usd_idle"] or 0.0
+    if pct_idle < IDLE_DRAG_PCT_FLOOR or usd_idle < IDLE_DRAG_USD_FLOOR:
+        return None
+    try:
+        loss = json.loads(cap["loss_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        loss = {}
+    ranked = sorted(((k, v or 0.0) for k, v in loss.items()), key=lambda kv: -kv[1])
+    top_cause, top_usd = ranked[0] if ranked else ("unknown", 0.0)
+    idea_supply_led = top_cause == "idle_no_qualified_ideas"
+    return {
+        "id": "idle-cash-drag",
+        "severity": min(85, int(35 + pct_idle)),
+        "summary": (
+            f"{pct_idle:.0f}% of equity idle (${usd_idle:,.0f}); "
+            f"top dollar bottleneck: {top_cause} ${top_usd:,.0f}"
+        ),
+        "evidence": [
+            f"capital_efficiency_snapshots as_of {cap['as_of']}: pct_deployed={cap['pct_deployed']}, pct_idle={pct_idle}",
+            "ranked $ bottlenecks: " + ", ".join(f"{k}=${v:,.0f}" for k, v in ranked),
+            "risk-gate blocks are a trivial share — the drag is idea supply, not the risk budget"
+            if idea_supply_led else
+            f"dominant cause is {top_cause}, not idle idea-supply — root-cause accordingly",
+        ],
+        "suggested_issue": {
+            "title": "Reduce idle-cash drag by raising qualified-idea origination throughput",
+            "acceptance_criteria": (
+                "- Attribute idle cash to its cause (no qualified ideas vs gates vs waiting) with a script, not prose\n"
+                "- If idea-supply-limited: raise origination throughput (broaden the daily refresh universe / "
+                "signal->hypothesis conversion) so MORE ideas clear the EXISTING gates — do NOT loosen risk caps or the deployment governor\n"
+                "- Any sizing/deployment parameter change ships as a rule_proposal, never a direct edit (invariant #4)\n"
+                f"- Fresh drag_report.py shows idle_no_qualified_ideas and pct_idle materially reduced (idle < {IDLE_DRAG_PCT_FLOOR:.0f}%)"
+            ),
+            "assignee": "Developer",
+        },
+    }
+
+
 def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     signals: list[dict] = []
 
@@ -461,6 +635,15 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     except sqlite3.Error as exc:
         print(f"WARN: stale-prediction signal skipped: {exc}", file=sys.stderr)
 
+    # --- Idle-cash drag: the desk's #1 measured dollar bottleneck, framed as an
+    # origination-throughput code gap (protect-first: never a deploy-more mandate).
+    try:
+        idle = idle_cash_drag_signal(cur)
+        if idle is not None:
+            signals.append(idle)
+    except sqlite3.Error as exc:
+        print(f"WARN: idle-cash-drag signal skipped: {exc}", file=sys.stderr)
+
     signals.sort(key=lambda s: -s["severity"])
     return signals
 
@@ -473,12 +656,15 @@ def main() -> int:
         print(json.dumps({"project": "AutoTrade", "error": f"store unavailable: {exc}", "signals": []}))
         return 1
     try:
-        signals = collect_signals(db.cursor())
+        cur = db.cursor()
+        objective = build_objective(cur)
+        signals = collect_signals(cur)
     finally:
         db.close()
     print(json.dumps({
         "project": "AutoTrade",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "objective": objective,
         "signals": signals,
     }, indent=1))
     return 0
