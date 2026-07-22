@@ -644,6 +644,44 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     except sqlite3.Error as exc:
         print(f"WARN: idle-cash-drag signal skipped: {exc}", file=sys.stderr)
 
+    # --- Factor-regime tilt: over-originating a factor the market is punishing (the
+    # momentum-unwind blind spot the macro regime layer can't see). Read-only; routes the
+    # finding to the backlog. The ACTUATION (factor-aware origination weighting) stays a
+    # gated rule_proposal — never an auto edit to sizing/origination.
+    try:
+        import factor_regime
+        fr = factor_regime.snapshot(cur.connection)
+        if fr.get("tilted_into_punished_factor"):
+            mkt = fr.get("market_leadership", {})
+            tilt = fr.get("origination_tilt", {})
+            procyc = tilt.get("procyclical_share", 0.0) or 0.0
+            signals.append({
+                "id": "factor-tilt-into-punished-factor",
+                "severity": min(82, int(45 + procyc * 45)),
+                "summary": fr.get("read", "origination tilted into a punished factor"),
+                "evidence": [
+                    f"market leadership={mkt.get('leadership')} "
+                    f"(MTUM-VLUE 21d {mkt.get('mom_minus_val_21d')}pp, MTUM-SPY 21d {mkt.get('mom_minus_spy_21d')}pp)",
+                    f"origination {procyc*100:.0f}% pro-cyclical (momentum+growth); family_share={tilt.get('family_share')}",
+                    "single-regime caveat: all resolved outcomes so far are from ONE adverse regime — "
+                    "directional evidence, not conclusive; do not overfit",
+                ],
+                "suggested_issue": {
+                    "title": "Factor-regime awareness: down-weight pro-cyclical origination when momentum is punished",
+                    "acceptance_criteria": (
+                        "- Consume factor_regime in signal_scan/signals_to_hypotheses as a `factor_fit` weight "
+                        "(analogous to the existing regime_fit)\n"
+                        "- Down-weight momentum/growth-family conviction when market leadership is value_leading\n"
+                        "- BACKTEST it once cross-regime resolved outcomes exist (there is currently NO value-leading "
+                        "resolved sample to validate against — a static momentum-avoidance would be single-regime overfitting)\n"
+                        "- Ship as a rule_proposal (invariant #4); never a direct sizing/origination edit"
+                    ),
+                    "assignee": "Quant",
+                },
+            })
+    except Exception as exc:
+        print(f"WARN: factor-tilt signal skipped: {exc}", file=sys.stderr)
+
     signals.sort(key=lambda s: -s["severity"])
     return signals
 
