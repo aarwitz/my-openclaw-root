@@ -169,23 +169,39 @@ def check_tokens():
     ocl = _resolve_openclaw()
     if not ocl:
         return finding("tokens", "warn", "openclaw CLI not found; cannot check model auth")
-    rc, out = _run([ocl, "models", "status", "--check"], timeout=40)
-    low = out.lower()
-    if rc == 0:
-        return finding("tokens", "ok", "model auth usable")
-    # The check is global across providers; the FLEET runs on openai-codex.
-    # github-copilot is the host-lane (jerry) profile and is absent from cron
-    # env by design — its failure must not page as a fleet outage (2026-07-10:
-    # two false-positive CRIT pages from exactly this).
-    codex_ok = "openai-codex" in low and not any(
-        x in low for x in ("openai-codex expired", "openai-codex invalid", "openai-codex missing"))
-    only_copilot_bad = codex_ok and "github-copilot" in low
-    if only_copilot_bad:
-        return finding("tokens", "warn",
-                       "fleet auth (openai-codex) healthy; github-copilot (host lane) unauthenticated in this env")
-    if "usable" in low and not any(x in low for x in ("missing", "invalid", "unusable")):
-        return finding("tokens", "warn", "model auth usable but flagged (likely expiring soon)")
-    return finding("tokens", "crit", f"model auth check failed (exit={rc}): {out.strip()[:160]}")
+    rc, out = _run([ocl, "models", "status", "--json"], timeout=40)
+    if rc != 0:
+        return finding("tokens", "warn", f"model auth status json failed (exit={rc}): {out.strip()[:160]}")
+    try:
+        data = json.loads(out)
+    except Exception as e:
+        return finding("tokens", "warn", f"model auth status json parse failed: {e}")
+
+    routes = data.get("auth", {}).get("runtimeAuthRoutes", [])
+    openai_route = next((r for r in routes if r.get("provider") == "openai"), None)
+    if not openai_route:
+        return finding("tokens", "crit", "openai runtime auth route missing")
+    if openai_route.get("authProvider") != "openai-codex":
+        return finding("tokens", "crit",
+                       f"openai runtime routed via unexpected auth provider: {openai_route.get('authProvider')}")
+    if openai_route.get("status") not in {"usable", "ok"}:
+        return finding("tokens", "crit",
+                       f"openai runtime auth unusable via {openai_route.get('authProvider')}: {openai_route.get('status')}")
+
+    oauth_providers = data.get("auth", {}).get("oauth", {}).get("providers", [])
+    codex_provider = next((p for p in oauth_providers if p.get("provider") == "openai-codex"), None)
+    if not codex_provider:
+        return finding("tokens", "crit", "openai-codex auth provider missing from oauth status")
+    status = codex_provider.get("status")
+    if status == "expired":
+        return finding("tokens", "crit", "fleet auth (openai-codex) expired")
+    if status == "expiring":
+        remaining_ms = codex_provider.get("remainingMs")
+        if isinstance(remaining_ms, (int, float)):
+            remaining_h = round(remaining_ms / 3600000, 1)
+            return finding("tokens", "warn", f"fleet auth (openai-codex) expiring in {remaining_h}h")
+        return finding("tokens", "warn", "fleet auth (openai-codex) expiring soon")
+    return finding("tokens", "ok", "fleet auth (openai-codex) healthy")
 
 
 def check_taskmanager():
