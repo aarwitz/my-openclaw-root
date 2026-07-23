@@ -69,17 +69,17 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-5.6",
+        "primary": "openai/gpt-5.5",
         "fallbacks": [
-          "openai/gpt-5.5"
+          "openai/gpt-5.4"
         ]
       },
       "imageModel": {
-        "primary": "openai/gpt-5.6"
+        "primary": "openai/gpt-5.5"
       },
       "models": {
-        "openai/gpt-5.6": {},
-        "openai/gpt-5.5": {}
+        "openai/gpt-5.5": {},
+        "openai/gpt-5.4": {}
       },
       "workspace": "/home/aaron/.openclaw/workspace",
       "skills": [
@@ -148,7 +148,7 @@
       {
         "id": "jerry",
         "workspace": "/home/aaron/.openclaw/workspace",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -164,7 +164,7 @@
       {
         "id": "resi",
         "workspace": "/home/aaron/.openclaw/workspaces/resi",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -185,7 +185,7 @@
       {
         "id": "researcher",
         "workspace": "/home/aaron/.openclaw/workspaces/researcher",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "skills": [
           "newsapi-ai",
           "finnhub",
@@ -201,7 +201,7 @@
       {
         "id": "quant",
         "workspace": "/home/aaron/.openclaw/workspaces/quant",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "skills": [
           "massive",
           "finnhub",
@@ -216,7 +216,7 @@
       {
         "id": "executor",
         "workspace": "/home/aaron/.openclaw/workspaces/executor",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [
@@ -234,7 +234,7 @@
       {
         "id": "trader",
         "workspace": "/home/aaron/.openclaw/workspaces/trader",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [
@@ -264,7 +264,7 @@
       {
         "id": "critic",
         "workspace": "/home/aaron/.openclaw/workspaces/critic",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "skills": [
           "newsapi-ai",
           "finnhub",
@@ -280,7 +280,7 @@
       {
         "id": "risk",
         "workspace": "/home/aaron/.openclaw/workspaces/risk",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [
@@ -297,7 +297,7 @@
       {
         "id": "archivist",
         "workspace": "/home/aaron/.openclaw/workspaces/archivist",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "skills": [
           "finnhub",
           "massive",
@@ -312,7 +312,7 @@
       {
         "id": "developer",
         "workspace": "/home/aaron/.openclaw/workspaces/developer",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "agentRuntime": {
@@ -343,7 +343,7 @@
       {
         "id": "dwight",
         "workspace": "/home/aaron/.openclaw/workspaces/dwight",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -380,7 +380,7 @@
       {
         "id": "overseer",
         "workspace": "/home/aaron/.openclaw/workspaces/overseer",
-        "model": "openai/gpt-5.6",
+        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -514,7 +514,7 @@
         {
           "type": "provider",
           "provider": "openai-codex",
-          "model": "gpt-5.6",
+          "model": "gpt-5.5",
           "preferredProfile": "aaronhorowitz97@gmail.com",
           "capabilities": [
             "image"
@@ -526,7 +526,7 @@
         {
           "type": "provider",
           "provider": "openai-codex",
-          "model": "gpt-5.5",
+          "model": "gpt-5.4",
           "preferredProfile": "aaronhorowitz97@gmail.com",
           "capabilities": [
             "image"
