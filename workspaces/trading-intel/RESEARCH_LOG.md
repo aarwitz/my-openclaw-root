@@ -12,6 +12,21 @@ isn't winning).
 
 ---
 
+## 2026-07-23 — market-graded challenge quality: the resolver's verdict was too kind
+
+**Change:** built `grade_resolutions.py` — outcome-grades every challenge and resolver
+decision against forward market-relative return (10td, ±2% noise band). Wired into the
+learning chain; `integrity_check` now carries standing `judgment:*` lines.
+**Result (42 mature challenges):** 13 false alarms / 16 VINDICATED / 13 neutral —
+decisive false-alarm rate **45%**, avg post-challenge thesis-direction excess **−0.88%**.
+**Lessons:** (1) The resolver's "59/66 false alarms" was LLM-judging-LLM reasoning quality;
+the MARKET says decisive challenges were 55% vindicated — challenges carry mild signal even
+when their reasoning is sector-noise ("right for wrong reasons" still saves money).
+(2) Never grade a judgment organ with another LLM; only forward outcomes count. (3) The
+resolver's 66 HOLD/CLOSEs are now a live experiment — `judgment:resolver_quality` appears
+automatically once ≥10 mature (~2 weeks). If the mass-HOLDs grade badly, the resolver gets
+revised toward respecting the tape more.
+
 ## 2026-07-23 — LANE CLOSED: LLM stance-picking on big movers
 
 **The five-run conclusion:** no prompt (fade, continuation), no diet (headlines, enriched

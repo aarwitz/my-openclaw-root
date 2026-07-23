@@ -274,12 +274,47 @@ def research_coverage(conn) -> list[dict]:
     }]
 
 
+def judgment_quality() -> list[dict]:
+    """Market-graded quality of the judgment organs (from grade_resolutions.py's summary).
+    LLM-vs-LLM verdicts are inadmissible here — only forward market-relative outcomes count
+    (2026-07-23: the resolver called 90% of challenges false alarms; the MARKET graded the
+    decisive ones only 45% false / 55% vindicated)."""
+    import os as _os, time as _time
+    path = _os.path.expanduser("~/.openclaw/state/resolution-grades.json")
+    out: list[dict] = []
+    try:
+        if _time.time() - _os.path.getmtime(path) > 48 * 3600:
+            return [{"family": "edge", "id": "judgment:grades_stale", "status": "RED",
+                     "detail": "resolution-grades.json older than 48h — grade_resolutions stopped running"}]
+        rep = json.load(open(path))
+    except (OSError, ValueError):
+        return []
+    ch = rep.get("challenges", {})
+    far = ch.get("false_alarm_rate_decisive")
+    nd = (ch.get("false_alarm", 0) or 0) + (ch.get("vindicated", 0) or 0)
+    if far is not None and nd >= 10:
+        out.append({"family": "edge", "id": "judgment:challenge_quality",
+                    "status": "RED" if far > 0.6 else "OK",
+                    "detail": f"critic challenges (market-graded, n={nd} decisive): "
+                              f"{far:.0%} false alarms, avg post-challenge excess {ch.get('avg_fwd_excess_pct')}%"})
+    hold, close = rep.get("resolver_hold", {}), rep.get("resolver_close", {})
+    n_res = (hold.get("n_graded", 0) or 0) + (close.get("n_graded", 0) or 0)
+    if n_res >= 10:
+        wrong = (hold.get("wrong", 0) or 0) + (close.get("wrong", 0) or 0)
+        correct = (hold.get("correct", 0) or 0) + (close.get("correct", 0) or 0)
+        out.append({"family": "edge", "id": "judgment:resolver_quality",
+                    "status": "RED" if wrong > correct else "OK",
+                    "detail": f"resolver decisions (market-graded, n={n_res}): {correct} correct / {wrong} wrong "
+                              f"(HOLD avg {hold.get('avg_fwd_excess_pct')}%, CLOSE avg {close.get('avg_fwd_excess_pct')}%)"})
+    return out
+
+
 def main() -> int:
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         integrity = data_reality(conn) + loop_closure(conn)
-        edge_checks = edge(conn) + research_coverage(conn)
+        edge_checks = edge(conn) + research_coverage(conn) + judgment_quality()
     finally:
         conn.close()
     integ_red = [c for c in integrity if c["status"] == "RED"]

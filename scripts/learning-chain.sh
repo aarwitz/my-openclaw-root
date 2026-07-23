@@ -82,6 +82,8 @@ step "calibrate"           "$PY" "$AR/calibrate.py"
 # Close the challenged->resolve loop: deep second-order LLM resolution of stale challenged
 # theses (HOLD/CLOSE/FLIP). Bounded per run; flips flow through quant->critic->risk gated.
 step "resolve_challenged"  "$PY" "$TI/resolve_challenged.py" --max "${RESOLVE_MAX:-16}"
+# Outcome-grade challenges + resolver decisions against the market (no organ ungraded).
+step "grade_resolutions"   "$PY" "$TI/grade_resolutions.py"
 # Same-day second-order decomposition of the biggest single-name moves (front of the
 # research funnel — attacks research:big_story_direction). Stances land gated in 'scored'.
 # HELD: v1 decomposition prompt scored 0/7 direction-correct OOS (backtest_decomposition
