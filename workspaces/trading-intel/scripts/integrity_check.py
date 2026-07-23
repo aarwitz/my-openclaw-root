@@ -85,6 +85,35 @@ def data_reality(conn) -> list[dict]:
             })
     except sqlite3.Error:
         pass
+
+    # Debrief numeric decay: market_events whose observed_moves_json is empty of ticker moves.
+    # Found 2026-07-23: every event after 07-17 recorded {} or index-only moves, silently starving
+    # both research:big_story_direction and event-decomposition candidates. An LLM "remembering to
+    # record numbers" is not a data source — flag the decay the day it happens.
+    try:
+        import json as _json
+        rows = conn.execute(
+            "SELECT observed_moves_json FROM market_events WHERE event_date >= date('now','-5 days')"
+        ).fetchall()
+        if len(rows) >= 2:
+            idx = {"SPY", "QQQ", "SOXX", "IWM", "DIA", "VIX", "GLD", "TLT"}
+            empty = 0
+            for r in rows:
+                try:
+                    mv = _json.loads(r["observed_moves_json"] or "{}")
+                except (ValueError, TypeError):
+                    mv = {}
+                if not any(k not in idx for k in (mv or {})):
+                    empty += 1
+            frac = empty / len(rows)
+            out.append({
+                "family": "data", "id": "nullhole:market_events.observed_moves",
+                "status": "RED" if frac >= 0.8 else "OK",
+                "detail": f"{empty}/{len(rows)} recent market_events have no single-name moves recorded "
+                          "— the debrief stopped writing numbers (starves big-story coverage + event decomposition)",
+            })
+    except sqlite3.Error:
+        pass
     return out
 
 

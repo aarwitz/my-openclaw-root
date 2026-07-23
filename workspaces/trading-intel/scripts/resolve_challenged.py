@@ -239,7 +239,7 @@ def main() -> int:
     args = p.parse_args()
 
     import sqlite3
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)  # busy-wait: passes write concurrently (2026-07-23 lock crash)
     conn.row_factory = sqlite3.Row
     q = ("SELECT id, tickers, state, thesis_summary, rationale_concise, confidence, scored_at, created_at "
          "FROM hypotheses WHERE state='challenged'")
