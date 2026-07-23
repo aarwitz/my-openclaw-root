@@ -245,12 +245,13 @@ def _cache() -> sqlite3.Connection:
     return conn
 
 
-def decompose_event(cache: sqlite3.Connection, ev: dict, prompt: str) -> dict | None:
-    phash = hashlib.sha256(prompt.encode()).hexdigest()[:16]  # prompt fix ⇒ cache miss ⇒ fresh call
-    key = hashlib.sha256(f"{RUBRIC_VERSION}|{MODEL}|{ev['ticker']}|{ev['date']}|{phash}".encode()).hexdigest()
-    row = cache.execute("SELECT response_json FROM responses WHERE key=?", (key,)).fetchone()
-    if row:
-        return json.loads(row[0])
+def _cache_key(ev: dict, prompt: str) -> str:
+    phash = hashlib.sha256(prompt.encode()).hexdigest()[:16]  # prompt fix => cache miss => fresh call
+    return hashlib.sha256(f"{RUBRIC_VERSION}|{MODEL}|{ev['ticker']}|{ev['date']}|{phash}".encode()).hexdigest()
+
+
+def _call_claude(prompt: str) -> dict | None:
+    """Pure subprocess call — thread-safe (no sqlite in worker threads)."""
     try:
         r = subprocess.run([CLAUDE_BIN, "-p", "--model", MODEL], input=prompt,
                            capture_output=True, text=True, timeout=300)
@@ -263,13 +264,9 @@ def decompose_event(cache: sqlite3.Connection, ev: dict, prompt: str) -> dict | 
     if not m:
         return None
     try:
-        res = json.loads(m.group(0))
+        return json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
-    cache.execute("INSERT OR REPLACE INTO responses VALUES (?,?,?,?,datetime('now'))",
-                  (key, RUBRIC_VERSION, MODEL, json.dumps(res)))
-    cache.commit()
-    return res
 
 
 # ---------------------------------------------------------------- grading
@@ -316,6 +313,7 @@ def main() -> int:
     p.add_argument("--max", type=int, default=24)
     p.add_argument("--find-only", action="store_true")
     p.add_argument("--note", default="", help="one-line description of what changed this run (ledger)")
+    p.add_argument("--workers", type=int, default=4, help="concurrent LLM calls")
     args = p.parse_args()
 
     events = find_events(args.max)
@@ -324,7 +322,9 @@ def main() -> int:
         return 0
 
     cache = _cache()
-    for ev in events:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _prep(ev):  # network-only (bars/news/fmp with file caches); no sqlite
         spy = _spy_fwd(ev["date"])
         ev["spy_fwd10"], ev["spy_fwd21"] = spy if spy else (None, None)
         prompt = PROMPT.format(ticker=ev["ticker"], date=ev["date"], move=ev["move"],
@@ -332,7 +332,13 @@ def main() -> int:
                                earnings_ctx=_earnings_context(ev["ticker"], ev["date"]),
                                analyst_actions=_analyst_actions(ev["ticker"], ev["date"]),
                                price_ctx=_price_ctx(ev["ticker"], ev["bar_i"]))
-        res = decompose_event(cache, ev, prompt) or {}
+        return ev, prompt
+
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        prepped = list(ex.map(_prep, events))
+
+    def _apply(ev, res):
+        res = res or {}
         ev["stance"] = res.get("stance", "error")
         ev["conviction"] = res.get("conviction")
         ev["second_order"] = res.get("second_order")
@@ -340,6 +346,26 @@ def main() -> int:
         print(f"  {ev['ticker']:6s} {ev['date']} {ev['move']:+6.1f}% -> {ev['stance']:8s} "
               f"(fwd10 {ev['fwd10']:+.1f}% vs SPY {ev['spy_fwd10'] if ev['spy_fwd10'] is not None else '?'})",
               file=sys.stderr)
+
+    todo = []
+    for ev, prompt in prepped:
+        key = _cache_key(ev, prompt)
+        row = cache.execute("SELECT response_json FROM responses WHERE key=?", (key,)).fetchone()
+        if row:
+            _apply(ev, json.loads(row[0]))
+        else:
+            todo.append((ev, prompt, key))
+    if todo:
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futs = {ex.submit(_call_claude, prompt): (ev, key) for ev, prompt, key in todo}
+            for f in as_completed(futs):
+                ev, key = futs[f]
+                res = f.result()
+                if res is not None:  # cache writes stay in the main thread
+                    cache.execute("INSERT OR REPLACE INTO responses VALUES (?,?,?,?,datetime('now'))",
+                                  (key, RUBRIC_VERSION, MODEL, json.dumps(res)))
+                    cache.commit()
+                _apply(ev, res)
 
     report = {
         "window": [WINDOW_START, WINDOW_END], "model": MODEL, "rubric": RUBRIC_VERSION,
