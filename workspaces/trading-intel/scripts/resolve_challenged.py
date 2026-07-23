@@ -241,6 +241,43 @@ def main() -> int:
     import sqlite3
     conn = sqlite3.connect(DB_PATH, timeout=30)  # busy-wait: passes write concurrently (2026-07-23 lock crash)
     conn.row_factory = sqlite3.Row
+
+    # Deterministic expiry pre-pass: challenged theses that are HYGIENE failures, not
+    # contested judgments — never promoted past 'scored', evidence stale > 7d, no open
+    # position — retire without an LLM call. Measured 2026-07-23: the challenged pile mixes
+    # two streams (critic_baseline hygiene fails on auto-generated scored theses + agent
+    # challenges of active theses); only the latter deserves deep resolution.
+    expired = 0
+    if not args.dry_run:
+        rows_exp = conn.execute("""
+            SELECT h.id, h.tickers FROM hypotheses h WHERE h.state='challenged'
+            AND NOT EXISTS (SELECT 1 FROM audits a WHERE a.entity_id=h.id
+                            AND a.after_state IN ('ready','active'))
+            AND COALESCE((SELECT MAX(e.retrieved_at) FROM hypothesis_evidence e
+                          WHERE e.hypothesis_id=h.id), h.created_at) < datetime('now','-7 days')
+        """).fetchall()
+        now = _now()
+        for r in rows_exp:
+            try:
+                tk = (json.loads(r["tickers"] or "[]") or [None])[0]
+            except ValueError:
+                tk = None
+            if tk and conn.execute(
+                "SELECT 1 FROM positions WHERE UPPER(ticker)=? AND state IN "
+                "('opening','open','scaling','trimming','closing') LIMIT 1", (str(tk).upper(),)
+            ).fetchone():
+                continue  # touching a held name -> deserves real resolution, not expiry
+            conn.execute("UPDATE hypotheses SET state='retired' WHERE id=?", (r["id"],))
+            conn.execute(
+                "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
+                "before_state, after_state, rationale_concise) VALUES (?,?,'critic','hypothesis',?,"
+                "'resolve_expire','challenged','retired',?)",
+                ("AUDIT-" + now.replace(":", "").replace("-", "") + "-" + r["id"][:20], now, r["id"],
+                 "deterministic expiry: never promoted, evidence stale >7d, no position — hygiene fail, not a contested thesis"),
+            )
+            expired += 1
+        if expired:
+            conn.commit()
     q = ("SELECT id, tickers, state, thesis_summary, rationale_concise, confidence, scored_at, created_at "
          "FROM hypotheses WHERE state='challenged'")
     params: list = []
@@ -268,6 +305,7 @@ def main() -> int:
     if not args.dry_run:
         conn.commit()
     print(json.dumps({"resolved": len([o for o in out if "decision" in o]),
+                      "expired_hygiene": expired,
                       "dry_run": bool(args.dry_run), "model": MODEL,
                       "generated_at": _now(), "resolutions": out}, indent=1))
     return 0
