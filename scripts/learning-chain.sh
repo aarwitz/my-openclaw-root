@@ -84,7 +84,10 @@ step "calibrate"           "$PY" "$AR/calibrate.py"
 step "resolve_challenged"  "$PY" "$TI/resolve_challenged.py" --max "${RESOLVE_MAX:-16}"
 # Same-day second-order decomposition of the biggest single-name moves (front of the
 # research funnel — attacks research:big_story_direction). Stances land gated in 'scored'.
-step "decompose_events"    "$PY" "$TI/decompose_events.py" --max "${DECOMP_MAX:-3}"
+# HELD: v1 decomposition prompt scored 0/7 direction-correct OOS (backtest_decomposition
+# 2026-07-23, fade-bias) — live authoring stays off until a prompt version BEATS both
+# naive baselines on the corpus. Re-enable by raising DECOMP_MAX once validated.
+step "decompose_events"    "$PY" "$TI/decompose_events.py" --max "${DECOMP_MAX:-0}"
 step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
 step "mark_positions"      "$PY" "$DEV/mark_positions.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
