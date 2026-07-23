@@ -12,11 +12,31 @@ isn't winning).
 
 ---
 
-## 2026-07-23 — model axis: Opus 4.8 on the identical enriched corpus (RUNNING)
+## 2026-07-23 — LANE CLOSED: LLM stance-picking on big movers
+
+**The five-run conclusion:** no prompt (fade, continuation), no diet (headlines, enriched
+earnings-surprise + analyst actions), and no model (Sonnet 5, Opus 4.8) beat the naive
+follow-the-move rule on the walk-forward corpus. Best case the engine CONVERGES to the rule
+(matching its hits while paying for tokens); every configuration's deviations from drift were
+net-negative; and every confidence signal graded anti-predictive at the extremes.
+
+**Standing decision:** stance-picking on this event class belongs to the deterministic drift
+mechanisms the quant layer already owns (FDR-validated, already trading). `decompose_events`
+live authoring stays at `DECOMP_MAX=0` indefinitely. Re-open ONLY with a fundamentally new
+point-in-time information source (options IV, filings text, true primary sources) that first
+beats both baselines here, then validates on a fresh holdout.
+
+**Where the LLM budget concentrates instead (the measured wins):** thesis resolution
+(challenged rot 79→14 in one day; 90% of critic challenges graded false alarms) and
+second-order context/falsifier authoring on quant-originated theses.
+
+## 2026-07-23 — model axis: Opus 4.8 on the identical enriched corpus
 
 **Change:** same corpus, same enriched prompt — only the model (sonnet-5 → opus-4-8).
-Question: does a stronger reasoner find deviations from drift that pay?
-**Result:** pending.
+**Result:** engine 58% / +3.14% fwd10 vs momentum 61% / +3.63%; fwd21 56% / +6.44% vs
+59% / +7.61%. Deviations: 1 paid (LITE +15.0) vs 3 cost (PL −11.6, CTMX −10.7, QCOM −7.3).
+**Lesson:** a stronger reasoner does not change the conclusion — it also converges to the
+rule and its deviations also lose. The constraint is informational, not cognitive.
 
 ## 2026-07-23 — enriched inputs: earnings surprise + analyst actions, 64 events
 
