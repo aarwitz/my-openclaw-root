@@ -137,6 +137,29 @@ def loop_closure(conn) -> list[dict]:
                     "detail": f"{ch} theses stuck 'challenged' (flagged wrong, never resolved)"})
     except sqlite3.Error:
         pass
+
+    # TRIGGER-FRESHNESS: a scheduled step that silently stops firing is a bug by construction
+    # (a fix "deployed" into a cron chain that never runs looks identical to no fix — the
+    # resolve_challenged deploy sat 22h before its first slot, invisible). Assert the resolver
+    # actually FIRED recently whenever there is rot for it to drain. 80h threshold clears the
+    # weekend gap (Fri 16:12 -> Mon 08:00 = ~64h) while catching a missed weekday by the next morning.
+    try:
+        if ch > 0:
+            last = conn.execute(
+                "SELECT MAX(timestamp) FROM audits WHERE actor='critic' "
+                "AND action IN ('resolve_hold','resolve_close','resolve_flip')"
+            ).fetchone()[0]
+            if last is None:
+                out.append({"family": "loop", "id": "trigger:resolver_fired",
+                            "status": "RED",
+                            "detail": f"{ch} challenged theses waiting but resolve_challenged has NEVER fired"})
+            else:
+                age_h = conn.execute("SELECT (julianday('now') - julianday(?)) * 24", (last,)).fetchone()[0]
+                out.append({"family": "loop", "id": "trigger:resolver_fired",
+                            "status": "RED" if age_h > 80 else "OK",
+                            "detail": f"resolver last fired {age_h:.0f}h ago with {ch} challenged waiting"})
+    except sqlite3.Error:
+        pass
     return out
 
 
