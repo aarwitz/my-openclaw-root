@@ -96,6 +96,44 @@ def _index_moves() -> dict:
     return moves
 
 
+def _tracked_big_moves(conn, min_abs_pct: float = 2.0, cap: int = 12) -> dict:
+    """Deterministic single-name moves for the tracked universe (book + recent ideas).
+
+    Single-name moves used to arrive ONLY via the optional --moves flag, i.e. an LLM
+    remembering to pass numbers on a CLI — which silently stopped after 2026-07-17 and
+    starved big-story coverage + event decomposition (invariant #1: numbers come from
+    scripts). Now computed from bars for every tracked name, biggest first.
+    """
+    names: set[str] = set()
+    try:
+        for r in conn.execute(
+            "SELECT DISTINCT UPPER(ticker) t FROM positions "
+            "WHERE state IN ('opening','open','scaling','trimming','closing')"
+        ):
+            if r["t"]:
+                names.add(r["t"])
+        for r in conn.execute(
+            "SELECT tickers FROM hypotheses WHERE created_at >= datetime('now','-30 days')"
+        ):
+            try:
+                names.update(str(t).upper() for t in json.loads(r["tickers"] or "[]"))
+            except (ValueError, TypeError):
+                continue
+    except sqlite3.Error:
+        return {}
+    moves: dict[str, float] = {}
+    for sym in sorted(names - set(INDEX_PROXIES)):
+        try:
+            bars = daily_bars(sym, days=5)
+        except (ConnectorError, Exception):
+            continue
+        if len(bars) >= 2:
+            prev, last = float(bars[-2]["c"]), float(bars[-1]["c"])
+            if prev and abs((last - prev) / prev * 100.0) >= min_abs_pct:
+                moves[sym] = round((last - prev) / prev * 100.0, 3)
+    return dict(sorted(moves.items(), key=lambda kv: -abs(kv[1]))[:cap])
+
+
 def _latest_snapshot(conn) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT day_pl, equity FROM portfolio_snapshots "
@@ -183,7 +221,8 @@ def main(argv=None) -> int:
         return EXIT_FAIL_LOUD
 
     observed_moves = _index_moves()
-    observed_moves.update(extra_moves)
+    observed_moves.update(_tracked_big_moves(conn))   # deterministic single-name moves
+    observed_moves.update(extra_moves)                # LLM extras may ADD, never required
 
     snap = _latest_snapshot(conn)
     day_pl = float(snap["day_pl"]) if snap and snap["day_pl"] is not None else None
