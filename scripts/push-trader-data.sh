@@ -68,8 +68,19 @@ assert d.get('generated_at'), 'no generated_at'
   exit 1
 fi
 
-echo "[push-data] kv put ($(stat -c%s "$DATA_JSON") bytes)"
-if ! npx wrangler kv key put data.json --path "$DATA_JSON" \
+# Pin wrangler: bare `npx wrangler` resolves via PATH — under host cron that hit the
+# (broken) system npm while interactive shells hit nvm, so pushes failed ONLY under cron
+# (2026-07-23, ~4.5h of stale app data). Prefer the repo's pinned binary; fall back to
+# nvm npx, then bare npx as a last resort.
+WRANGLER_BIN="/home/aaron/repos/lidi-solutions/node_modules/.bin/wrangler"
+if [[ ! -x "$WRANGLER_BIN" ]]; then
+  NVM_NPX=$(ls -1 "$HOME"/.nvm/versions/node/*/bin/npx 2>/dev/null | sort -V | tail -1)
+  WRANGLER_BIN="${NVM_NPX:+$NVM_NPX wrangler}"
+  WRANGLER_BIN="${WRANGLER_BIN:-npx wrangler}"
+fi
+
+echo "[push-data] kv put ($(stat -c%s "$DATA_JSON") bytes) via $WRANGLER_BIN"
+if ! $WRANGLER_BIN kv key put data.json --path "$DATA_JSON" \
       --namespace-id "$KV_NAMESPACE_ID" --remote 2>&1 | tail -2; then
   echo "FATAL: wrangler kv put failed" >&2
   exit 1
