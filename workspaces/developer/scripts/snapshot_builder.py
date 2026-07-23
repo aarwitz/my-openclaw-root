@@ -865,7 +865,7 @@ def _intraday_equity():
     """Last 7 days of intraday desk-book equity samples (D53, powers 1D/1W chart)."""
     try:
         import sqlite3, time
-        c = sqlite3.connect(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
+        c = sqlite3.connect(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"), timeout=30)
         cutoff = int((time.time() - 7 * 86400) * 1000)
         rows = c.execute(
             "SELECT ts, equity FROM book_equity_intraday WHERE book='desk' AND ts >= ? ORDER BY ts",
@@ -890,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
     if not db_path.exists():
         print(f"ERROR: db missing at {db_path}", file=sys.stderr)
         return 2
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     snapshot = build_snapshot(conn)
     if args.validate:

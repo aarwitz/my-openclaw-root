@@ -19,7 +19,7 @@ def now_iso() -> str:
 def connect() -> sqlite3.Connection:
     if not DB_PATH.exists():
         raise FileNotFoundError(f"DB missing at {DB_PATH}")
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)  # busy-wait: concurrent pass writers (2026-07-23 lock-crash class)
     conn.row_factory = sqlite3.Row
     return conn
 

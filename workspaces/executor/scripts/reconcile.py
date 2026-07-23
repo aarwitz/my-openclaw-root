@@ -105,10 +105,13 @@ def apply_repairs(conn, result: dict) -> dict:
             avg_entry = float(broker.get("avg_entry_price", 0) or 0)
             current_price = float(broker.get("current_price", 0) or 0)
             market_value = float(broker.get("market_value", 0) or 0)
+            reg = conn.execute(
+                "SELECT current FROM regime ORDER BY determined_at DESC LIMIT 1"
+            ).fetchone()
             conn.execute(
-                "INSERT INTO positions (id, hypothesis_id, ticker, vehicle, qty, cost_basis, current_price, current_value, state, opened_at) "
-                "VALUES (?, ?, ?, 'equity', ?, ?, ?, ?, 'open', ?)",
-                (pid, hid, symbol, qty, avg_entry, current_price, market_value, now),
+                "INSERT INTO positions (id, hypothesis_id, ticker, vehicle, qty, cost_basis, current_price, current_value, state, opened_at, regime_at_first_open) "
+                "VALUES (?, ?, ?, 'equity', ?, ?, ?, ?, 'open', ?, ?)",
+                (pid, hid, symbol, qty, avg_entry, current_price, market_value, now, reg["current"] if reg else None),
             )
             repaired.append({"type": d["type"], "ticker": symbol, "action": "created_placeholder_position", "position_id": pid})
         except Exception as exc:
