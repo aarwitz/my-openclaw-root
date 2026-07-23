@@ -156,16 +156,23 @@ def backfill_snapshots(conn, series: list[dict]) -> int:
     for prev, cur in zip([None] + series[:-1], series):
         if cur["date"] in have:
             continue
+        # cash is knowable from the internal ledger's book_equity for that date — writing
+        # NULL here was the source of the portfolio_snapshots.cash null-hole (91% NULL).
+        cash_row = conn.execute(
+            "SELECT cash FROM book_equity WHERE book='desk' AND date=?", (cur["date"],)
+        ).fetchone()
+        cash_val = float(cash_row[0]) if cash_row and cash_row[0] is not None else None
         conn.execute(
             "INSERT INTO portfolio_snapshots (id, captured_at, equity, last_equity, day_pl, "
             "cash, buying_power, spy_close, spy_as_of, account_status, source) "
-            "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, 'alpaca_history_backfill')",
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 'alpaca_history_backfill')",
             (
                 f"PSNAP-{uuid.uuid4().hex[:12]}",
                 f"{cur['date']}T21:00:00Z",  # market close (approx, UTC)
                 cur["equity"],
                 prev["equity"] if prev else None,
                 round(cur["equity"] - prev["equity"], 2) if prev else None,
+                cash_val,
                 cur["spy_close"],
                 f"{cur['date']}T21:00:00Z",
             ),

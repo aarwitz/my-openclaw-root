@@ -64,12 +64,15 @@ def _upsert_position(conn, *, ticker: str, hypothesis_id: str, delta: float,
     if row is None:
         pid = f"POS-{uuid.uuid4().hex[:12]}"
         if not dry_run:
+            reg = conn.execute(
+                "SELECT current FROM regime ORDER BY determined_at DESC LIMIT 1"
+            ).fetchone()
             conn.execute(
                 "INSERT INTO positions (id, hypothesis_id, ticker, vehicle, qty, cost_basis, "
-                "current_price, current_value, state, opened_at) "
-                "VALUES (?, ?, ?, 'equity', ?, ?, ?, ?, 'open', ?)",
+                "current_price, current_value, state, opened_at, regime_at_first_open) "
+                "VALUES (?, ?, ?, 'equity', ?, ?, ?, ?, 'open', ?, ?)",
                 (pid, hypothesis_id, ticker, delta, fill_price, fill_price,
-                 delta * fill_price, filled_at),
+                 delta * fill_price, filled_at, reg["current"] if reg else None),
             )
         return f"opened {pid} qty={delta}"
 
