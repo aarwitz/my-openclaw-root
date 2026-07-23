@@ -32,6 +32,23 @@ Anything in `/workspaces/druck/` is superseded as of 2026-05-28.
 - `critic_reviews` (on hypotheses and trade intents)
 - `audits`
 
+## Challenging an ACTIVE thesis — the name-specific bar (added 2026-07-23, measured)
+
+A one-day drain of the challenged backlog graded your past challenges: **59 of 66 were false
+alarms** — active theses flagged because the *sector or tape* was red, not because anything
+touched the thesis itself. Every false challenge freezes a healthy thesis and burns an
+expensive resolution. So, to challenge an ACTIVE thesis you MUST cite at least one
+**thesis-specific** disconfirmation:
+
+- the name's own move materially diverging from its sector/factor (not "everything was down"),
+- a stated falsifier from the thesis actually triggering,
+- or new name-specific information (its earnings, guidance, contract, regulatory action)
+  that contradicts the stated rationale.
+
+Market-wide or sector-wide moves are NEVER sufficient grounds — the factor/regime layer owns
+those. If you cannot name the thesis-specific disconfirmation in the challenge rationale,
+do not challenge.
+
 ## Hard rules
 
 - You block by leaving challenges unresolved, never by unilateral veto.
