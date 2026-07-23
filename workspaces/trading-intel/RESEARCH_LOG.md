@@ -12,14 +12,27 @@ isn't winning).
 
 ---
 
-## 2026-07-23 — enriched inputs: earnings surprise + analyst actions (RUNNING)
+## 2026-07-23 — model axis: Opus 4.8 on the identical enriched corpus (RUNNING)
 
-**Change:** kept the continuation-base-rate prompt; changed the information diet — 15×400-char
-headlines (was 10×150), point-in-time earnings context (`fmp.earnings`: surprise magnitude,
-event-day-is-earnings flag), dated analyst actions (`fmp.upgrades_downgrades`, 14d window).
-Hypothesis: the failure is input starvation — headlines can't distinguish "durable
-beat-and-raise" from "sympathy pop"; the surprise datum can.
-**Result:** pending (fires after the 64-event baseline completes).
+**Change:** same corpus, same enriched prompt — only the model (sonnet-5 → opus-4-8).
+Question: does a stronger reasoner find deviations from drift that pay?
+**Result:** pending.
+
+## 2026-07-23 — enriched inputs: earnings surprise + analyst actions, 64 events
+
+**Change:** kept the continuation prompt; changed the diet — 15×400-char headlines,
+point-in-time earnings surprise (`fmp.earnings` + event-day-is-earnings flag), dated analyst
+actions (14d). Hypothesis: input starvation.
+**Result:** engine 59% / +2.58% fwd10 vs momentum 59% / +2.75%; fwd21 56% / +5.58% vs
+59% / +6.95%. Deviations from the rule collapsed to 4 (2 paid, 2 cost — net wash).
+**Lessons:** (1) Given the real driver data the engine CONVERGES TO the drift rule — it stops
+being wrong by learning to do what the free rule does. It matches, never beats. (2) **Its own
+conviction is anti-predictive at the extremes** (3 highest/lowest-conviction calls: all wrong,
+≈−10% each) — the same inversion as the desk's p_correct (corr −0.17). This system's confidence
+signals keep inverting; treat any LLM/mechanism conviction as unvalidated until graded.
+(3) The mid-conviction slice sits +0.5pp over the rule — noise-level, post-hoc, not actionable.
+(4) The 64-event baseline (headline-only diet) confirmed the 28-event verdict at scale:
+55%/+1.70% — under the rule on both horizons.
 
 ## 2026-07-23 — continuation-base-rate prompt, 28 events
 
