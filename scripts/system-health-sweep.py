@@ -617,7 +617,16 @@ def check_dev_lane():
         data = json.load(ur.urlopen(req, timeout=20))
         issues = data if isinstance(data, list) else data.get("issues", [])
         for i in issues:
-            if i.get("status") in ("to_do", "in_progress") and i.get("launch_state") in ("launched", "queued"):
+            st = i.get("status")
+            # aging: a to_do untouched >14d is either obsolete or mis-prioritized — force triage
+            if st == "to_do" and i.get("launch_state") not in ("launched", "queued"):
+                ts0 = str(i.get("updated_at") or i.get("created_at") or "")[:19]
+                try:
+                    if (NOW - datetime.fromisoformat(ts0).timestamp()) / 86400 > 14:
+                        problems.append(f"TM-{i.get('id')} to_do untouched >14d — triage or close")
+                except ValueError:
+                    pass
+            if st in ("to_do", "in_progress") and i.get("launch_state") in ("launched", "queued"):
                 ts = str(i.get("updated_at") or i.get("created_at") or "")[:19]
                 try:
                     age_d = (NOW - datetime.fromisoformat(ts).timestamp()) / 86400

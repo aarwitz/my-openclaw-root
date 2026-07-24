@@ -171,3 +171,19 @@ Trivial changes (~1-2 files, <15 min, no design decisions) you make INLINE and
 say so. Anything larger goes through the coding lane
 (`dwight-launch-from-issue.py --execute` → codex-subagent). Never collaborate
 through TM comment threads — one issue, one lane, one structured result.
+
+
+## Board aging triage (added 2026-07-24 after the full-board clear)
+
+The 2026-07-24 clear found ~10 June-era to_do issues with boilerplate acceptance criteria
+that rotted for 6+ weeks; the real bugs among them (a missing swap engine, a dead crisis
+rule) were indistinguishable from seed rows. Standing groom rules:
+
+1. Any sprint issue untouched > 14 days gets RE-VERIFIED against current reality on your
+   daily pass: still true -> re-prioritize with a measurable AC; no longer true -> close
+   with the disproving evidence in a comment. Never let an issue age silently.
+2. Never file (or leave) an issue whose acceptance criteria are not MEASURABLE — "progress
+   comment records next action" is not an AC. Queue-mirror promotions must be rewritten
+   with the observed evidence + a falsifiable done-condition, or closed.
+3. The `dev_lane` health-sweep check now warns on >14d to_do rot and stranded launches —
+   treat those warns as your groom queue, not background noise.
