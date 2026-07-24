@@ -12,6 +12,21 @@ isn't winning).
 
 ---
 
+## 2026-07-24 — valuation engine graded: FIRST organ to grade POSITIVE
+
+**Change:** built `grade_valuations.py` (chain step + `judgment:valuation_quality` scoreboard
+line): walk-forward grades the desk's own stored valuations — non-overlapping snapshots,
+21td forward excess vs SPY, by zone.
+**Result (n≈60):** cheap **+6.1%/21td (70% win)** vs rich **−3.4% (45%)** → cheap-minus-rich
+spread **≈+9pp/21td**. High-confidence calls +2.3% vs low-confidence −8.3% — the first
+NON-inverted confidence signal in the system. Continuous MoS carries little signal (+0.09);
+the zone bucket is what works.
+**Caveats (recorded in the summary itself):** single-regime window — the graded month IS the
+value-rotation tape, so part of the spread is regime beta; 14d spacing < 21td horizon means
+partial overlap inflates significance. NO parameter changes off this; it validates the
+existing wiring's direction (critic rich-brake, band nudge) and stands as a decay tripwire
+(RED if the spread inverts).
+
 ## 2026-07-24 — PROVEN: event_drift_up survives the full 20-year FDR harness (**)
 
 **Change:** formalized the corpus's momentum-baseline finding as declarative mechanisms
