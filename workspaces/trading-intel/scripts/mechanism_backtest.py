@@ -53,6 +53,8 @@ SHORT_BORROW_PER_DAY = 0.0001              # ~2.5%/yr borrow cost applied to sho
 # Economic seed mechanisms (the hypotheses). conds: list of (feature, op, threshold). op in >,<.
 SEEDS = [
     ("earnings_beat",    "positive EPS surprise -> post-earnings drift up", [("eps_surprise_pct", ">", 0.05)], "long",  "event"),
+    ("event_drift_up",   "big 1-day up-move -> post-event continuation",    [("ret_1d", ">", 4.0)], "long",  "event"),
+    ("event_drift_dn",   "big 1-day down-move -> continuation down",        [("ret_1d", "<", -4.0)], "short", "event"),
     ("earnings_miss",    "negative EPS surprise -> drift down",             [("eps_surprise_pct", "<", -0.05)], "short", "event"),
     ("oversold_uptrend", "buy the dip within an uptrend",        [("dist_sma50", "<", -0.07), ("dist_sma200", ">", 0.0)], "long", "state"),
     ("momentum_12_1",    "12-1m momentum continuation",                    [("mom_12_1", ">", 0.20)], "long",  "state"),
@@ -199,6 +201,20 @@ def load_ticker(conn, ticker):
                 dv_series.append((d, math.log10(avg)))
         if dv_series:
             feats["dollar_vol_63d_log"] = dv_series
+    # 1-day close-to-close return (%) — the big-move event trigger. Corpus finding
+    # 2026-07-23/24: +2.75%/10td average continuation after |1d| >= 4% moves on the tracked
+    # universe (walk-forward, post-cutoff). Formalized here for the 20-year FDR test.
+    # Point-in-time: value for date d is knowable at d's close; the engine enters at the
+    # NEXT trading day's close, so there is no look-ahead.
+    if len(dates) >= 2:
+        r1 = []
+        for i in range(1, len(dates)):
+            p0 = close[dates[i - 1]]
+            if p0:
+                r1.append((dates[i], (close[dates[i]] / p0 - 1.0) * 100.0))
+        if r1:
+            feats["ret_1d"] = r1
+
     # pre-sort feature as_of lists for bisect
     fkeys = {n: [a for a, _ in v] for n, v in feats.items()}
     for k, series in _macro_series().items():     # merge global macro features (same series for all tickers)
