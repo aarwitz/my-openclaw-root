@@ -579,12 +579,65 @@ def check_integrity():
     return finding("integrity", "ok", rep.get("headline", "loops closed + edge present"))
 
 
+def check_dev_lane():
+    """Dev-loop health (added 2026-07-24 after TM-222 sat completed-but-invisible for 10 days):
+    (a) stale `main` — the auto-merge gate prefers `main` as diff base; if it lags `master`,
+        every PR diff inflates and auto-HOLDs (root cause of the July gate holds);
+    (b) unshipped work — local issue branches with commits ahead of master and no open PR
+        (the launcher's push/PR step can fail silently after a success contract);
+    (c) stranded TM launches — sprint-5 issues stuck launched/queued with no update > 2d."""
+    problems = []
+    try:
+        import subprocess as sp
+        def _rev(ref):
+            r = sp.run(["git", "-C", ROOT, "rev-parse", ref], capture_output=True, text=True)
+            return r.stdout.strip() if r.returncode == 0 else None
+        m, ma = _rev("main"), _rev("master")
+        if m and ma and m != ma:
+            merged = sp.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", "main", "master"],
+                            capture_output=True).returncode == 0
+            problems.append(f"`main` != `master`{' (main is BEHIND — gate base rot)' if merged else ''}")
+        heads = sp.run(["git", "-C", ROOT, "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+                       capture_output=True, text=True).stdout.split()
+        for b in heads:
+            if b in ("main", "master") or not any(b.startswith(pfx) for pfx in ("tm-", "issue-", "quant/", "dwight/")):
+                continue
+            ahead = sp.run(["git", "-C", ROOT, "rev-list", "--count", f"master..{b}"],
+                           capture_output=True, text=True).stdout.strip()
+            if ahead and int(ahead) > 0:
+                problems.append(f"branch {b}: {ahead} unshipped commit(s) ahead of master")
+    except Exception as e:
+        problems.append(f"git checks failed: {e}")
+    try:
+        import urllib.request as ur
+        tok = json.load(open(f"{ROOT}/credentials/task-manager-agent.json"))["session_token"]
+        req = ur.Request("https://tm.lidisolutions.ai/api/issues?sprint_id=5",
+                         headers={"Authorization": f"Bearer {tok}",
+                                  "User-Agent": "Mozilla/5.0 (compatible; LIDI-Agent/1.0)"})
+        data = json.load(ur.urlopen(req, timeout=20))
+        issues = data if isinstance(data, list) else data.get("issues", [])
+        for i in issues:
+            if i.get("status") in ("to_do", "in_progress") and i.get("launch_state") in ("launched", "queued"):
+                ts = str(i.get("updated_at") or i.get("created_at") or "")[:19]
+                try:
+                    age_d = (NOW - datetime.fromisoformat(ts).timestamp()) / 86400
+                except ValueError:
+                    continue
+                if age_d > 2:
+                    problems.append(f"TM-{i.get('id')} stranded: {i.get('launch_state')} {age_d:.0f}d without update")
+    except Exception as e:
+        problems.append(f"TM stranded-check failed: {e}")
+    if problems:
+        return finding("dev_lane", "warn", "; ".join(problems[:6]))
+    return finding("dev_lane", "ok", "main==master, no unshipped issue branches, no stranded launches")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
-    check_integrity,
+    check_integrity, check_dev_lane,
 ]
 
 
