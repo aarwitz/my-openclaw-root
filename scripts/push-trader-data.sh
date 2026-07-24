@@ -47,6 +47,13 @@ cd "$LIDI_REPO" || exit 2
 # 1D/1W chart has real points (10-min cadence from this cron).
 python3 "$LIDI_REPO/../../.openclaw/workspaces/executor/scripts/sim_broker.py" mark --book desk >/dev/null 2>&1 || true
 
+# 2026-07-24: rebuild the python base EVERY cycle, not only during trader passes.
+# The mjs overlay recycles brokerPositions from the existing data.json, so a single
+# stale/bad base write (e.g. a pass racing a code deploy) used to persist zeroed
+# Day-P&L for hours. Non-fatal: on failure the overlay recycles the previous base.
+python3 "$HOME/.openclaw/workspaces/developer/scripts/snapshot_builder.py" --out "$DATA_JSON" \
+  || echo "WARN: python base rebuild failed; overlay will recycle previous base" >&2
+
 echo "[push-data] snapshot"
 if ! node scripts/snapshot-trader-intel.mjs; then
   echo "FATAL: snapshot-trader-intel.mjs failed" >&2
@@ -63,6 +70,10 @@ import json,sys
 d=json.load(open('$DATA_JSON'))
 assert d.get('contract_version','').startswith('trader-intel/'), 'bad contract'
 assert d.get('generated_at'), 'no generated_at'
+bp = d.get('brokerPositions') or []
+# direction is set unconditionally by the canonical enrichment — its absence means
+# the enrichment never ran and Day P&L would render \$0.00 across the app.
+assert (not bp) or all(p.get('direction') for p in bp), 'brokerPositions missing canonical enrichment'
 "; then
   echo "FATAL: data.json failed contract sanity check — not pushing" >&2
   exit 1
