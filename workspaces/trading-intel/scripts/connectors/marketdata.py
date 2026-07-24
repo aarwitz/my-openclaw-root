@@ -220,7 +220,18 @@ def spy_trend() -> dict[str, Any]:
     sma50 = sum(closes[-50:]) / 50.0
     sma200 = sum(closes[-200:]) / 200.0
     last = closes[-1]
+    # TM-172: classify_regime's crisis rule reads sma50_lt_sma200_falling_sessions but no
+    # provider ever supplied it (silently defaulted 0 -> death-cross persistence could never
+    # trigger crisis). Definition: consecutive most-recent sessions with SMA50 < SMA200.
+    falling = 0
+    for k in range(len(closes), 199, -1):
+        w = closes[:k]
+        if sum(w[-50:]) / 50.0 < sum(w[-200:]) / 200.0:
+            falling += 1
+        else:
+            break
     return {
+        "sma50_lt_sma200_falling_sessions": falling,
         "close": round(last, 2),
         "sma50": round(sma50, 2),
         "sma200": round(sma200, 2),
