@@ -330,6 +330,19 @@ def judgment_quality() -> list[dict]:
                     "status": "RED" if far > 0.6 else "OK",
                     "detail": f"critic challenges (market-graded, n={nd} decisive): "
                               f"{far:.0%} false alarms, avg post-challenge excess {ch.get('avg_fwd_excess_pct')}%"})
+    # Valuation engine quality (market-graded by grade_valuations.py)
+    vpath = _os.path.expanduser("~/.openclaw/state/valuation-grades.json")
+    try:
+        vrep = json.load(open(vpath))
+        sp = vrep.get("cheap_minus_rich_spread_pp")
+        if sp is not None and vrep.get("n_graded", 0) >= 30:
+            out.append({"family": "edge", "id": "judgment:valuation_quality",
+                        "status": "RED" if sp < -2.0 else "OK",
+                        "detail": f"cheap-minus-rich 21td spread {sp:+.1f}pp over {vrep['n_graded']} graded calls "
+                                  f"({vrep.get('caveat','')})"})
+    except (OSError, ValueError):
+        pass
+
     hold, close = rep.get("resolver_hold", {}), rep.get("resolver_close", {})
     n_res = (hold.get("n_graded", 0) or 0) + (close.get("n_graded", 0) or 0)
     if n_res >= 10:

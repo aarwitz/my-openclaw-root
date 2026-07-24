@@ -84,6 +84,7 @@ step "calibrate"           "$PY" "$AR/calibrate.py"
 step "resolve_challenged"  "$PY" "$TI/resolve_challenged.py" --max "${RESOLVE_MAX:-16}"
 # Outcome-grade challenges + resolver decisions against the market (no organ ungraded).
 step "grade_resolutions"   "$PY" "$TI/grade_resolutions.py"
+step "grade_valuations"    "$PY" "$TI/grade_valuations.py"
 # Same-day second-order decomposition of the biggest single-name moves (front of the
 # research funnel — attacks research:big_story_direction). Stances land gated in 'scored'.
 # HELD: v1 decomposition prompt scored 0/7 direction-correct OOS (backtest_decomposition
