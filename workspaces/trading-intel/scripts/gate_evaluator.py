@@ -389,7 +389,10 @@ def apply(conn, intent_id: str, result: dict) -> None:
          c["provenance_completeness_pct"], c["counterargument_quality_score"],
          c["explainability_status"], result["next_state"], blocked_reason, intent_id),
     )
-    aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + intent_id[:24]
+    # TM-173: second-granularity ids collided on same-second re-evaluations of one intent
+    # (weekly rerun crash, sqlite UNIQUE). uuid suffix makes every audit id unique.
+    import uuid as _uuid
+    aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + _uuid.uuid4().hex[:8] + "-" + intent_id[:16]
     conn.execute(
         "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
         "before_state, after_state, rationale_concise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

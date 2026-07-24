@@ -119,11 +119,13 @@ def main() -> int:
         )
         if state_col:
             row = con.execute(
-                f"SELECT COUNT(*) AS n FROM trade_intents WHERE {state_col} IN ('pending','draft','proposed')"
+                f"SELECT COUNT(*) AS n FROM trade_intents WHERE {state_col} IN ('proposed','critic_review','risk_review')"
             ).fetchone()
             out["intents_pending"] = row["n"] if row else 0
             row = con.execute(
-                f"SELECT COUNT(*) AS n FROM trade_intents WHERE {state_col} IN ('ready','approved','gated_green')"
+                # TM-171: the real intent machine is proposed->critic_review->risk_review->approved
+                # ->submitted->filled; the old sets counted states that never exist.
+                f"SELECT COUNT(*) AS n FROM trade_intents WHERE {state_col} IN ('approved')"
             ).fetchone()
             out["intents_ready_to_submit"] = row["n"] if row else 0
 

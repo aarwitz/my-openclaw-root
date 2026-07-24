@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '2');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '12');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
 
 -- ----------------------------------------------------------------------------
