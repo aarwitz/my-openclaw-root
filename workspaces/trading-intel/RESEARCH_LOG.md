@@ -12,6 +12,26 @@ isn't winning).
 
 ---
 
+## 2026-07-24 — PROVEN: event_drift_up survives the full 20-year FDR harness (**)
+
+**Change:** formalized the corpus's momentum-baseline finding as declarative mechanisms
+(`ret_1d` derived in-engine, point-in-time; seeds event_drift_up/dn) and ran the full
+1,541-name, 20-year, cost-net, walk-forward harness (holdout ≥ 2020-06-18).
+**Result:** `event_drift_up` quarter_63d: **+0.922%/qtr net, n=15,714 OOS, p<1e-5 —
+survives FDR AND Bonferroni.** month_21d weakly positive (+0.14%, p=.038, not FDR);
+swing_5d nothing. `event_drift_dn` (shorting big down-moves) **loses at every horizon**
+(−2.1%/qtr, p=1.0): down-moves mean-revert, consistent with the deep_drawdown /
+oversold_uptrend survivor family.
+**Lessons:** (1) The naive follow-the-move rule that beat every LLM prompt was HALF right —
+the 20-year test split it: up-drift is real at the quarterly horizon; down-drift is inverted.
+64 corpus events could not resolve that; 15,714 could. (2) The full methodology chain paid:
+live miss (Kimi) → walk-forward corpus → baselines → formalization → FDR proof, in two days.
+(3) The 12-name preview (+3.97%/63d) shrank to +0.92% at scale — universe shrinkage is real;
+never promote on previews.
+**Next:** promotion of event_drift_up (quarter_63d, long) into the live calibrated set is
+HUMAN-GATED (invariant #4) — awaiting operator decision via the standard promote_mechanisms /
+integrate_calibrated path. Not self-approved.
+
 ## 2026-07-23 — market-graded challenge quality: the resolver's verdict was too kind
 
 **Change:** built `grade_resolutions.py` — outcome-grades every challenge and resolver
