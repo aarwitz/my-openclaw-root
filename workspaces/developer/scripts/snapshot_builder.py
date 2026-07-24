@@ -442,12 +442,72 @@ def _snapshot_spy_comparison(points: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _enrich_positions_canonical(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Make the Holdings/Portfolio numbers PERFECT from canonical truth (2026-07-24,
+    operator-requested). The sim adapter's rows carried no intraday fields (Day P&L
+    rendered $0.00 forever), inconsistent unrealized dollars, and long-only arithmetic
+    that breaks on shorts. Per symbol:
+      * unrealized_pl / unrealized_plpc from the MARKED canonical positions
+        (mark_positions is sign-aware; shorts correct), falling back to mv - cost.
+      * unrealized_intraday_pl + change_today from prev close via marketdata bars —
+        the incomplete-bar guard means the last cached bar during a session IS
+        yesterday's close, exactly the intraday reference needed.
+      * direction long/short from qty sign.
+    """
+    try:
+        from connectors.marketdata import daily_bars
+    except Exception:
+        daily_bars = None
+    canon: dict[str, dict[str, float]] = {}
+    try:
+        c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        c.row_factory = sqlite3.Row
+        for r in c.execute(
+            "SELECT UPPER(ticker) t, SUM(pnl_ideal) pl, "
+            "SUM(COALESCE(current_value, qty*cost_basis)) mv, "
+            "SUM(qty*cost_basis) cost "
+            "FROM positions WHERE state IN ('opening','open','scaling','trimming','closing') "
+            "GROUP BY UPPER(ticker)"
+        ):
+            canon[r["t"]] = {"pl": r["pl"], "mv": r["mv"], "cost": r["cost"]}
+        c.close()
+    except sqlite3.Error:
+        pass
+    for row in rows:
+        sym = str(row.get("symbol") or row.get("ticker") or "").upper()
+        qty = _safe_float(row.get("qty"), 0.0) or 0.0
+        price = _safe_float(row.get("current_price"), None)
+        row["direction"] = "short" if qty < 0 else "long"
+        cn = canon.get(sym)
+        if cn and cn.get("pl") is not None:
+            row["unrealized_pl"] = round(float(cn["pl"]), 2)
+            cost = cn.get("cost")
+            if cost:
+                row["unrealized_plpc"] = round(float(cn["pl"]) / abs(float(cost)), 6)
+        if daily_bars is not None and price and qty:
+            try:
+                bars = [b for b in daily_bars(sym, days=6) if b.get("c")]
+                prev = float(bars[-1]["c"]) if bars else None
+                # if the last bar is somehow today's completed bar (post-close build),
+                # use the one before it as the intraday reference
+                from datetime import date as _d
+                if bars and str(bars[-1].get("t"))[:10] == _d.today().isoformat() and len(bars) >= 2:
+                    prev = float(bars[-2]["c"])
+                if prev:
+                    row["unrealized_intraday_pl"] = round(qty * (price - prev), 2)
+                    row["change_today"] = round(price / prev - 1.0, 6)
+            except Exception:
+                pass
+    return rows
+
+
 def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     try:
         acct = get_account()
         raw_positions = list_positions()
         orders = list_orders(status="all", limit=20)
         positions, norm_issues = _normalize_broker_positions(raw_positions)
+        positions = _enrich_positions_canonical(positions)
         blocking_norm_issues = [
             i for i in norm_issues if i.get("type") != "corporate_action_split_applied"
         ]
