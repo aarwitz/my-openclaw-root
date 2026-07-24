@@ -26,6 +26,67 @@ import signal_scan  # noqa: E402
 
 LIVE = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 HZN_TEXT = {"swing_1_5d": "1-5 days", "position_1_4w": "1-4 weeks", "trend_1_3m": "1-3 months"}
+PROVENANCE_ROOT = "sqlite:///home/aaron/.openclaw/state/trading-intel.sqlite"
+
+
+def _mechanism_evidence_rows(hypothesis_id: str, ticker: str, signal: dict, now: str) -> list[tuple]:
+    """Evidence rows from stored world-model mechanism fires.
+
+    signal_scan is deterministic and DB/feature-store backed. Persisting its
+    top mechanism fires gives downstream evidence/provenance gates concrete
+    artifacts to inspect without changing any thresholds.
+    """
+    top = sorted(signal["fired"], key=lambda f: -f["posterior"])[:5]
+    rows = [
+        (
+            f"ev-sig-{uuid.uuid4().hex[:12]}",
+            hypothesis_id,
+            "world_model_p_long",
+            f"{signal['p_long']:.4f}",
+            "signal_scan.py",
+            f"{PROVENANCE_ROOT}#signal_scan/{ticker}",
+            now,
+            now,
+            now,
+            None,
+            "world_model",
+        ),
+        (
+            f"ev-sig-{uuid.uuid4().hex[:12]}",
+            hypothesis_id,
+            "world_model_mechanisms_fired",
+            str(signal["n_fired"]),
+            "signal_scan.py",
+            f"{PROVENANCE_ROOT}#signal_scan/{ticker}",
+            now,
+            now,
+            now,
+            None,
+            "world_model",
+        ),
+    ]
+    for mech in top:
+        rows.append(
+            (
+                f"ev-sig-{uuid.uuid4().hex[:12]}",
+                hypothesis_id,
+                f"mechanism:{mech['id']}",
+                json.dumps({
+                    "posterior": round(float(mech["posterior"]), 4),
+                    "direction": mech["direction"],
+                    "horizon": mech["horizon"],
+                    "rationale": mech["rationale"],
+                }, sort_keys=True),
+                "signal_scan.py",
+                f"{PROVENANCE_ROOT}#mechanisms/{mech['id']}",
+                now,
+                now,
+                now,
+                None,
+                "world_model_mechanism",
+            )
+        )
+    return rows
 
 
 def main():
@@ -71,7 +132,14 @@ def main():
             conn.execute("INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,"
                          "state,confidence,time_horizon,rationale_concise) VALUES(?,?,?,?,?,?,?,?,?)",
                          (hid, now, "quant", json.dumps([t]), thesis, "raw", conf, hzn,
-                          f"world-model scan: {len(top)} mechs, p_long={r['p_long']:.2f}"))
+                          f"world-model scan for {t}: top {len(top)} of {r['n_fired']} "
+                          f"mechanisms fired; p_long={r['p_long']:.2f}"))
+            conn.executemany(
+                "INSERT INTO hypothesis_evidence(id, hypothesis_id, indicator, value, source, "
+                "source_url, retrieved_at, released_at, as_of, vintage, signal_type) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                _mechanism_evidence_rows(hid, t, r, now),
+            )
         written.append((t, round(r["p_long"], 3), r["n_fired"], conf))
     if not a.dry_run:
         conn.commit()

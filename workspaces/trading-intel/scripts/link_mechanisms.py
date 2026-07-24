@@ -10,6 +10,9 @@ its trades and learns nothing. This module links deterministically, three tiers:
               hypotheses embed exact names: "Mechanisms: <name>; <name>").
   T2 FEATURE: ≥2 distinct feature tokens from the mechanism id (drawdown_252,
               mom_12_1, vix_level, ...) appear in thesis + evidence indicators.
+              Generated multi-feature mechanisms require T1 exact-name linkage;
+              fuzzy feature/class links over-attributed plain growth prose in
+              the TM-257 replay cohort.
   T3 CLASS:   ≥2 distinct ≥4-char tokens from antecedent/consequent classes
               appear in thesis + evidence indicators (the legacy rule, now fed
               with evidence text, not just prose).
@@ -103,6 +106,11 @@ def link(text: str, mechanisms: list[dict], hypothesis_horizon: str | None = Non
         name = (m.get("name") or "").lower()
         if len(name) > 10 and name in text:
             src = "name"
+        elif mid.startswith("multi_"):
+            # TM-263/TM-257 follow-up: generated conjunctive feature stacks are
+            # too specific for fuzzy prose linkage. Require the creating signal
+            # to name the multi mechanism exactly.
+            continue
         elif len(_feature_tokens(mid) & set(re.split(r"[\s_,:;.()]+", text))) >= 2:
             src = "feature"
         elif sum(1 for t in _class_tokens(m) if t in text) >= 2:

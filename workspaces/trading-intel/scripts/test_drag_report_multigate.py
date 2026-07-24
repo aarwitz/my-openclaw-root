@@ -2,6 +2,7 @@
 import sqlite3
 import sys
 import unittest
+import json
 
 import os
 
@@ -9,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import drag_report  # noqa: E402
 import gate_evaluator  # noqa: E402
+import signals_to_hypotheses  # noqa: E402
 
 
 LEGACY_REASON = (
@@ -32,6 +34,37 @@ def _make_conn() -> sqlite3.Connection:
     )
     cur.execute(
         "CREATE TABLE predictions (id TEXT, hypothesis_id TEXT, horizon TEXT, resolved_at TEXT, brier_component REAL, realized_outcome TEXT, predicted_at TEXT)"
+    )
+    cur.execute(
+        "CREATE TABLE capital_efficiency_snapshots ("
+        "as_of TEXT PRIMARY KEY, equity REAL, cash REAL, deployed REAL, "
+        "pct_deployed REAL, pct_blocked REAL, pct_idle REAL, pct_stale REAL, pct_waiting REAL, "
+        "usd_blocked REAL, usd_idle REAL, usd_stale REAL, usd_waiting REAL, edge_rate REAL, loss_json TEXT)"
+    )
+    return conn
+
+
+def _make_sizing_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE trade_intents (
+          id TEXT, action TEXT, state TEXT, created_at TEXT, blocked_reason TEXT,
+          ticker TEXT, size REAL, entry_price_target TEXT
+        );
+        CREATE TABLE positions (
+          ticker TEXT, state TEXT, current_value REAL, qty REAL, cost_basis REAL
+        );
+        CREATE TABLE risk_reviews (
+          id TEXT, target_id TEXT, reviewed_at TEXT, limits_json TEXT, breaches_json TEXT
+        );
+        CREATE TABLE hypotheses (id TEXT, tickers TEXT);
+        CREATE TABLE predictions (
+          id TEXT, hypothesis_id TEXT, horizon TEXT, resolved_at TEXT,
+          brier_component REAL, realized_outcome TEXT, predicted_at TEXT
+        );
+        """
     )
     return conn
 
@@ -189,6 +222,39 @@ class GateAttributionTests(unittest.TestCase):
         legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
         self.assertTrue(any("live concurrent_names=4/48" in item for item in legacy["evidence"]))
 
+    def test_collect_signals_marks_resolved_no_sizing_headroom_non_active(self):
+        conn = _make_sizing_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO positions VALUES ('AAA', 'open', 1000.0, 10.0, 100.0)")
+        limits = {
+            "equity": 100000.0,
+            "gross_cap": 60000.0,
+            "current_gross": 61000.0,
+            "gross_headroom": 0.0,
+            "name_cap": 10000.0,
+            "name_existing": 0.0,
+            "name_headroom": 10000.0,
+        }
+        for idx in range(4):
+            iid = f"ti-sizing-{idx}"
+            cur.execute(
+                "INSERT INTO trade_intents VALUES (?, 'open', 'blocked', '2099-01-01T00:00:00Z', ?, 'BBB', 1, '100.0')",
+                (iid, "risk:no sizing headroom (name=10000.0, gross=0.0)"),
+            )
+            cur.execute(
+                "INSERT INTO risk_reviews VALUES (?, ?, '2099-01-01T00:01:00Z', ?, ?)",
+                (f"rr-{idx}", iid, json.dumps(limits), json.dumps(["gross_exposure_cap"])),
+            )
+        conn.commit()
+
+        signals = drag_report.collect_signals(conn.cursor())
+        conn.close()
+
+        summaries = [signal["summary"] for signal in signals]
+        self.assertFalse(any("same class: risk:no sizing headroom" in s for s in summaries))
+        legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
+        self.assertTrue(any("can_buy_one_share=True" in item for item in legacy["evidence"]))
+
     def test_stale_prediction_signal_ignores_not_yet_matured_trading_day_windows(self):
         conn = _make_conn()
         cur = conn.cursor()
@@ -210,6 +276,59 @@ class GateAttributionTests(unittest.TestCase):
             conn.close()
 
         self.assertFalse(any(signal["id"] == "predictions-unresolved-backlog" for signal in signals))
+
+    def test_idle_cash_signal_exposes_structured_attribution(self):
+        conn = _make_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO capital_efficiency_snapshots VALUES ("
+            "'2099-01-01T00:00:00Z', 100000, 45000, 55000, "
+            "55, 1, 45, 0, 5, 1000, 45000, 0, 5000, 0.04, ?)",
+            (json.dumps({
+                "idle_no_qualified_ideas": 1800,
+                "risk_gate_blocked": 40,
+                "unresolved_predictions_waiting": 200,
+                "stale_thesis_trapped": 0,
+            }),),
+        )
+        signal = drag_report.idle_cash_drag_signal(cur)
+        conn.close()
+
+        self.assertIsNotNone(signal)
+        attr = signal["idle_cash_attribution"]
+        self.assertEqual(attr["idle_no_qualified_ideas"]["expected_loss_usd"], 1800)
+        self.assertEqual(attr["gates"]["expected_loss_usd"], 40)
+        self.assertEqual(attr["waiting"]["expected_loss_usd"], 200)
+        self.assertTrue(any("idle attribution from stored DB snapshot" in item for item in signal["evidence"]))
+
+    def test_signal_hypothesis_evidence_rows_are_gate_usable(self):
+        now = "2099-01-01T00:00:00Z"
+        signal = {
+            "p_long": 0.91,
+            "n_fired": 3,
+            "fired": [
+                {
+                    "id": "mech_a",
+                    "posterior": 0.72,
+                    "direction": "long",
+                    "horizon": "month_21d",
+                    "rationale": "stored mechanism A fired",
+                },
+                {
+                    "id": "mech_b",
+                    "posterior": 0.66,
+                    "direction": "long",
+                    "horizon": "quarter_63d",
+                    "rationale": "stored mechanism B fired",
+                },
+            ],
+        }
+        rows = signals_to_hypotheses._mechanism_evidence_rows("hyp-1", "ABC", signal, now)
+
+        self.assertGreaterEqual(len(rows), 4)
+        self.assertTrue(all(row[5] for row in rows), "provenance URL must be present for gate_evaluator")
+        self.assertTrue(all(row[6] == now for row in rows), "retrieved_at must be fresh and explicit")
+        self.assertIn("world_model_mechanism", {row[10] for row in rows})
 
 
 if __name__ == "__main__":

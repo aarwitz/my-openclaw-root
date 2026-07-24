@@ -5,6 +5,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 # Deterministic prefix for every trader cron pass. Runs:
 #   1. classify_regime (writes new regime row)
 #   1b. value_universe (DCF/comps fair value + margin of safety + realized vol -> valuations)
+#   1c. signals_to_hypotheses (stored world-model fires -> raw hypotheses)
 #   2. score_hypotheses (writes quant_score on raw hypotheses)
 #   3. critic_baseline (deterministic critic challenges; raises bar on rich names)
 #   4. predict (world-model probabilistic call: p_correct + name-aware return band)
@@ -88,6 +89,12 @@ printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]]
 
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
 run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
+# Deterministic world-model ORIGINATION. D68: keep the signal lane inside the
+# normal pass so idle cash caused by no qualified ideas is attacked by more
+# candidates flowing through the unchanged score -> critic -> trader -> risk
+# gates. The script dedupes unresolved names and now persists mechanism evidence
+# rows, so downstream evidence/provenance gates remain intact.
+run_step "signals_to_hypotheses" 180 python3 workspaces/trading-intel/scripts/signals_to_hypotheses.py --max-new 8 --scan-top-n 600
 # D59: valuation-first ORIGINATION — value was compute-only (critic brake +
 # predict bands); nothing authored ideas from undervaluation. Max 3/day,
 # value-trap screened (requires trend or analyst inflection).

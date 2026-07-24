@@ -114,6 +114,68 @@ class ConcurrentNameAttributionTests(unittest.TestCase):
         self.assertNotEqual(decision["verdict"], "blocked")
         self.assertNotIn("max_positions", decision["breaches"])
 
+    def test_pending_exit_does_not_double_count_gross_headroom(self):
+        conn = _make_conn()
+        conn.execute("INSERT INTO positions VALUES ('AAA', 'open', 59000.0, 590.0, 100.0)")
+        conn.execute(
+            "INSERT INTO trade_intents VALUES "
+            "('TI-EXIT', 'H-EXIT', 'AAA', 100.0, 100.0, 'approved', 'exit')"
+        )
+        risk_gate.MAX_GROSS_PCT = 0.60
+
+        decision = risk_gate.gate(
+            conn,
+            {
+                "id": "TI-NEW",
+                "hypothesis_id": "H-NEW",
+                "ticker": "BBB",
+                "size": 5,
+                "entry_price_target": 100.0,
+                "action": "open",
+            },
+            equity=100000.0,
+            day_pl=0.0,
+            regime="neutral",
+        )
+
+        self.assertEqual(decision["verdict"], "approved")
+        self.assertEqual(decision["limits"]["current_gross"], 59000.0)
+        gross_attr = decision["limits"]["gross_exposure_attribution"]
+        self.assertEqual(gross_attr["pending_new_risk_notional"], 0.0)
+        self.assertEqual(gross_attr["pending_risk_reducing_notional"], 10000.0)
+
+    def test_pending_new_risk_still_reserves_gross_headroom(self):
+        conn = _make_conn()
+        conn.execute("INSERT INTO positions VALUES ('AAA', 'open', 59000.0, 590.0, 100.0)")
+        conn.execute(
+            "INSERT INTO trade_intents VALUES "
+            "('TI-OPEN', 'H-OPEN', 'BBB', 9.0, 100.0, 'approved', 'open')"
+        )
+        risk_gate.MAX_GROSS_PCT = 0.60
+
+        decision = risk_gate.gate(
+            conn,
+            {
+                "id": "TI-NEW",
+                "hypothesis_id": "H-NEW",
+                "ticker": "CCC",
+                "size": 2,
+                "entry_price_target": 200.0,
+                "action": "open",
+            },
+            equity=100000.0,
+            day_pl=0.0,
+            regime="neutral",
+        )
+
+        self.assertEqual(decision["verdict"], "blocked")
+        self.assertIn("gross_exposure_cap", decision["breaches"])
+        self.assertEqual(decision["limits"]["current_gross"], 59900.0)
+        self.assertEqual(
+            decision["limits"]["sizing_block_attribution"]["min_one_share_notional"],
+            200.0,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

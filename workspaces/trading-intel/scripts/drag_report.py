@@ -58,6 +58,8 @@ IDLE_DRAG_USD_FLOOR = 5_000.0      # ...and a material dollar amount
 def normalize_block_reason(reason: str) -> str:
     """Collapse per-intent detail so identical failure classes group together."""
     reason = (reason or "").strip()
+    if reason.startswith("risk:no sizing headroom"):
+        return "risk:no sizing headroom (name=N, gross=N)"
     reason = re.sub(r"\[[^\]]*\]", "", reason)
     reason = re.sub(r"\d+(\.\d+)?", "N", reason)
     return reason[:90] or "(no reason recorded)"
@@ -131,6 +133,171 @@ def current_max_positions() -> int | None:
         return None
     match = re.search(r"^MAX_POSITIONS\s*=\s*(\d+)", text, flags=re.MULTILINE)
     return int(match.group(1)) if match else None
+
+
+@lru_cache(maxsize=1)
+def current_risk_pct_limits() -> dict[str, float | None]:
+    try:
+        text = RISK_GATE_PATH.read_text()
+    except OSError:
+        return {"max_name_pct": None, "max_gross_pct": None}
+    out: dict[str, float | None] = {"max_name_pct": None, "max_gross_pct": None}
+    for key, const in (("max_name_pct", "MAX_NAME_PCT"), ("max_gross_pct", "MAX_GROSS_PCT")):
+        match = re.search(rf"^{const}\s*=\s*([0-9.]+)", text, flags=re.MULTILINE)
+        if match:
+            out[key] = float(match.group(1))
+    return out
+
+
+def latest_equity(cur: sqlite3.Cursor, fallback: float | None = None) -> float | None:
+    try:
+        row = cur.execute(
+            "SELECT equity FROM capital_efficiency_snapshots ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row and row["equity"] is not None:
+        return float(row["equity"])
+    return fallback
+
+
+def latest_risk_review_limits(conn: sqlite3.Connection, intent_id: str) -> dict:
+    try:
+        row = conn.execute(
+            "SELECT reviewed_at, limits_json, breaches_json FROM risk_reviews "
+            "WHERE target_id=? ORDER BY reviewed_at DESC LIMIT 1",
+            (intent_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        return {}
+    if not row:
+        return {}
+    try:
+        limits = json.loads(row["limits_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        limits = {}
+    return {
+        "reviewed_at": row["reviewed_at"],
+        "limits": limits,
+        "breaches_json": row["breaches_json"],
+    }
+
+
+def trade_intent_sizing_inputs(conn: sqlite3.Connection, intent_id: str) -> dict:
+    try:
+        row = conn.execute(
+            "SELECT ticker, size, entry_price_target FROM trade_intents WHERE id=?",
+            (intent_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        return {}
+    if not row:
+        return {}
+    try:
+        price = float(row["entry_price_target"] or 0.0)
+    except (TypeError, ValueError):
+        price = 0.0
+    size = float(row["size"] or 0.0)
+    return {
+        "ticker": (row["ticker"] or "").upper(),
+        "size": size,
+        "entry_price": price,
+        "notional": round(abs(size * price), 2),
+    }
+
+
+def _position_notional(row: sqlite3.Row) -> float:
+    val = row["current_value"]
+    if val is None:
+        val = float(row["qty"] or 0.0) * float(row["cost_basis"] or 0.0)
+    return abs(float(val or 0.0))
+
+
+def current_gross_sizing_snapshot(conn: sqlite3.Connection, ticker: str, price: float, fallback_equity: float | None) -> dict:
+    limits = current_risk_pct_limits()
+    equity = latest_equity(conn.cursor(), fallback=fallback_equity)
+    if equity is None or limits["max_gross_pct"] is None or limits["max_name_pct"] is None:
+        return {"available": False, "reason": "risk_limits_or_equity_unavailable"}
+    try:
+        positions = conn.execute(
+            "SELECT ticker, current_value, qty, cost_basis FROM positions "
+            f"WHERE state IN ({','.join('?' * len(OPEN_POSITION_STATES))})",
+            OPEN_POSITION_STATES,
+        ).fetchall()
+        pending = conn.execute(
+            "SELECT id, ticker, action, state, size, entry_price_target FROM trade_intents "
+            f"WHERE state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
+            PENDING_INTENT_STATES,
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return {"available": False, "reason": f"current_snapshot_unavailable:{exc}"}
+
+    sym = (ticker or "").upper()
+    position_gross = 0.0
+    name_existing = 0.0
+    top_positions = []
+    for row in positions:
+        notional = _position_notional(row)
+        position_gross += notional
+        if (row["ticker"] or "").upper() == sym:
+            name_existing += notional
+        top_positions.append({"ticker": (row["ticker"] or "").upper(), "notional": round(notional, 2)})
+
+    pending_new_risk = []
+    pending_risk_reducing = []
+    for row in pending:
+        action = (row["action"] or "").lower()
+        notional = abs(float(row["size"] or 0.0) * float(row["entry_price_target"] or 0.0))
+        item = {
+            "id": row["id"],
+            "ticker": (row["ticker"] or "").upper(),
+            "action": action,
+            "state": row["state"],
+            "notional": round(notional, 2),
+        }
+        if action in RISK_REDUCING_ACTIONS:
+            pending_risk_reducing.append(item)
+            continue
+        pending_new_risk.append(item)
+        if item["ticker"] == sym:
+            name_existing += notional
+
+    pending_new_risk_notional = sum(float(row["notional"] or 0.0) for row in pending_new_risk)
+    gross = position_gross + pending_new_risk_notional
+    gross_cap = float(limits["max_gross_pct"] or 0.0) * equity
+    name_cap = float(limits["max_name_pct"] or 0.0) * equity
+    concurrent = concurrent_name_snapshot(conn)
+    max_positions = current_max_positions()
+    candidate_is_new_name = name_existing <= 0
+    slot_ok = (
+        max_positions is None
+        or not candidate_is_new_name
+        or concurrent["count"] < max_positions
+    )
+    gross_headroom = max(0.0, gross_cap - gross)
+    name_headroom = max(0.0, name_cap - name_existing)
+    can_buy_one_share = bool(price > 0 and gross_headroom >= price and name_headroom >= price and slot_ok)
+    return {
+        "available": True,
+        "equity": round(equity, 2),
+        "gross_cap": round(gross_cap, 2),
+        "current_gross": round(gross, 2),
+        "gross_headroom": round(gross_headroom, 2),
+        "name_cap": round(name_cap, 2),
+        "name_existing": round(name_existing, 2),
+        "name_headroom": round(name_headroom, 2),
+        "candidate_is_new_name": candidate_is_new_name,
+        "concurrent_names": concurrent["count"],
+        "max_positions": max_positions,
+        "slot_ok": slot_ok,
+        "can_buy_one_share": can_buy_one_share,
+        "position_gross": round(position_gross, 2),
+        "pending_new_risk_notional": round(pending_new_risk_notional, 2),
+        "pending_risk_reducing_notional": round(sum(float(row["notional"] or 0.0) for row in pending_risk_reducing), 2),
+        "top_positions": sorted(top_positions, key=lambda item: -item["notional"])[:4],
+        "pending_new_risk_intents": pending_new_risk[:4],
+        "pending_risk_reducing_intents": pending_risk_reducing[:4],
+    }
 
 
 def concurrent_name_snapshot(conn: sqlite3.Connection) -> dict:
@@ -257,6 +424,72 @@ def count_stale_predictions(cur: sqlite3.Cursor) -> int:
 def classify_risk_block(row: sqlite3.Row) -> dict:
     reason = (row["blocked_reason"] or "").strip()
     historical_count, historical_cap = parse_concurrent_name_reason(reason)
+    if reason.startswith("risk:no sizing headroom"):
+        review = latest_risk_review_limits(row["conn"], row["id"])
+        limits = review.get("limits", {})
+        sizing = trade_intent_sizing_inputs(row["conn"], row["id"])
+        current = current_gross_sizing_snapshot(
+            row["conn"],
+            sizing.get("ticker", ""),
+            float(sizing.get("entry_price") or 0.0),
+            fallback_equity=limits.get("equity"),
+        )
+        gross_attr = limits.get("gross_exposure_attribution") or {}
+        sizing_attr = limits.get("sizing_block_attribution") or {}
+        blocked_at_bits = [
+            f"reviewed_at={review.get('reviewed_at') or 'unknown'}",
+            f"requested={sizing.get('size', 'unknown')}@{sizing.get('entry_price', 'unknown')} notional={sizing.get('notional', 'unknown')}",
+            (
+                "blocked_at "
+                f"gross={limits.get('current_gross')}/{limits.get('gross_cap')} "
+                f"gross_headroom={limits.get('gross_headroom')} "
+                f"name={limits.get('name_existing')}/{limits.get('name_cap')} "
+                f"name_headroom={limits.get('name_headroom')}"
+            ),
+        ]
+        if gross_attr:
+            blocked_at_bits.append(
+                "portfolio_at_block "
+                f"positions=${gross_attr.get('position_gross')} "
+                f"pending_new_risk=${gross_attr.get('pending_new_risk_notional')} "
+                f"pending_exits=${gross_attr.get('pending_risk_reducing_notional')} "
+                f"open_orders={len(gross_attr.get('open_orders') or [])}"
+            )
+        else:
+            blocked_at_bits.append("portfolio_at_block=legacy limits_json only")
+        if sizing_attr:
+            blocked_at_bits.append(
+                "sizing_at_block "
+                f"min_share=${sizing_attr.get('min_one_share_notional')} "
+                f"binding={','.join(sizing_attr.get('binding_breaches') or [])}"
+            )
+        if current.get("available"):
+            blocked_at_bits.append(
+                "live_now "
+                f"gross={current['current_gross']}/{current['gross_cap']} "
+                f"gross_headroom={current['gross_headroom']} "
+                f"name_headroom={current['name_headroom']} "
+                f"slots={current['concurrent_names']}/{current['max_positions']} "
+                f"pending_new_risk=${current['pending_new_risk_notional']} "
+                f"pending_exits=${current['pending_risk_reducing_notional']} "
+                f"can_buy_one_share={current['can_buy_one_share']}"
+            )
+        else:
+            blocked_at_bits.append(f"live_now_unavailable={current.get('reason')}")
+
+        active = not bool(current.get("can_buy_one_share"))
+        class_prefix = "" if active else "legacy_false_positive:"
+        evidence_prefix = "still binding" if active else "resolved under current portfolio state"
+        return {
+            "active": active,
+            "class_key": f"{class_prefix}{normalize_block_reason(reason)}",
+            "summary_key": normalize_block_reason(reason),
+            "evidence": (
+                f"intent {row['id']} action={row['action']} blocked as {reason}; "
+                f"{evidence_prefix}; " + "; ".join(blocked_at_bits)
+            ),
+        }
+
     if not reason.startswith("risk:concurrent_names="):
         return {
             "active": True,
@@ -431,6 +664,27 @@ def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
         loss = json.loads(cap["loss_json"] or "{}")
     except (json.JSONDecodeError, TypeError):
         loss = {}
+    attribution = {
+        "as_of": cap["as_of"],
+        "pct_idle": round(float(pct_idle), 2),
+        "usd_idle": round(float(usd_idle), 2),
+        "idle_no_qualified_ideas": {
+            "expected_loss_usd": round(float(loss.get("idle_no_qualified_ideas") or 0.0), 2),
+            "capital_usd": round(float(cap["usd_idle"] or 0.0), 2),
+        },
+        "gates": {
+            "expected_loss_usd": round(float(loss.get("risk_gate_blocked") or 0.0), 2),
+            "capital_usd": round(float(cap["usd_blocked"] or 0.0), 2),
+        },
+        "waiting": {
+            "expected_loss_usd": round(float(loss.get("unresolved_predictions_waiting") or 0.0), 2),
+            "capital_usd": round(float(cap["usd_waiting"] or 0.0), 2),
+        },
+        "stale": {
+            "expected_loss_usd": round(float(loss.get("stale_thesis_trapped") or 0.0), 2),
+            "capital_usd": round(float(cap["usd_stale"] or 0.0), 2),
+        },
+    }
     ranked = sorted(((k, v or 0.0) for k, v in loss.items()), key=lambda kv: -kv[1])
     top_cause, top_usd = ranked[0] if ranked else ("unknown", 0.0)
     idea_supply_led = top_cause == "idle_no_qualified_ideas"
@@ -444,10 +698,16 @@ def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
         "evidence": [
             f"capital_efficiency_snapshots as_of {cap['as_of']}: pct_deployed={cap['pct_deployed']}, pct_idle={pct_idle}",
             "ranked $ bottlenecks: " + ", ".join(f"{k}=${v:,.0f}" for k, v in ranked),
+            "idle attribution from stored DB snapshot: "
+            f"no_qualified=${attribution['idle_no_qualified_ideas']['expected_loss_usd']:,.0f}, "
+            f"gates=${attribution['gates']['expected_loss_usd']:,.0f}, "
+            f"waiting=${attribution['waiting']['expected_loss_usd']:,.0f}, "
+            f"stale=${attribution['stale']['expected_loss_usd']:,.0f}",
             "risk-gate blocks are a trivial share — the drag is idea supply, not the risk budget"
             if idea_supply_led else
             f"dominant cause is {top_cause}, not idle idea-supply — root-cause accordingly",
         ],
+        "idle_cash_attribution": attribution,
         "suggested_issue": {
             "title": "Reduce idle-cash drag by raising qualified-idea origination throughput",
             "acceptance_criteria": (
@@ -530,7 +790,7 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                 "evidence": [
                     (
                         f"{count} blocked rows still in trade_intents over {BLOCK_LOOKBACK_DAYS}d re-evaluate "
-                        "to pass under the current gate stack"
+                        "to pass under the current gate stack or current portfolio state"
                     ),
                     *meta["evidence"],
                 ],
@@ -585,9 +845,32 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                         f"mechanism={mech} before={base_means.get(mech)} "
                         f"after={fix_means.get(mech)} delta={selected_delta}"
                     )
+                relinked = report.get("replay", {}).get("current_linker_replay") or {}
+                relinked_mean = relinked.get("mean_brier")
+                relinked_delta = report.get("replay", {}).get("current_linker_delta_vs_actual")
+                if relinked_mean is not None and relinked_delta is not None:
+                    evidence.append(
+                        "TM-263 current-linker replay: "
+                        f"before_actual={report.get('actual_mean_brier')} after_replay={relinked_mean} "
+                        f"delta={relinked_delta} changed_links={relinked.get('changed_links')}; "
+                        "historical resolved rows are not retro-mutated"
+                    )
+                selected_relinked = report.get("replay", {}).get("selected_contributor_current_linker") or {}
+                if selected_relinked:
+                    evidence.append(
+                        "TM-257 selected bucket under current linker: "
+                        f"mechanism={selected_relinked.get('mechanism')} "
+                        f"before_count={selected_relinked.get('before_count')} "
+                        f"after_count={selected_relinked.get('after_count')} "
+                        f"before_mean={selected_relinked.get('before_mean_brier')} "
+                        f"after_mean={selected_relinked.get('after_mean_brier')}"
+                    )
                 reason = report.get("selection_reason")
                 if reason:
                     evidence.append(f"selection_reason: {reason}")
+                evidence.append(
+                    "single-regime caveat: all resolved calibration rows in this report are neutral / position_1_4w"
+                )
             except Exception as exc:
                 evidence.append(f"brier_contributor_breakdown_unavailable: {exc}")
             signals.append({

@@ -421,6 +421,33 @@
         "bestEffort": true
       },
       "state": {}
+    },
+    {
+      "id": "0c12b435-3d7d-4ceb-9920-8f6bd333f414",
+      "agentId": "jerry",
+      "name": "aaron-dr-referral-arcl-surgery-reminder-2026-07-28",
+      "description": "One-shot reminder requested by Aaron in Telegram DM on 2026-07-24.",
+      "enabled": true,
+      "deleteAfterRun": true,
+      "createdAtMs": 1784903169125,
+      "schedule": {
+        "kind": "at",
+        "at": "2026-07-28T13:30:00.000Z"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "At the scheduled time, send Aaron exactly this reminder in plain text: Reminder: get referral from dr and look up the thing from first arcl surgery.",
+        "timeoutSeconds": 120
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "telegram",
+        "to": "telegram:6043080629",
+        "accountId": "jerry"
+      },
+      "state": {}
     }
   ]
 }

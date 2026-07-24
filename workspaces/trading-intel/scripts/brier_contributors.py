@@ -24,6 +24,8 @@ ROOT = Path("/home/aaron/.openclaw")
 DB_PATH = ROOT / "state/trading-intel.sqlite"
 sys.path.insert(0, str(ROOT / "workspaces/quant/scripts"))
 import predict  # noqa: E402
+sys.path.insert(0, str(ROOT / "workspaces/trading-intel/scripts"))
+import link_mechanisms  # noqa: E402
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -146,10 +148,22 @@ def replay_mean_brier(
     *,
     prefer_horizon: bool,
     family_mode: str,
+    relink: bool = False,
 ) -> dict:
     total = 0.0
     bucket_totals: dict[str, list[float]] = defaultdict(list)
+    changed_links = 0
+    mechanism_list = list(mechs.values())
     for row in rows:
+        mechanism_ids = row["mechanism_ids"]
+        if relink:
+            text = link_mechanisms.hypothesis_text(conn, row["hypothesis_id"], row["thesis_summary"])
+            mechanism_ids = [
+                item["id"]
+                for item in link_mechanisms.link(text, mechanism_list, row["time_horizon"])
+            ]
+            if mechanism_ids != row["mechanism_ids"]:
+                changed_links += 1
         hyp = (
             row["hypothesis_id"],
             row["hypothesis_created_at"],
@@ -161,7 +175,7 @@ def replay_mean_brier(
         pred = predict.build_prediction(
             conn,
             hyp,
-            row["mechanism_ids"],
+            mechanism_ids,
             mechs,
             row["regime_at_prediction"],
             prefer_horizon=prefer_horizon,
@@ -170,13 +184,18 @@ def replay_mean_brier(
         bit = 1.0 if row["realized_outcome"] == "correct" else 0.0
         brier = (pred["p_correct"] - bit) ** 2
         total += brier
-        for mechanism in row["mechanism_ids"] or ["(none)"]:
+        for mechanism in mechanism_ids or ["(none)"]:
             bucket_totals[mechanism].append(brier)
     mean = total / len(rows) if rows else None
     return {
         "mean_brier": None if mean is None else round(mean, 6),
+        "changed_links": changed_links,
         "mechanism_means": {
             mechanism: round(sum(values) / len(values), 6)
+            for mechanism, values in bucket_totals.items()
+        },
+        "mechanism_counts": {
+            mechanism: len(values)
             for mechanism, values in bucket_totals.items()
         },
     }
@@ -194,6 +213,10 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
     fixed = (
         replay_mean_brier(conn, rows, mechs, prefer_horizon=True, family_mode="root")
         if rows else {"mean_brier": None, "mechanism_means": {}}
+    )
+    relinked = (
+        replay_mean_brier(conn, rows, mechs, prefer_horizon=True, family_mode="root", relink=True)
+        if rows else {"mean_brier": None, "mechanism_means": {}, "mechanism_counts": {}, "changed_links": 0}
     )
 
     worst_overall = ranked[0] if ranked else None
@@ -237,6 +260,23 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
                     - fixed["mechanism_means"].get(selected_mech, 0.0),
                     6,
                 )
+            ),
+            "current_linker_replay": relinked,
+            "current_linker_delta_vs_actual": (
+                None
+                if actual_mean is None or relinked["mean_brier"] is None
+                else round(actual_mean - relinked["mean_brier"], 6)
+            ),
+            "selected_contributor_current_linker": (
+                None
+                if not selected_mech
+                else {
+                    "mechanism": selected_mech,
+                    "before_count": selected["count"] if selected else None,
+                    "after_count": relinked.get("mechanism_counts", {}).get(selected_mech, 0),
+                    "before_mean_brier": selected["mean_brier"] if selected else None,
+                    "after_mean_brier": relinked.get("mechanism_means", {}).get(selected_mech),
+                }
             ),
         },
     }

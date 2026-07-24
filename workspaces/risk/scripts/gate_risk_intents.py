@@ -112,6 +112,8 @@ EXIT_FAIL_LOUD = 2
 PENDING_INTENT_STATES = ("approved", "submitted", "partial")
 OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
 EXITING_INTENT_STATES = ("proposed", "critic_review", "risk_review", "approved", "submitted", "partial")
+RISK_REDUCING_ACTIONS = ("exit", "trim")
+ORDER_TERMINAL_STATUSES = ("filled", "canceled", "cancelled", "rejected", "expired")
 
 
 def _now_iso() -> str:
@@ -345,37 +347,140 @@ def _equity_and_daypl() -> tuple[float, float | None]:
     return equity, day_pl
 
 
-def _open_position_value(conn, exclude_ticker: str | None = None) -> float:
+def _money(value: float | int | None) -> float:
+    return round(float(value or 0.0), 2)
+
+
+def _position_notional(row: sqlite3.Row) -> float:
+    val = row["current_value"]
+    if val is None:
+        val = float(row["qty"] or 0) * float(row["cost_basis"] or 0)
+    return abs(float(val or 0))
+
+
+def _intent_notional(row: sqlite3.Row) -> float:
+    return abs(float(row["size"] or 0) * float(row["entry_price_target"] or 0))
+
+
+def _is_risk_reducing_action(action: str | None) -> bool:
+    return (action or "").lower() in RISK_REDUCING_ACTIONS
+
+
+def _open_position_rows(conn, exclude_ticker: str | None = None) -> list[dict]:
     rows = conn.execute(
         "SELECT ticker, current_value, qty, cost_basis FROM positions "
         f"WHERE state IN ({','.join('?' * len(OPEN_POSITION_STATES))})",
         OPEN_POSITION_STATES,
     ).fetchall()
-    total = 0.0
+    out = []
     for r in rows:
         if exclude_ticker and (r["ticker"] or "").upper() == exclude_ticker.upper():
             continue
-        val = r["current_value"]
-        if val is None:
-            val = float(r["qty"] or 0) * float(r["cost_basis"] or 0)
-        # GROSS exposure: a short position (negative qty/value) consumes risk
-        # budget exactly like a long — abs(), never netted (migration 0013).
-        total += abs(float(val or 0))
-    return total
+        out.append({
+            "ticker": (r["ticker"] or "").upper(),
+            "qty": float(r["qty"] or 0),
+            "notional": _position_notional(r),
+        })
+    return out
 
 
-def _pending_intent_value(conn, exclude_id: str | None = None) -> float:
+def _open_position_value(conn, exclude_ticker: str | None = None) -> float:
+    # GROSS exposure: a short position consumes risk budget exactly like a long
+    # -- abs(), never netted (migration 0013).
+    return sum(row["notional"] for row in _open_position_rows(conn, exclude_ticker))
+
+
+def _pending_intent_rows(conn, exclude_id: str | None = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, ticker, size, entry_price_target FROM trade_intents "
+        "SELECT id, ticker, action, state, size, entry_price_target FROM trade_intents "
         f"WHERE state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
         PENDING_INTENT_STATES,
     ).fetchall()
-    total = 0.0
+    out = []
     for r in rows:
         if exclude_id and r["id"] == exclude_id:
             continue
-        total += abs(float(r["size"] or 0) * float(r["entry_price_target"] or 0))
-    return total
+        out.append({
+            "id": r["id"],
+            "ticker": (r["ticker"] or "").upper(),
+            "action": (r["action"] or "").lower(),
+            "state": r["state"],
+            "notional": _intent_notional(r),
+        })
+    return out
+
+
+def _open_order_rows(conn) -> list[dict]:
+    try:
+        rows = conn.execute(
+            "SELECT o.broker_order_id, o.trade_intent_id, o.symbol, o.side, o.qty, "
+            "o.limit_price, o.status, ti.action "
+            "FROM orders o LEFT JOIN trade_intents ti ON ti.id = o.trade_intent_id "
+            f"WHERE lower(o.status) NOT IN ({','.join('?' * len(ORDER_TERMINAL_STATUSES))}) "
+            "ORDER BY o.submitted_at DESC",
+            ORDER_TERMINAL_STATUSES,
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        out.append({
+            "order_id": r["broker_order_id"],
+            "intent_id": r["trade_intent_id"],
+            "ticker": (r["symbol"] or "").upper(),
+            "side": r["side"],
+            "action": (r["action"] or "").lower(),
+            "qty": float(r["qty"] or 0),
+            "limit_price": None if r["limit_price"] is None else float(r["limit_price"]),
+            "status": r["status"],
+        })
+    return out
+
+
+def _top_notional(rows: list[dict], limit: int = 8) -> list[dict]:
+    out = []
+    for row in sorted(rows, key=lambda item: -float(item.get("notional") or 0.0))[:limit]:
+        item = dict(row)
+        item["notional"] = _money(item.get("notional"))
+        out.append(item)
+    return out
+
+
+def _round_notional_rows(rows: list[dict], limit: int = 8) -> list[dict]:
+    out = []
+    for row in rows[:limit]:
+        item = dict(row)
+        item["notional"] = _money(item.get("notional"))
+        out.append(item)
+    return out
+
+
+def _gross_exposure_snapshot(conn, exclude_id: str | None = None) -> dict:
+    positions = _open_position_rows(conn)
+    pending = _pending_intent_rows(conn, exclude_id=exclude_id)
+    pending_new_risk = [row for row in pending if not _is_risk_reducing_action(row["action"])]
+    pending_risk_reducing = [row for row in pending if _is_risk_reducing_action(row["action"])]
+    position_gross = sum(float(row["notional"] or 0.0) for row in positions)
+    pending_new_risk_notional = sum(float(row["notional"] or 0.0) for row in pending_new_risk)
+    return {
+        "position_gross": _money(position_gross),
+        "pending_new_risk_notional": _money(pending_new_risk_notional),
+        "pending_risk_reducing_notional": _money(sum(float(row["notional"] or 0.0) for row in pending_risk_reducing)),
+        "_gross_total_raw": position_gross + pending_new_risk_notional,
+        "gross_total": _money(position_gross + pending_new_risk_notional),
+        "top_positions": _top_notional(positions),
+        "pending_new_risk_intents": _round_notional_rows(pending_new_risk),
+        "pending_risk_reducing_intents": _round_notional_rows(pending_risk_reducing),
+        "open_orders": _open_order_rows(conn)[:8],
+    }
+
+
+def _pending_intent_value(conn, exclude_id: str | None = None) -> float:
+    return sum(
+        row["notional"]
+        for row in _pending_intent_rows(conn, exclude_id=exclude_id)
+        if not _is_risk_reducing_action(row["action"])
+    )
 
 
 def _name_exposure(conn, ticker: str) -> float:
@@ -392,12 +497,13 @@ def _name_exposure(conn, ticker: str) -> float:
             val = float(r["qty"] or 0) * float(r["cost_basis"] or 0)
         total += abs(float(val or 0))   # per-name cap on ABS exposure (shorts too)
     intents = conn.execute(
-        "SELECT size, entry_price_target FROM trade_intents "
+        "SELECT action, size, entry_price_target FROM trade_intents "
         f"WHERE UPPER(ticker)=? AND state IN ({','.join('?' * len(PENDING_INTENT_STATES))})",
         (sym, *PENDING_INTENT_STATES),
     ).fetchall()
     for r in intents:
-        total += abs(float(r["size"] or 0) * float(r["entry_price_target"] or 0))
+        if not _is_risk_reducing_action(r["action"]):
+            total += abs(float(r["size"] or 0) * float(r["entry_price_target"] or 0))
     return total
 
 
@@ -499,7 +605,8 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
 
     name_cap = MAX_NAME_PCT * equity
     gross_cap = MAX_GROSS_PCT * equity
-    current_gross = _open_position_value(conn) + _pending_intent_value(conn, exclude_id=iid)
+    gross_snapshot = _gross_exposure_snapshot(conn, exclude_id=iid)
+    current_gross = float(gross_snapshot.pop("_gross_total_raw", gross_snapshot["gross_total"]))
     gross_headroom = max(0.0, gross_cap - current_gross)
     name_existing = _name_exposure(conn, sym)
     name_headroom = max(0.0, name_cap - name_existing)
@@ -513,6 +620,7 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
         "name_existing": round(name_existing, 2), "name_headroom": round(name_headroom, 2),
         "max_gross_pct": MAX_GROSS_PCT, "gross_cap": round(gross_cap, 2),
         "current_gross": round(current_gross, 2), "gross_headroom": round(gross_headroom, 2),
+        "gross_exposure_attribution": gross_snapshot,
         "max_positions": MAX_POSITIONS, "concurrent_names": concurrent,
         "concurrent_name_slots": concurrent_snapshot["active_slots"],
         "concurrent_exiting_slots": concurrent_snapshot["exiting_slots"],
@@ -578,6 +686,16 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
 
     approved_qty = int(math.floor(approved_notional / price)) if price > 0 else 0
     if approved_qty < 1:
+        limits["sizing_block_attribution"] = {
+            "requested_qty": req_qty,
+            "requested_price": round(price, 4),
+            "requested_notional": round(req_notional, 2),
+            "approved_notional_before_rounding": round(approved_notional, 2),
+            "min_one_share_notional": round(price, 2),
+            "binding_breaches": breaches or ["no_headroom"],
+            "name_headroom": round(name_headroom, 2),
+            "gross_headroom": round(gross_headroom, 2),
+        }
         return {"verdict": "blocked", "approved_qty": 0, "limits": limits,
                 "breaches": breaches or ["no_headroom"],
                 "reason": f"no sizing headroom (name={round(name_headroom,2)}, "

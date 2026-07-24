@@ -2,6 +2,7 @@ import sqlite3
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brier_contributors
@@ -55,6 +56,43 @@ class BrierContributorTests(unittest.TestCase):
         self.assertEqual(worst_linked["mechanism"], "mech_a")
         self.assertEqual(worst_linked["count"], 2)
         self.assertEqual(worst_linked["total_brier"], 0.49)
+
+    def test_relink_replay_reports_changed_links_and_mechanism_counts(self) -> None:
+        rows = [
+            {
+                "prediction_id": "p1",
+                "hypothesis_id": "h1",
+                "hypothesis_created_at": "2026-07-01T00:00:00Z",
+                "thesis_summary": "growth thesis",
+                "time_horizon": "position_1_4w",
+                "hypothesis_state": "resolved",
+                "tickers": '["ABC"]',
+                "regime_at_prediction": "neutral",
+                "mechanism_ids": ["multi_growth_mom__month_21d"],
+                "realized_outcome": "incorrect",
+            },
+        ]
+
+        def fake_prediction(conn, hyp, mech_ids, mechs, regime, **kwargs):
+            return {"p_correct": 0.5 if not mech_ids else 0.8}
+
+        with (
+            patch.object(brier_contributors.link_mechanisms, "hypothesis_text", return_value="growth thesis"),
+            patch.object(brier_contributors.link_mechanisms, "link", return_value=[]),
+            patch.object(brier_contributors.predict, "build_prediction", side_effect=fake_prediction),
+        ):
+            report = brier_contributors.replay_mean_brier(
+                sqlite3.connect(":memory:"),
+                rows,
+                {"multi_growth_mom__month_21d": {"id": "multi_growth_mom__month_21d"}},
+                prefer_horizon=True,
+                family_mode="root",
+                relink=True,
+            )
+
+        self.assertEqual(report["changed_links"], 1)
+        self.assertEqual(report["mean_brier"], 0.25)
+        self.assertEqual(report["mechanism_counts"], {"(none)": 1})
 
 
 if __name__ == "__main__":
