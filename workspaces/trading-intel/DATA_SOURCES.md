@@ -72,3 +72,16 @@ purchased Massive Options Developer 2026-07-09; 4yr flat-file backfill same day
 (563,543 rows, 592 names, 2022-07-11..2026-07-08). **FULL TEST FAILED: 0 of 7
 constructions survive BH-FDR q=0.10** (best: opt_net_prem IC 0.017, t=1.19,
 46 rebalances). Family KILLED; recommend canceling the add-on. Panel banked.
+
+**2026-07-14 (TM-222 WSB scout):** plain-Python extractor added at
+`scripts/wsb_archive_ic.py`. It can parse local Reddit archive files
+(`.zst/.jsonl/.json`) and can backfill the same normalized cache from Arctic Shift when
+local dumps are absent. First bounded scout used **WSB submission posts only**
+(`title + selftext`, one mention per ticker per post, cashtags + uppercase ticker tokens),
+window **2024-10-01..2025-03-30**, forward horizon **21 trading days**, rebalance every
+**3 trading days** (`n=41`). Results: `mention_share` pooled IC **0.0365**, **t=1.64**;
+`mentions_z` pooled IC **0.0292**, **t=1.89**. Stability split matters: pre-2025
+`mention_share` was better (**IC 0.0820**, `n=14`) while post-2025 `mentions_z` was the
+only live leg (**IC 0.0499**, **t=2.45**, `n=27`). **Verdict: keep the family on WATCH,
+do not wire live yet.** A full local-dump 2019→2025 replay is still required before this
+graduates from scout to candidate feature.

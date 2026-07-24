@@ -386,3 +386,22 @@ incident postmortems) need no tag.
 - **VIX-capitulation long (vix_high + deep drawdown) survived every horizon and rigor
   control** (+3%/qtr net) — one of the few macro-conditioned entries that is robustly
   mechanical rather than judgment-dependent.
+## 2026-07-14 — WSB post attention still carries a small 21d signal, but the construction that works changed across the 2025 break
+
+- **A bounded WSB archive scout (submission posts only, 2024-10-01..2025-03-30, 41
+  rebalances every 3 trading days) produced real but regime-unstable rank signal.**
+  Using Arctic Shift's point-in-time `r/wallstreetbets` submission archive and counting
+  one ticker mention per post (`title + selftext`, cashtags and uppercase tokens only),
+  `mention_share` posted pooled IC **0.0365** with **t=1.64** and `mentions_z` posted
+  pooled IC **0.0292** with **t=1.89** versus forward 21-trading-day raw returns.
+- **The split around 2025 is the important part.** Pre-2025 (`n=14`) `mention_share`
+  did the work (**IC 0.0820, t=2.00**) while `mentions_z` was slightly negative
+  (**IC -0.0107, t=-0.56**). Post-2025 (`n=27`) that flipped: `mention_share` faded
+  (**IC 0.0130, t=0.50**) while `mentions_z` improved (**IC 0.0499, t=2.45**).
+- **Verdict:** promising enough to keep the family alive, not stable enough to promote
+  as a live feature off this scout alone. The safer interpretation is that raw retail
+  "share of voice" mattered more before the 2025 regime break, while post-2025 the
+  only usable signal was *surprise* attention relative to a ticker's own recent base
+  rate. Next step is the full local-dump pass (2019→2025) before any feature wiring.
+- revalidate-by: 2026-10-14
+
