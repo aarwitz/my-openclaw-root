@@ -277,7 +277,27 @@ def _emit(rows, ticker, as_of, knowable_at, source, feats: dict):
 
 
 # --- technical series from bars -------------------------------------------------
+def _drop_incomplete_today(bars):
+    """Massive serves TODAY'S PARTIAL bar intraday. The backtest's point-in-time semantics are
+    COMPLETE closes only — an intraday refresh (2026-07-24: 493 rows/88 tickers polluted by a
+    mid-session run) would stamp partial-day features (ret_1d on a half-day print, shifted SMAs)
+    that live decisions consume but the backtest never saw. Drop the last bar whenever it is
+    today AND the session is open."""
+    if not bars:
+        return bars
+    try:
+        from datetime import datetime, timezone
+        from connectors.marketdata import market_clock
+        today = datetime.now(timezone.utc).astimezone().date().isoformat()
+        if str(bars[-1].get("t", ""))[:10] >= today[:10] and market_clock().get("is_open"):
+            return bars[:-1]
+    except Exception:
+        pass  # clock unavailable -> keep bars (scheduled runs are post-close/pre-open anyway)
+    return bars
+
+
 def _technical(bars):
+    bars = _drop_incomplete_today(bars)
     """Return list of (date, {feature: value}) from oldest->newest split-adjusted bars."""
     c = [b["c"] for b in bars]
     h = [b["h"] for b in bars]

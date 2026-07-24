@@ -86,6 +86,39 @@ def data_reality(conn) -> list[dict]:
     except sqlite3.Error:
         pass
 
+    # GATE-BYPASS tripwire (invariant #3): any broker-reaching intent after the 2026-06-06
+    # hardening without an approving risk_review = the single worst possible bug. 5 legacy
+    # fills from the desk's first sessions (06-04/05) are grandfathered by the date floor.
+    try:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM trade_intents ti WHERE ti.state IN ('submitted','filled','partial') "
+            "AND ti.created_at >= '2026-06-06' AND NOT EXISTS (SELECT 1 FROM risk_reviews rr "
+            "WHERE rr.target_id=ti.id AND rr.verdict IN ('approved','resized'))"
+        ).fetchone()[0]
+        out.append({"family": "data", "id": "gate:bypass",
+                    "status": "RED" if n else "OK",
+                    "detail": f"{n} broker-reaching intents WITHOUT an approving risk_review (post-hardening)"})
+    except sqlite3.Error:
+        pass
+
+    # PARTIAL-BAR leakage tripwire: features stamped as_of=today while the session is open are
+    # incomplete-bar prints the backtest semantics never saw (2026-07-24 incident: 493 rows).
+    try:
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz
+        sys.path.insert(0, _os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))
+        from connectors.marketdata import market_clock as _mc
+        if _mc().get("is_open"):
+            fdb = sqlite3.connect("file:" + _os.path.expanduser("~/.openclaw/state/features.sqlite") + "?mode=ro", uri=True)
+            today = _dt.now(_tz.utc).astimezone().date().isoformat()
+            n = fdb.execute("SELECT COUNT(*) FROM features WHERE as_of>=?", (today,)).fetchone()[0]
+            fdb.close()
+            out.append({"family": "data", "id": "data:partial_bar_leak",
+                        "status": "RED" if n else "OK",
+                        "detail": f"{n} feature rows stamped with today's INCOMPLETE bar while the session is open"})
+    except Exception:
+        pass
+
     # Debrief numeric decay: market_events whose observed_moves_json is empty of ticker moves.
     # Found 2026-07-23: every event after 07-17 recorded {} or index-only moves, silently starving
     # both research:big_story_direction and event-decomposition candidates. An LLM "remembering to
