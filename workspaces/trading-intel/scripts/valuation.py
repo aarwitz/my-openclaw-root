@@ -241,9 +241,17 @@ def value(ticker: str) -> dict[str, Any]:
         fair_eps = fair_pe * eps
 
     # blend
+    # D71 (rp-capex-depressed-fcf-20260715, operator-approved 2026-07-24): on capex-cycle
+    # names, trough FCF makes the DCF leg an artifact (MU: dcf $33.54 vs price $982) that
+    # mis-classifies semis as 'rich' and trips the critic brake. When FCF is materially
+    # depressed vs earnings (positive NI, FCF < 40% of NI), the DCF leg is down-weighted
+    # (0.65 -> 0.25) so the growth-justified earnings multiple carries the estimate, and
+    # confidence is cut so downstream consumers scale back either way.
+    ni = f.get("net_income")
+    fcf_depressed = bool(ni and ni > 0 and fcf is not None and fcf < 0.4 * ni)
     parts = []
     if fair_dcf and fair_dcf > 0:
-        parts.append(("dcf", fair_dcf, 0.65))
+        parts.append(("dcf", fair_dcf, 0.25 if fcf_depressed else 0.65))
     if fair_eps and fair_eps > 0:
         parts.append(("eps", fair_eps, 0.35))
     if not parts:
@@ -280,6 +288,8 @@ def value(ticker: str) -> dict[str, Any]:
         conf *= 0.4   # raw value is an extrapolation — don't trust the magnitude
     if abs(g_used - GROWTH_MAX) < 1e-9:
         conf *= 0.85  # growth pinned at the ceiling = high-growth extrapolation
+    if fcf_depressed:
+        conf *= 0.75  # capex-cycle trough FCF: the DCF anchor is least trustworthy here (D71)
     conf = max(0.1, min(0.95, conf))
 
     out.update({
@@ -292,6 +302,7 @@ def value(ticker: str) -> dict[str, Any]:
         "margin_of_safety": round(mos, 4),
         "raw_margin_of_safety": round(raw_mos, 4),
         "zone": zone,
+        "fcf_depressed": fcf_depressed,
         "confidence": round(conf, 3),
         "dcf_value": round(fair_dcf, 2) if fair_dcf else None,
         "eps_multiple_value": round(fair_eps, 2) if fair_eps else None,
