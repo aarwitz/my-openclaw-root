@@ -303,6 +303,12 @@ def _technical(bars):
         f = {}
         if rsi[i] is not None:
             f["rsi14"] = rsi[i]
+        # 1-day close-to-close return in PERCENT (matches event_drift_* conds, e.g. ret_1d > 4.0).
+        # Live twin of the backtest engine's in-engine derivation — without this, the promoted
+        # event_drift_up mechanism could never fire in signal_scan (the validated-edge-cannot-
+        # actuate class, D70).
+        if i >= 1 and c[i - 1]:
+            f["ret_1d"] = (c[i] / c[i - 1] - 1) * 100.0
         s50, s200 = sma(i, 50), sma(i, 200)
         if s50:
             f["dist_sma50"] = c[i] / s50 - 1
