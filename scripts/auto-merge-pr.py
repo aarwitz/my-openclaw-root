@@ -66,7 +66,15 @@ def load_policy():
 
 
 def base_branch_of(repo):
-    for candidate in ("main", "master"):
+    # Prefer origin's actual HEAD branch: a stale local `main` (frozen 2026-07-22) was
+    # silently used as the diff base for two days, inflating every PR to ~59 files and
+    # auto-holding the whole coding lane (TM-222 postmortem, 2026-07-24).
+    head_p = git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if head_p.returncode == 0 and head_p.stdout.strip():
+        cand = head_p.stdout.strip().split("/")[-1]
+        if git(repo, "rev-parse", "--verify", cand).returncode == 0:
+            return cand
+    for candidate in ("master", "main"):
         if git(repo, "rev-parse", "--verify", "--quiet",
                f"refs/remotes/origin/{candidate}").returncode == 0:
             return candidate
