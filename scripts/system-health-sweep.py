@@ -488,19 +488,12 @@ def check_project_registry():
 
 
 def check_options_freshness():
-    """options_daily (thetadata audition data) lives in its own table — was 4td
-    stale with no monitor when the 2026-07-09 audit looked."""
-    try:
-        c = sqlite3.connect(f"file:{ROOT}/state/features.sqlite?mode=ro", uri=True, timeout=30)
-        maxd = c.execute("SELECT MAX(date) FROM options_daily").fetchone()[0]
-        c.close()
-    except Exception as e:
-        return finding("options_freshness", "warn", f"options_daily query failed: {e}")
-    if not maxd:
-        return finding("options_freshness", "warn", "options_daily empty")
-    age = (datetime.now(timezone.utc).date() - datetime.strptime(maxd, "%Y-%m-%d").date()).days
-    sev = "warn" if age > 7 else "ok"
-    return finding("options_freshness", sev, f"options_daily max date {maxd} ({age}d old)")
+    """RETIRED 2026-07-24: options-flow was FDR-killed twice (fdc5b75 2026-07-11: 0/7
+    constructions survive; 9e47ae3 2026-07-17: event-conditioned retest dead) and ingestion
+    stopped with it — a dead-by-decision pipeline must not emit a permanent stale-data WARN
+    (alarm fatigue buries real warns). options_daily stays in features.sqlite as archived
+    research data. Re-enable only if options ingestion is deliberately restarted."""
+    return finding("options_freshness", "ok", "retired: options-flow FDR-killed; ingest stopped by decision (2026-07-24)")
 
 
 def check_ledger_backup():
