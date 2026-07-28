@@ -592,6 +592,14 @@ def check_dev_lane():
         def _rev(ref):
             r = sp.run(["git", "-C", ROOT, "rev-parse", ref], capture_output=True, text=True)
             return r.stdout.strip() if r.returncode == 0 else None
+        # (0) live tree must BE on master — the whole fleet executes from this checkout.
+        # 2026-07-27 a coding-lane run left ~/.openclaw on its issue branch for 22h:
+        # every cron ran branch code and master fixes (c8206b1) silently un-deployed.
+        head_branch = sp.run(["git", "-C", ROOT, "branch", "--show-current"],
+                             capture_output=True, text=True).stdout.strip()
+        if head_branch != "master":
+            problems.append(f"LIVE TREE IS ON '{head_branch or 'detached HEAD'}', not master — "
+                            "the fleet is running non-master code (recover: commit/stash, git checkout master)")
         m, ma = _rev("main"), _rev("master")
         if m and ma and m != ma:
             merged = sp.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", "main", "master"],
