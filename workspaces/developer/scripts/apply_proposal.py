@@ -53,10 +53,30 @@ def _set_status(conn, proposal_id: str, *, new_status: str, decider: str,
     audit(conn, actor="developer", entity_type="rule_proposal", entity_id=proposal_id,
           action=new_status, before_state=before, after_state=new_status,
           rationale=(reason or f"decider={decider}")[:480])
+    executed = None
+    if new_status == "applied":
+        # Execute the one proposal class that is a pure DB status flip (calibrate.py
+        # files these on every posterior collapse — before 2026-07-28 'applied' only
+        # recorded the decision and the mechanism stayed live until someone remembered
+        # the UPDATE). Anything else still requires a code/coding-lane apply.
+        import re
+        m = re.fullmatch(r"mechanisms\.(.+)\.status", str(row["target_artifact"] or ""))
+        if m and str(row["proposed_value"]) in ("deprecated", "active", "candidate"):
+            mid, new_val = m.group(1), str(row["proposed_value"])
+            cur = conn.execute("SELECT status FROM mechanisms WHERE id=?", (mid,)).fetchone()
+            if cur:
+                conn.execute("UPDATE mechanisms SET status=? WHERE id=?", (new_val, mid))
+                audit(conn, actor="developer", entity_type="mechanism", entity_id=mid,
+                      action="status_change", before_state=cur["status"], after_state=new_val,
+                      rationale=f"executed by rule_proposal {proposal_id}")
+                executed = {"mechanism": mid, "status": f"{cur['status']} -> {new_val}"}
+            else:
+                executed = {"error": f"mechanism {mid} not found — decision recorded, nothing executed"}
     conn.commit()
     return {"id": proposal_id, "from": before, "to": new_status,
             "target_artifact": row["target_artifact"],
-            "proposed_value": row["proposed_value"]}
+            "proposed_value": row["proposed_value"],
+            **({"executed": executed} if executed else {})}
 
 
 def main(argv: list[str] | None = None) -> int:

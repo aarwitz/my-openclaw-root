@@ -104,8 +104,28 @@ def make_result(args: argparse.Namespace, matches: list[dict[str, Any]], decisio
     }
 
 
+def project_sprint_mapping(project: str) -> str | None:
+    """Deterministic project -> TM sprint-name mapping from projects.json.
+
+    2026-07-27 the PM lane went fail-closed for a day because its prompt passed
+    only --project AutoTrade while the live sprint is named 'ATS v6 Trading
+    Intel'. An LLM remembering the exact sprint string is not a mapping —
+    projects.json (`products[].tm_sprint_name`) is."""
+    try:
+        with open("/home/aaron/.openclaw/projects.json") as fh:
+            data = json.load(fh)
+        want = normalize_name(project)
+        for prod in data.get("products", []):
+            if normalize_name(str(prod.get("id") or "")) == want or \
+               normalize_name(str(prod.get("name") or "")) == want:
+                return prod.get("tm_sprint_name") or None
+    except Exception:
+        return None
+    return None
+
+
 def decide(args: argparse.Namespace, sprints: list[dict[str, Any]]) -> tuple[dict[str, Any], int]:
-    target = normalize_name(args.sprint_name or args.project)
+    target = normalize_name(args.sprint_name or project_sprint_mapping(args.project) or args.project)
     matches = [s for s in sprints if normalize_name(str(s.get("name") or "")) == target]
     active_matches = [m for m in matches if bool(m.get("is_active"))]
 

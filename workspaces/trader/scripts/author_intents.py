@@ -416,6 +416,24 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     regime = _regime_current(conn)
     pred = _latest_prediction(conn, hid)
     p_correct = float(pred["p_correct"]) if pred and pred["p_correct"] is not None else None
+
+    # rp-horizon-tilt-20260728 (approved): realized selection alpha is positive ONLY at
+    # trend_1_3m (+129 bps avg, n=13) — every sub-month bucket is negative (position_1_4w
+    # -340, swing -844, intraday -446). Tilt, don't ban: sub-month intents are sized at
+    # 0.5x, and the shortest horizons (intraday/swing) require an FDR-proven mechanism
+    # link. Risk-neutral: all caps/floors/ceilings unchanged; this shrinks, never grows.
+    horizon = str(hyp_row["time_horizon"] or "position_1_4w")
+    horizon_mult = 1.0 if horizon == "trend_1_3m" else 0.5
+    if horizon in ("intraday", "swing_1_5d"):
+        proven = {"event_drift_up"}
+        try:
+            mech_ids = set(json.loads(pred["mechanism_ids_json"] or "[]")) if pred else set()
+        except (json.JSONDecodeError, TypeError):
+            mech_ids = set()
+        if not (mech_ids & proven):
+            return {"id": hid, "ticker": ticker, "skip": True,
+                    "reason": f"horizon_gate: {horizon} authoring requires an FDR-proven "
+                              f"mechanism link (rp-horizon-tilt-20260728)"}
     governor = _deployment_governor(
         conn,
         hyp_row,
@@ -438,7 +456,7 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     baseline_notional = governor["size_pct"] * equity
     raw_notional = max(float(sizing["notional_raw"]), baseline_notional)
     dyn_ceiling = min(governor["notional_ceiling"], governor["kelly_cap_effective"] * equity)
-    notional = max(governor["notional_floor"], min(dyn_ceiling, raw_notional * episode_mult))
+    notional = max(governor["notional_floor"], min(dyn_ceiling, raw_notional * episode_mult * horizon_mult))
     notional = min(notional, cash_remaining)
     if notional < min(governor["notional_floor"], cash_remaining):
         return {"id": hid, "ticker": ticker, "skip": True,
@@ -464,6 +482,8 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         "episode_context": episode_ctx,
         "episode_sizing_multiplier": episode_mult,
         "episode_signal": episode_flag,
+        "horizon": horizon,
+        "horizon_sizing_multiplier": horizon_mult,
         "return_band_pct": (
             None if pred is None else
             [pred["return_p10"], pred["return_p50"], pred["return_p90"]]

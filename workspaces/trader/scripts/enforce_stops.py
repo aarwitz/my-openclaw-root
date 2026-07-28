@@ -125,7 +125,10 @@ def _ensure_stop_postmortem(conn: sqlite3.Connection, hypothesis_id: str, *,
             "world_model_v1",
         ),
     )
-    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + pid[:24]
+    # uuid fragment: pid[:24] used to truncate to exactly "PM-STOP-<ts>" — two stops
+    # in the same second produced IDENTICAL audit ids, the INSERT threw, and the whole
+    # enforcement run died (2026-07-28: stops dead for a full session, crash-looping).
+    aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + uuid.uuid4().hex[:8] + "-" + hypothesis_id[:14]
     conn.execute(
         "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
         "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "
@@ -211,8 +214,13 @@ def main(argv=None) -> int:
         mark = None if (basis is None or dd_pct is None) else basis * (1.0 + (dd_pct / 100.0))
 
         if not a.dry_run:
-            if _ensure_stop_postmortem(conn, hid, ticker=tick, dd_pct=dd_pct, basis=basis, mark=mark):
-                postmortems_written += 1
+            # Isolate: a bad row here is bookkeeping, not protection — it must never
+            # abort stop ENFORCEMENT for the rest of the book (2026-07-28 crash loop).
+            try:
+                if _ensure_stop_postmortem(conn, hid, ticker=tick, dd_pct=dd_pct, basis=basis, mark=mark):
+                    postmortems_written += 1
+            except sqlite3.Error as exc:
+                print(f"WARN: postmortem failed for {hid} ({tick}): {exc}", file=sys.stderr)
         else:
             exists = conn.execute(
                 "SELECT 1 FROM postmortems WHERE hypothesis_id=? LIMIT 1",
@@ -228,7 +236,7 @@ def main(argv=None) -> int:
             conn.execute(
                 "UPDATE hypotheses SET state='resolved', resolved_at=?, resolved_state='wrong', "
                 "rationale_concise=COALESCE(rationale_concise,'') WHERE id=?", (_now_iso(), hid))
-            aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + hid[:24]
+            aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + uuid.uuid4().hex[:8] + "-" + hid[:14]
             conn.execute(
                 "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
                 "before_state, after_state, rationale_concise) VALUES (?, ?, 'trader', "

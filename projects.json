@@ -27,7 +27,9 @@
       "status": "active",
       "notes": "Trading logic changes flow as rule_proposals (human-gated); web/app code via normal PR lane.",
       "sprint_id": 5,
-      "telemetry_cmd": "python3 /home/aaron/.openclaw/workspaces/trading-intel/scripts/drag_report.py"
+      "telemetry_cmd": "python3 /home/aaron/.openclaw/workspaces/trading-intel/scripts/drag_report.py",
+      "tm_sprint_name": "ATS v6 Trading Intel",
+      "tm_sprint_id": 5
     },
     {
       "id": "resilife",
