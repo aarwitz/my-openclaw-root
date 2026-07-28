@@ -33,6 +33,7 @@ BRIER_COINFLIP = 0.25
 BLOCK_LOOKBACK_DAYS = 14
 BRIER_LOOKBACK_DAYS = 30
 STALE_PREDICTION_DAYS = 21
+LEGACY_ARTIFACT_ACTION = "mark_historical_artifacts"
 RISK_REDUCING_ACTIONS = {"exit", "trim"}
 OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
 PENDING_INTENT_STATES = ("approved", "submitted", "partial")
@@ -203,6 +204,27 @@ def trade_intent_sizing_inputs(conn: sqlite3.Connection, intent_id: str) -> dict
         "size": size,
         "entry_price": price,
         "notional": round(abs(size * price), 2),
+    }
+
+
+def legacy_artifact_disposition(conn: sqlite3.Connection, summary_key: str) -> dict | None:
+    try:
+        row = conn.execute(
+            "SELECT id, timestamp, after_state, rationale_concise FROM audits "
+            "WHERE actor='developer' AND entity_type='trade_intents' "
+            "AND entity_id=? AND action=? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (summary_key, LEGACY_ARTIFACT_ACTION),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "timestamp": row["timestamp"],
+        "after_state": row["after_state"],
+        "rationale": row["rationale_concise"],
     }
 
 
@@ -780,6 +802,34 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
             count = meta["count"]
             if count < 3:
                 continue
+            disposition = legacy_artifact_disposition(cur.connection, meta["summary_key"])
+            if disposition:
+                signals.append({
+                    "id": f"historical-artifacts-{slugify(meta['summary_key'])}"[:64],
+                    "severity": 5,
+                    "summary": (
+                        f"{count} blocked intents in {BLOCK_LOOKBACK_DAYS}d are marked historical artifacts "
+                        f"and intentionally retained: {meta['summary_key']}"
+                    ),
+                    "evidence": [
+                        (
+                            f"historical artifact disposition {disposition['id']} at {disposition['timestamp']}; "
+                            f"after_state={disposition.get('after_state') or 'historical_artifact'}"
+                        ),
+                        (
+                            "residual blocked rows are retained for audit/history; Developer does not requeue "
+                            "or cancel trade_intents"
+                        ),
+                        f"disposition rationale: {disposition.get('rationale')}",
+                        (
+                            f"{count} residual blocked rows still re-evaluate to pass under the current gate stack "
+                            "or current portfolio state"
+                        ),
+                        *meta["evidence"],
+                    ],
+                    "suggested_issue": None,
+                })
+                continue
             signals.append({
                 "id": f"legacy-blocked-{slugify(meta['summary_key'])}"[:64],
                 "severity": min(75, 25 + count * 2),
@@ -864,6 +914,15 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                         f"after_count={selected_relinked.get('after_count')} "
                         f"before_mean={selected_relinked.get('before_mean_brier')} "
                         f"after_mean={selected_relinked.get('after_mean_brier')}"
+                    )
+                next_blocker = report.get("next_blocker") or {}
+                if next_blocker:
+                    evidence.append(
+                        "TM-267 next blocker: "
+                        f"{next_blocker.get('kind')} "
+                        f"(actual={next_blocker.get('actual_mean_brier')} "
+                        f"current_linker_replay={next_blocker.get('current_linker_replay_mean_brier')} "
+                        f"changed_links={next_blocker.get('changed_links')})"
                     )
                 reason = report.get("selection_reason")
                 if reason:
