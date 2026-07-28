@@ -158,7 +158,9 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$gateway_ok" == true && -f "$SNAPSHOT_JSON" ]]; then
   et_dow="$(TZ=America/New_York date +%u)"   # 1..7
-  et_hm="$(TZ=America/New_York date +%H%M)"
+  # 10# forces base-10: 0850/0900 are invalid octal and used to crash this test,
+  # silently disabling the stale-snapshot page for the whole 08:00-09:59 window.
+  et_hm=$((10#$(TZ=America/New_York date +%H%M)))
   if [[ "$et_dow" -le 5 && "$et_hm" -ge 1000 && "$et_hm" -le 1630 ]]; then
     snap_age=$(( $(date +%s) - $(stat -c %Y "$SNAPSHOT_JSON") ))
     if (( snap_age > 10800 )); then

@@ -21,6 +21,8 @@ Run as a pass stage BEFORE compute_attribution. Writes only the P&L columns on
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -126,6 +128,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         conn.commit()
     marked = [o for o in opened if "skipped" not in o]
+    skipped = [o for o in opened if "skipped" in o]
+    if not args.dry_run:
+        # Persist unmarkable positions for integrity_check (data:unmarkable_positions).
+        # A position no provider can price (ticker rename, delisting) is unprotected —
+        # stops and falsifiers can never fire on it. BK->BNY sat like this Jul 8-28.
+        skips_path = Path(os.path.expanduser("~/.openclaw/state/mark-skips.json"))
+        skips_path.write_text(json.dumps(
+            {"generated_at": now_iso(), "skipped": skipped}, indent=1))
     emit({
         "marked_open": len(marked),
         "skipped_open": len(opened) - len(marked),

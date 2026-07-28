@@ -47,16 +47,31 @@ def daily_bars(symbol: str, days: int = 260, adjustment: str = "raw") -> list[di
     are always split-adjusted (which is what every consumer actually wants).
     """
     bars = massive.daily_bars(symbol)
-    if not bars:
+    # Fall back to FMP when Massive has NOTHING — or when its series went STALE
+    # (>7 calendar days behind). A ticker rename (BK->BNY 2026) leaves the old
+    # symbol returning frozen-but-nonempty bars, which used to win over a
+    # potentially fresher fallback and silently poison every downstream mark.
+    stale = False
+    if bars:
+        try:
+            last = datetime.strptime(str(bars[-1]["t"])[:10], "%Y-%m-%d").date()
+            stale = (date.today() - last).days > 7
+        except (ValueError, KeyError):
+            stale = False
+    if not bars or stale:
         try:
             fb = fmp.historical_price(symbol, frm="2004-01-01")
         except ConnectorError:
             fb = []
-        bars = [
+        fb_bars = [
             {"t": r["date"], "c": r["close"], "h": r.get("high") or r["close"], "v": r.get("volume") or 0}
             for r in sorted(fb or [], key=lambda r: r["date"])
             if r.get("close")
         ]
+        # keep whichever series is fresher; both stale -> keep what we had (callers
+        # that need freshness must check the last bar date themselves)
+        if fb_bars and (not bars or str(fb_bars[-1]["t"]) > str(bars[-1]["t"])):
+            bars = fb_bars
     if not bars:
         raise ConnectorError(f"marketdata daily_bars: no bars for {symbol}")
     return bars[-days:] if days else bars

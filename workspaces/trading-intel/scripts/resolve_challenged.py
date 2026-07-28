@@ -304,10 +304,20 @@ def main() -> int:
         out.append(rec)
     if not args.dry_run:
         conn.commit()
-    print(json.dumps({"resolved": len([o for o in out if "decision" in o]),
+    n_resolved = len([o for o in out if "decision" in o])
+    n_failed = len([o for o in out if o.get("error") == "no_resolution"])
+    print(json.dumps({"resolved": n_resolved,
                       "expired_hygiene": expired,
+                      "llm_failures": n_failed,
                       "dry_run": bool(args.dry_run), "model": MODEL,
                       "generated_at": _now(), "resolutions": out}, indent=1))
+    # FAIL LOUD: attempts made and every one died (expired CLI login, model outage).
+    # 2026-07-27 this exact state exited 0 — the chain logged "ok: resolve_challenged"
+    # over 9 straight `claude -p` failures and the resolver silently stalled for days.
+    if n_failed and not n_resolved:
+        print(f"FATAL: all {n_failed} resolution attempts failed (claude -p auth/outage?)",
+              file=sys.stderr)
+        return 2
     return 0
 
 

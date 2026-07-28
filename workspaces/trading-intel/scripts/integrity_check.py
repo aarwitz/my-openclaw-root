@@ -119,6 +119,36 @@ def data_reality(conn) -> list[dict]:
     except Exception:
         pass
 
+    # UNMARKABLE positions: mark_positions couldn't price an open position with any provider.
+    # That position's stops/falsifiers can never fire — it is unprotected capital. Root causes:
+    # ticker rename (BK->BNY sat unpriced 2026-07-08..28), delisting, symbol typo. mark_positions
+    # writes state/mark-skips.json every run; stale telemetry (>24h) is itself a failure.
+    try:
+        import json as _json
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz
+        p = _os.path.expanduser("~/.openclaw/state/mark-skips.json")
+        if not _os.path.exists(p):
+            out.append({"family": "data", "id": "data:unmarkable_positions", "status": "OK",
+                        "detail": "no mark-skips telemetry yet (mark_positions has not run since upgrade)"})
+        else:
+            with open(p) as fh:
+                sk = _json.load(fh)
+            age_h = ( _dt.now(_tz.utc)
+                      - _dt.fromisoformat(str(sk.get("generated_at","1970-01-01T00:00:00Z")).replace("Z","+00:00"))
+                    ).total_seconds() / 3600.0
+            names = sorted({s.get("ticker","?") for s in sk.get("skipped", [])})
+            if age_h > 24:
+                out.append({"family": "data", "id": "data:unmarkable_positions", "status": "RED",
+                            "detail": f"mark telemetry is {age_h:.0f}h old — mark_positions is not running"})
+            else:
+                out.append({"family": "data", "id": "data:unmarkable_positions",
+                            "status": "RED" if names else "OK",
+                            "detail": (f"open positions NO provider can price (unprotected — rename/delisting?): {', '.join(names)}"
+                                       if names else "all open positions priced on the last mark pass")})
+    except Exception:
+        pass
+
     # Debrief numeric decay: market_events whose observed_moves_json is empty of ticker moves.
     # Found 2026-07-23: every event after 07-17 recorded {} or index-only moves, silently starving
     # both research:big_story_direction and event-decomposition candidates. An LLM "remembering to
