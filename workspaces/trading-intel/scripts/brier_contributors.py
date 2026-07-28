@@ -201,6 +201,59 @@ def replay_mean_brier(
     }
 
 
+def diagnose_next_blocker(report: dict) -> dict:
+    """Classify the next calibration blocker from stored vs replayed Brier."""
+    actual = report.get("actual_mean_brier")
+    replay = report.get("replay", {})
+    current = replay.get("current_linker_replay") or {}
+    current_mean = current.get("mean_brier")
+    changed_links = int(current.get("changed_links") or 0)
+    target = 0.25
+
+    if actual is None or current_mean is None:
+        return {
+            "kind": "current_linker_behavior",
+            "target_mean_brier": target,
+            "rationale": "Insufficient resolved/replay data to separate linker behavior from calibration decay.",
+        }
+    if changed_links > 0 and current_mean < actual:
+        if current_mean < target <= actual:
+            rationale = (
+                "Current-linker replay beats the coin-flip threshold, but stored resolved rows still carry "
+                "historical links. Recomputing resolved-history links/posteriors is a gated data/model change."
+            )
+        else:
+            rationale = (
+                "Current-linker replay improves Brier, but not enough to beat the coin-flip threshold; relink "
+                "history first, then measure residual mechanism-specific calibration decay."
+            )
+        return {
+            "kind": "resolved_history_relinking",
+            "target_mean_brier": target,
+            "actual_mean_brier": actual,
+            "current_linker_replay_mean_brier": current_mean,
+            "changed_links": changed_links,
+            "rationale": rationale,
+        }
+    if current_mean >= actual:
+        return {
+            "kind": "current_linker_behavior",
+            "target_mean_brier": target,
+            "actual_mean_brier": actual,
+            "current_linker_replay_mean_brier": current_mean,
+            "changed_links": changed_links,
+            "rationale": "Current-linker replay does not improve the stored resolved cohort.",
+        }
+    return {
+        "kind": "mechanism_specific_calibration_decay",
+        "target_mean_brier": target,
+        "actual_mean_brier": actual,
+        "current_linker_replay_mean_brier": current_mean,
+        "changed_links": changed_links,
+        "rationale": "Linker replay is already reflected closely enough; remaining drag is mechanism-specific calibration decay.",
+    }
+
+
 def build_report(conn: sqlite3.Connection, days: int) -> dict:
     rows = load_resolved_rows(conn, days)
     ranked = rank_contributors(rows)
@@ -233,7 +286,7 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
         selection_reason = "Selected the highest total-Brier contributor by mechanism/regime/horizon."
 
     actual_mean = round(sum(float(row["brier_component"]) for row in rows) / len(rows), 6) if rows else None
-    return {
+    report = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "window_days": days,
         "resolved_predictions": len(rows),
@@ -280,6 +333,8 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
             ),
         },
     }
+    report["next_blocker"] = diagnose_next_blocker(report)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:

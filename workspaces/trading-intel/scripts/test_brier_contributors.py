@@ -94,6 +94,39 @@ class BrierContributorTests(unittest.TestCase):
         self.assertEqual(report["mean_brier"], 0.25)
         self.assertEqual(report["mechanism_counts"], {"(none)": 1})
 
+    def test_diagnose_next_blocker_resolved_history_relinking(self) -> None:
+        report = {
+            "actual_mean_brier": 0.253884,
+            "replay": {
+                "current_linker_replay": {
+                    "mean_brier": 0.242734,
+                    "changed_links": 88,
+                },
+            },
+        }
+
+        blocker = brier_contributors.diagnose_next_blocker(report)
+
+        self.assertEqual(blocker["kind"], "resolved_history_relinking")
+        self.assertEqual(blocker["actual_mean_brier"], 0.253884)
+        self.assertEqual(blocker["current_linker_replay_mean_brier"], 0.242734)
+        self.assertEqual(blocker["changed_links"], 88)
+
+    def test_diagnose_next_blocker_current_linker_behavior(self) -> None:
+        report = {
+            "actual_mean_brier": 0.253884,
+            "replay": {
+                "current_linker_replay": {
+                    "mean_brier": 0.254,
+                    "changed_links": 12,
+                },
+            },
+        }
+
+        blocker = brier_contributors.diagnose_next_blocker(report)
+
+        self.assertEqual(blocker["kind"], "current_linker_behavior")
+
 
 if __name__ == "__main__":
     unittest.main()

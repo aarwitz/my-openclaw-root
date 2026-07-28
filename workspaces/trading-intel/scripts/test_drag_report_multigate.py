@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import drag_report  # noqa: E402
 import gate_evaluator  # noqa: E402
 import signals_to_hypotheses  # noqa: E402
+import cleanup_legacy_blocked_intents  # noqa: E402
 
 
 LEGACY_REASON = (
@@ -58,6 +59,11 @@ def _make_sizing_conn() -> sqlite3.Connection:
         );
         CREATE TABLE risk_reviews (
           id TEXT, target_id TEXT, reviewed_at TEXT, limits_json TEXT, breaches_json TEXT
+        );
+        CREATE TABLE audits (
+          id TEXT PRIMARY KEY, timestamp TEXT, actor TEXT, entity_type TEXT, entity_id TEXT,
+          action TEXT, before_state TEXT, after_state TEXT, rationale_concise TEXT,
+          journal_ref TEXT, experiment_id TEXT
         );
         CREATE TABLE hypotheses (id TEXT, tickers TEXT);
         CREATE TABLE predictions (
@@ -254,6 +260,48 @@ class GateAttributionTests(unittest.TestCase):
         self.assertFalse(any("same class: risk:no sizing headroom" in s for s in summaries))
         legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
         self.assertTrue(any("can_buy_one_share=True" in item for item in legacy["evidence"]))
+
+    def test_cleanup_marks_no_sizing_headroom_as_historical_artifacts(self):
+        conn = _make_sizing_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO positions VALUES ('AAA', 'open', 1000.0, 10.0, 100.0)")
+        limits = {
+            "equity": 100000.0,
+            "gross_cap": 60000.0,
+            "current_gross": 61000.0,
+            "gross_headroom": 0.0,
+            "name_cap": 10000.0,
+            "name_existing": 0.0,
+            "name_headroom": 10000.0,
+            "sizing_block_attribution": {"binding_breaches": ["gross_exposure_cap"]},
+        }
+        for idx in range(4):
+            iid = f"ti-sizing-{idx}"
+            cur.execute(
+                "INSERT INTO trade_intents VALUES (?, 'open', 'blocked', '2099-01-01T00:00:00Z', ?, 'BBB', 1, '100.0')",
+                (iid, "risk:no sizing headroom (name=10000.0, gross=0.0)"),
+            )
+            cur.execute(
+                "INSERT INTO risk_reviews VALUES (?, ?, '2099-01-01T00:01:00Z', ?, ?)",
+                (f"rr-{idx}", iid, json.dumps(limits), json.dumps(["gross_exposure_cap"])),
+            )
+        conn.commit()
+
+        rows = cleanup_legacy_blocked_intents.eligible_rows(conn, 14)
+        audit_id = cleanup_legacy_blocked_intents.mark_historical_artifacts(conn, rows)
+        audit = cleanup_legacy_blocked_intents.read_back(conn)
+        signals = drag_report.collect_signals(conn.cursor())
+        conn.close()
+
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(audit_id, "AUDIT-TM-266-legacy-no-sizing-headroom")
+        self.assertEqual(audit["action"], drag_report.LEGACY_ARTIFACT_ACTION)
+        self.assertIn("historical_artifact", audit["after_state"])
+        self.assertFalse(any(signal["id"].startswith("legacy-blocked-risk-no-sizing") for signal in signals))
+        retained = next(signal for signal in signals if signal["id"].startswith("historical-artifacts-risk-no-sizing"))
+        self.assertEqual(retained["severity"], 5)
+        self.assertIn("intentionally retained", retained["summary"])
+        self.assertTrue(any("retained for audit/history" in item for item in retained["evidence"]))
 
     def test_stale_prediction_signal_ignores_not_yet_matured_trading_day_windows(self):
         conn = _make_conn()
