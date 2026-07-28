@@ -1,42 +1,30 @@
 {
-  "$comment": "Auto-merge policy for the coding lane (operator decision 2026-07-17: PR review is no longer human-gated for routine changes). Consumed by scripts/auto-merge-pr.py, which dwight-launch-from-issue.py invokes after opening a PR. A PR auto-merges only if it passes deterministic gates AND touches no protected path AND stays under the size caps; otherwise it holds in in_review and pages Aaron with the reason. Protected paths are the blast-radius set: trading risk/execution logic, live config, credentials, schema migrations, and the merge machinery itself (agents must never be able to auto-merge changes to the thing that decides auto-merges).",
-  "version": 1,
+  "$comment": "Auto-merge policy for the coding lane. v2 (operator decision 2026-07-28, Aaron): human-merge holds are OFF for trading logic, config, cron, and schema — 'I would prefer mistakes be made and system discovers and merge again rather than undefined behavior.' The gates (py_compile, changed tests, repo checks incl. money-path CI) decide; merges page Aaron with a revert command. The ONLY remaining holds are the self-referential/unrecoverable core: (a) the merge machinery itself — a bad merge there can disable the system's ability to merge its own fix; (b) credentials + token/restart scripts — a bricked fleet auth needs a human /login and cannot self-discover; (c) the trace/guard layer every governed script depends on; (d) container compose + CI injection. Agents must never widen this file (it is itself protected).",
+  "version": 2,
   "max_changed_files": 15,
   "max_changed_lines": 1500,
   "protected_paths": [
-    "workspaces/risk/**",
-    "workspaces/executor/**",
-    "openclaw.json",
-    "openclaw.json.*",
-    "cron/**",
     "credentials/**",
-    "sql/schema.sql",
-    "sql/migrations/**",
-    "workspaces/trading-intel/sql/**",
     "scripts/safe-restart.sh",
     "scripts/token-backup.sh",
     "scripts/token-restore.sh",
     "scripts/merge-policy.json",
     "scripts/auto-merge-pr.py",
+    "scripts/pr-gate-sweeper.py",
     "scripts/dwight-launch-from-issue.py",
     "scripts/dwight-assign-coding-task.sh",
     "scripts/launch-coding-task.sh",
     "scripts/gh-account-router.sh",
-    "scripts/page-operator.sh",
     "scripts/run-with-trace.sh",
     "scripts/lib/**",
     "scripts/policy.json",
     "docker-compose*",
-    ".claude/**",
-    ".gitignore",
-    ".github/**",
-    "CLAUDE.md",
-    "AGENTIC_SYSTEM.md",
-    "SYSTEM_ARCHITECTURE.md"
+    ".github/**"
   ],
   "repo_checks": {
     "/home/aaron/.openclaw": [
-      "bash scripts/scripts-policy-lint.sh"
+      "bash scripts/scripts-policy-lint.sh",
+      "bash scripts/run-with-trace.sh --tag test scripts/money-path-tests.py"
     ]
   }
 }

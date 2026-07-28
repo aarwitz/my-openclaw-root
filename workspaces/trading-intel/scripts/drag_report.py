@@ -1065,6 +1065,50 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     except sqlite3.Error as exc:
         print(f"WARN: selection-alpha signal skipped: {exc}", file=sys.stderr)
 
+    # --- Selection alpha BY HORIZON: the 2026-07-28 decomposition found the ONLY
+    # positive bucket is the longest horizon (trend_1_3m +129 bps avg) while every
+    # sub-month horizon loses (position_1_4w -340, swing/intraday worse). Keep the
+    # split visible so the loop measures whether the horizon tilt (rp-horizon-tilt-
+    # 20260728) works — or whether the pattern was small-n noise.
+    try:
+        rows = cur.execute(
+            "SELECT horizon, COUNT(*) n, AVG(realized_edge_vs_spy_bps) avg_bps "
+            "FROM attribution WHERE realized_edge_vs_spy_bps IS NOT NULL "
+            "GROUP BY horizon HAVING n >= 4"
+        ).fetchall()
+        long_h = [r for r in rows if r["horizon"] == "trend_1_3m"]
+        short_h = [r for r in rows if r["horizon"] != "trend_1_3m"]
+        if long_h and short_h:
+            lg = long_h[0]
+            worst = min(short_h, key=lambda r: r["avg_bps"])
+            spread = float(lg["avg_bps"]) - float(worst["avg_bps"])
+            if spread >= 200.0 and float(worst["avg_bps"]) < 0:
+                signals.append({
+                    "id": "selection-alpha-horizon-split",
+                    "severity": 55,
+                    "summary": (
+                        f"Horizon split persists: trend_1_3m {lg['avg_bps']:+.0f} bps (n={lg['n']}) vs "
+                        f"{worst['horizon']} {worst['avg_bps']:+.0f} bps (n={worst['n']}) — "
+                        "the desk only wins at its longest horizon"
+                    ),
+                    "evidence": [
+                        "per-horizon AVG(realized_edge_vs_spy_bps) from attribution (all-time)",
+                        "rp-horizon-tilt-20260728 proposes sizing sub-month intents at 0.5x; "
+                        "this signal tracks whether the split persists as n grows",
+                    ],
+                    "suggested_issue": {
+                        "title": "Horizon split in realized selection alpha: validate or refute with fresh closes",
+                        "acceptance_criteria": (
+                            "- Recompute per-horizon realized edge as new trades close (script, not prose)\n"
+                            "- If the split persists at n>=25 per bucket, escalate the horizon tilt; if it collapses, retire rp-horizon-tilt\n"
+                            "- Any sizing change ships as a rule_proposal (invariant #4)"
+                        ),
+                        "assignee": "Quant",
+                    },
+                })
+    except sqlite3.Error as exc:
+        print(f"WARN: horizon-split signal skipped: {exc}", file=sys.stderr)
+
     signals.sort(key=lambda s: -s["severity"])
     return signals
 
