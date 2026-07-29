@@ -49,6 +49,13 @@ These are the rules most likely to cause real damage if violated:
   always approval-gated. Structural/parameter changes to the trading logic flow as
   `rule_proposals` that a human approves; **agents never self-approve.** Task Manager state must
   never auto-launch non-code work or anything assigned to Aaron.
+- **The live tree never leaves its live branch** (operator rule 2026-07-29, after four
+  stranded-branch incidents in a week): `~/.openclaw` stays on `master`, the lidi repos stay
+  on `main`. Branch work belongs in isolated `git worktree`s, never in a live checkout. The
+  launcher refuses to start a run on an off-branch/dirty tree; the hourly sweeper self-heals
+  stranded trees (work pushed first); the health sweep crits. Never `git checkout` a branch
+  in a live tree — use `git worktree add` (TM-292 tracks moving the coding lane itself to
+  worktree isolation).
 - **Coding-lane merges are policy-gated, not human-gated** (operator decision 2026-07-17):
   `scripts/auto-merge-pr.py` merges routine PRs after deterministic gates (py-compile, changed
   tests, repo checks) and Telegrams Aaron a digest with a revert command. PRs touching protected
