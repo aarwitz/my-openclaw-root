@@ -405,3 +405,22 @@ incident postmortems) need no tag.
   rate. Next step is the full local-dump pass (2019→2025) before any feature wiring.
 - revalidate-by: 2026-10-14
 
+## 2026-07-29 — TM-265 kills WSB archive attention for sized/live use
+
+- **Full WSB submission archive replay completed for 2019-01-01..2025-12-31 and met
+  the sample-size gate.** Command:
+  `python3 workspaces/trading-intel/scripts/wsb_archive_ic.py run --after 2019-01-01 --before 2026-01-01 --cache /home/aaron/.openclaw/state/market-data-cache/wsb_posts_2019_2025.jsonl --output /home/aaron/.openclaw/tmp/wsb_ic_results_2019_2025_step10.json --rebalance-step 10`.
+  Inputs were `344,120` cached Arctic Shift WSB submissions; coverage was `1,231`
+  tickers with mentions and `1,121` price-covered/scored tickers. The panel produced
+  `183` rebalances; active cross-section size ranged from `25` to `139` names with
+  median `73`.
+- **Neither feature cleared the post-break graduation bar.** Overall `mention_share`
+  pooled IC was **0.0045** with **t=0.40** (`n=183`), and `mentions_z` pooled IC was
+  **-0.0117** with **t=-1.23** (`n=183`). Pre-2025: `mention_share` **IC 0.0001,
+  t=0.01** (`n=146`), `mentions_z` **IC -0.0136, t=-1.27** (`n=146`). Post-2025:
+  `mention_share` **IC 0.0215, t=0.84** (`n=37`), `mentions_z` **IC -0.0045,
+  t=-0.21** (`n=37`). The graduate bar required `|IC| >= 0.03` and `t >= 2` on
+  the post-2025 leg; both features missed.
+- **Verdict: KILL the WSB archive attention feature family for sized/live trading.**
+  No rule proposal filed. Keep the normalized cache and JSON result only as banked
+  historical evidence; do not wire `mention_share` or `mentions_z` into live scoring.
