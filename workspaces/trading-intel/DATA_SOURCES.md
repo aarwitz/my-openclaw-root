@@ -52,7 +52,7 @@ entries append to the Scout log at the bottom.
 
 | source | verdict | why |
 |---|---|---|
-| **Reddit archive dumps** (Academic Torrents / Arctic Shift) | **AUDITION** (TM-filed) | only true point-in-time history in budget: raw WSB/stocks posts 2019→2025, $0 |
+| **Reddit archive dumps** (Academic Torrents / Arctic Shift) | **KILLED** (TM-265 full replay) | full WSB submissions replay failed the IC bar; keep banked panel/cache only |
 | **ApeWisdom** | **COLLECTING** (4×/day cron since 2026-07-10, `social_mentions`) | free live cross-section (~17 subreddits+4chan), no history API — forward feed for the same family |
 | Finnhub social-sentiment | skip | not in our tier; paid tiers 403 it too (gh issue #557) |
 | StockTwits official | skip | API closed to new registrations; partner-only |
@@ -85,3 +85,13 @@ window **2024-10-01..2025-03-30**, forward horizon **21 trading days**, rebalanc
 only live leg (**IC 0.0499**, **t=2.45**, `n=27`). **Verdict: keep the family on WATCH,
 do not wire live yet.** A full local-dump 2019→2025 replay is still required before this
 graduates from scout to candidate feature.
+
+**2026-07-29 (TM-265 WSB full replay):** full WSB submission archive replay COMPLETE for
+**2019-01-01..2025-12-31** using `scripts/wsb_archive_ic.py run` against an Arctic Shift
+cache (`344,120` submissions, `1,231` tickers mentioned, `1,121` tickers scored). Default
+21-calendar-day lookback / 21-trading-day forward horizon / 21-trading-day rebalance panel
+produced `mention_share` pooled IC **0.0058**, **t=0.40** (`n=87`) and `mentions_z`
+pooled IC **-0.0115**, **t=-0.81** (`n=87`). Stability did not rescue it: pre-2025
+`mention_share` IC **0.0005**, `mentions_z` IC **-0.0157**; post-2025 `mention_share`
+IC **0.0260**, `mentions_z` IC **0.0047**, both low-t. **Verdict: family KILLED for
+sized/live use; keep only the banked panel/cache as historical evidence.**
