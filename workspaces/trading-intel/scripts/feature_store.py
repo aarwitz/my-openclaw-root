@@ -282,14 +282,19 @@ def _drop_incomplete_today(bars):
     COMPLETE closes only — an intraday refresh (2026-07-24: 493 rows/88 tickers polluted by a
     mid-session run) would stamp partial-day features (ret_1d on a half-day print, shifted SMAs)
     that live decisions consume but the backtest never saw. Drop the last bar whenever it is
-    today AND the session is open."""
+    today and today's close has NOT happened yet — "is_open" alone let the 08:52 PRE-OPEN
+    refresh keep partial pre-market bars (2026-07-29: 105 leaked rows). Today's bar is only
+    trustworthy after today's close."""
     if not bars:
         return bars
     try:
         from datetime import datetime, timezone
         from connectors.marketdata import market_clock
-        today = datetime.now(timezone.utc).astimezone().date().isoformat()
-        if str(bars[-1].get("t", ""))[:10] >= today[:10] and market_clock().get("is_open"):
+        now_et = datetime.now(timezone.utc).astimezone()
+        today = now_et.date().isoformat()
+        clock = market_clock()
+        session_closed_today = (not clock.get("is_open")) and now_et.hour >= 16
+        if str(bars[-1].get("t", ""))[:10] >= today[:10] and not session_closed_today:
             return bars[:-1]
     except Exception:
         pass  # clock unavailable -> keep bars (scheduled runs are post-close/pre-open anyway)

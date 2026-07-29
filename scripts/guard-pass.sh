@@ -51,8 +51,12 @@ movers = [f"{r['ticker']} {r['unrealized_pnl_pct']:+.1f}%" for r in db.execute(
     "SELECT ticker, unrealized_pnl_pct FROM positions WHERE state != 'closed' AND unrealized_pnl_pct IS NOT NULL "
     "ORDER BY ABS(unrealized_pnl_pct) DESC LIMIT 3")]
 gross = db.execute("SELECT SUM(ABS(COALESCE(current_value, qty*cost_basis))) FROM positions WHERE state != 'closed'").fetchone()[0] or 0
+# Pending rule_proposals: Aaron asked (2026-07-29) where to even SEE these —
+# surface them in the digest whenever any await a decision.
+props = [r["id"] for r in db.execute("SELECT id FROM rule_proposals WHERE status='proposed' ORDER BY created_at")]
+ptxt = f" | 📋 proposals awaiting Aaron: {len(props)} ({', '.join(props[:3])}{'…' if len(props) > 3 else ''})" if props else ""
 print(f"🛡 guard {'' if eq is None else f'— equity ${eq[0]:,.0f}'} | day P&L {'' if att is None else f'{att[0]:+.0f} trade / {att[1]:+.0f} yield'} | "
-      f"{npos} names, gross ${gross:,.0f}, cash ${eq[1]:,.0f} | intents today: {ints or 'none'} | biggest: {', '.join(movers)}")
+      f"{npos} names, gross ${gross:,.0f}, cash ${eq[1]:,.0f} | intents today: {ints or 'none'} | biggest: {', '.join(movers)}{ptxt}")
 PYEOF
 )
 [[ -n "${FAILED:-}" ]] && DIGEST="$DIGEST | ⚠ failed: $FAILED"
