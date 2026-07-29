@@ -90,6 +90,16 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
 
 ## Runtime topology
 
+- **THIS MACHINE IS `RSL`** (`hostname` = RSL). It is not a remote host — never `ssh aaron@RSL`
+  (2026-07-29: two agents independently ssh'd into the machine they were already on and
+  concluded a deploy source was unreachable). Everything below runs HERE: the gateway
+  container, the tm.lidisolutions.ai worker source + deploys (`~/repos/lidi-task-manager`,
+  deploy ONLY via `scripts/deploy-tm.sh`), and the lidi-solutions site source + deploys
+  (`~/repos/lidi-solutions`, deploy via `scripts/publish-trader-intel.sh`). Provenance is
+  asserted, not remembered: `scripts/provenance-check.py` (in the health sweep) verifies
+  host identity, every live checkout's branch/cleanliness/sync, and that live deployments
+  report a git sha known to their repo (`/api/version`, `/version.json`).
+
 - **One containerized gateway** (`openclaw-gateway`, host `127.0.0.1:18789`, compose:
   `docker-compose.openclaw.yml`). **All** fleet agents run *inside this single container* — there is
   no process boundary per agent. `~/.openclaw` is bind-mounted at the same absolute path, so

@@ -56,6 +56,15 @@ if ! npm run build --silent; then
   exit 1
 fi
 
+# Provenance stamp (2026-07-29): every deploy carries the git sha it was built
+# from, served at /version.json. provenance-check.py compares it to origin/main —
+# closing the "what code is actually live?" blindness (the deploy-source hunt of
+# 07-28/29 was unanswerable without this).
+GIT_SHA="$(git -C "$LIDI_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+printf '{"sha":"%s","built_at":"%s","repo":"lidi-solutions"}\n' \
+  "$GIT_SHA" "$(date -u +%FT%TZ)" > dist/version.json
+echo "[publish] stamped dist/version.json sha=$GIT_SHA"
+
 echo "[publish] wrangler pages deploy dist (project=lidi-solutions)"
 # Capture full output to a tempfile so we keep the actual exit code AND can show
 # the last lines without piping through tail (which would mask the exit code).

@@ -649,12 +649,36 @@ def check_dev_lane():
     return finding("dev_lane", "ok", "main==master, no unshipped issue branches, no stranded launches")
 
 
+def check_provenance():
+    """Where is the code running from? (2026-07-29: a week of stranded branches,
+    an ssh into the host we were already on, and an unanswerable 'what commit is
+    deployed?'.) Delegates to scripts/provenance-check.py: host identity, every
+    live checkout on its expected branch/clean/synced, deployed shas match git."""
+    try:
+        import subprocess as sp
+        r = sp.run([f"{ROOT}/scripts/run-with-trace.sh", "--tag", "verify",
+                    f"{ROOT}/scripts/provenance-check.py", "--json"],
+                   capture_output=True, text=True, timeout=180)
+        out = r.stdout[r.stdout.index("{"):r.stdout.rindex("}") + 1]
+        rep = json.loads(out)
+    except Exception as e:
+        return finding("provenance", "crit", f"provenance-check unrunnable: {e}")
+    bad = [c["check"] + ": " + c["detail"][:90] for c in rep["checks"] if c["status"] == "FAIL"]
+    unv = [c["check"] for c in rep["checks"] if c["status"] == "UNVERIFIABLE"]
+    if bad:
+        return finding("provenance", "crit", "; ".join(bad[:4]))
+    if unv:
+        return finding("provenance", "warn",
+                       f"repos+host OK; deploys not yet stamped (unverifiable): {', '.join(unv)}")
+    return finding("provenance", "ok", "host identity, all live checkouts, and deployed shas verified")
+
+
 CHECKS = [
     check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
-    check_integrity, check_dev_lane,
+    check_integrity, check_dev_lane, check_provenance,
 ]
 
 

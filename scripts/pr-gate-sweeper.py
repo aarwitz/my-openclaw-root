@@ -26,7 +26,15 @@ import subprocess
 from datetime import datetime, timezone
 
 REPOS = [
-    {"slug": "aarwitz/my-openclaw-root", "path": "/home/aaron/.openclaw"},
+    {"slug": "aarwitz/my-openclaw-root", "path": "/home/aaron/.openclaw", "live_branch": "master"},
+]
+# Branch self-heal covers every LIVE checkout (each has been found stranded on a
+# work branch at least once: openclaw 07-27, lidi-solutions TM-213,
+# lidi-task-manager 07-29). PR gating stays openclaw-only — the merge policy's
+# protected paths are openclaw-shaped.
+HEAL_ONLY = [
+    {"path": "/home/aaron/repos/lidi-solutions", "live_branch": "main"},
+    {"path": "/home/aaron/repos/lidi-task-manager", "live_branch": "main"},
 ]
 MIN_AGE_MIN = 10
 GATE = "/home/aaron/.openclaw/scripts/auto-merge-pr.py"
@@ -37,14 +45,14 @@ def sh(cmd, timeout=900):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
-def heal_live_tree(path: str) -> dict | None:
+def heal_live_tree(path: str, live_branch: str = "master") -> dict | None:
     """Self-heal a live tree left on a work branch (2026-07-27: fleet ran an
     issue branch for 22h). Guards: tree clean, no in-flight git op, last commit
     quiet >60min (a lane run is never that quiet), work branch pushed to origin
-    BEFORE switching so nothing is lost. Then checkout master + ff-pull."""
+    BEFORE switching so nothing is lost. Then checkout the live branch + ff-pull."""
     import os
     branch = sh(["git", "-C", path, "branch", "--show-current"]).stdout.strip()
-    if branch in ("master", ""):
+    if branch in (live_branch, ""):
         return None
     if sh(["git", "-C", path, "status", "--porcelain"]).stdout.strip():
         return {"tree": path, "branch": branch, "skipped": "dirty tree — human decision"}
@@ -55,20 +63,24 @@ def heal_live_tree(path: str) -> dict | None:
     if quiet_min < 60:
         return {"tree": path, "branch": branch, "skipped": f"recent commits ({quiet_min:.0f}m) — lane may be live"}
     sh(["git", "-C", path, "push", "origin", branch])            # preserve work first
-    co = sh(["git", "-C", path, "checkout", "master"])
+    co = sh(["git", "-C", path, "checkout", live_branch])
     if co.returncode != 0:
         return {"tree": path, "branch": branch, "error": co.stderr.strip()[:200]}
-    sh(["git", "-C", path, "pull", "--ff-only", "origin", "master"])
+    sh(["git", "-C", path, "pull", "--ff-only", "origin", live_branch])
     sh(["/home/aaron/.openclaw/scripts/run-with-trace.sh", "--tag", "cron",
         "/home/aaron/.openclaw/scripts/page-operator.sh", "live-tree-self-healed",
-        f"{path} was left on branch '{branch}' — pushed it to origin and restored master (work preserved)."])
+        f"{path} was left on branch '{branch}' — pushed it to origin and restored {live_branch} (work preserved)."])
     return {"tree": path, "branch": branch, "healed": True}
 
 
 def main() -> int:
     results = []
     for repo in REPOS:
-        h = heal_live_tree(repo["path"])
+        h = heal_live_tree(repo["path"], repo.get("live_branch", "master"))
+        if h:
+            results.append(h)
+    for tree in HEAL_ONLY:
+        h = heal_live_tree(tree["path"], tree["live_branch"])
         if h:
             results.append(h)
     for repo in REPOS:
