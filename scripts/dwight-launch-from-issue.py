@@ -837,6 +837,21 @@ def run(argv: List[str]) -> int:
 
     original_branch = git_current_branch(repo) if args.execute else None
 
+    # OPERATOR RULE (2026-07-29): the live tree launches from its live branch, clean —
+    # or not at all. TM-288/291 both ran into a checkout left dirty/off-branch by a
+    # sibling run and finished as uncommitted work with no PR (invisible to the
+    # sweeper). Fail fast with a clear reason instead of cross-contaminating.
+    if args.execute:
+        expected = "master" if repo.rstrip("/").endswith(".openclaw") else "main"
+        dirt = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+                              capture_output=True, text=True, check=False).stdout.strip()
+        if original_branch != expected or dirt:
+            print(f"REFUSING launch: {repo} is on '{original_branch}' (expected {expected}) "
+                  f"with {len(dirt.splitlines()) if dirt else 0} dirty file(s). "
+                  "Another run is active or a prior run left debris — recover the tree first "
+                  "(pr-gate-sweeper self-heals hourly).", file=sys.stderr)
+            return 3
+
     completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
     output = (completed.stdout or "") + (completed.stderr or "")
     if completed.stdout:
