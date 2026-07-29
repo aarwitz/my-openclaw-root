@@ -28,7 +28,7 @@ entries append to the Scout log at the bottom.
 | Candidate | Verdict | Why / expected value |
 |---|---|---|
 | **Options positioning (evaluated 2026-07-03)** | **AUDITION FREE, then Massive Options** | Target features: put/call vol + OI ratios, IV rank, 25Δ skew, net premium flow (daily, per underlying). Plan: (1) ThetaData FREE tier (1yr EOD hist, 20req/min — needs operator signup) → IC screen on ~100 names; (2) if any \|IC\|≥0.03 → Massive Options Developer $79/mo (4yr hist, flat files, same vendor/connector) → full FDR backtest 2022-26; (3) permanent slot only if it passes the standard bar. REJECTED: Unusual Whales (vendor-precomputed, not point-in-time reproducible, priciest), Databento OPRA (pay-per-volume institutional overkill for EOD aggregates) |
-| **Reddit retail sentiment (apewisdom/free or SocialGrep)** | ADD (cheap) | complements X attention; WSB mention velocity had real 2021-24 signal in meme/mid-caps — exactly where X dilutes; forward-collect + backtest what history exists |
+| **Reddit retail sentiment (apewisdom/free or SocialGrep)** | **KILLED for sized/live use** | TM-265 full WSB archive replay missed the post-2025 IC/t bar; keep existing forward collection only as advisory/history unless a different construction gets separately validated |
 | **Congressional trading (QuiverQuant ~$500/yr, or free STOCK Act scrapes)** | TRIAL (cheap) | 30-45d disclosure lag blunts it; published alpha modest at our horizon. Worth one backtest column, not a subscription commitment until it passes FDR |
 | **Google Trends (free)** | ADD (free) | search attention per name; free history via pytrends; cheap experiment alongside X |
 | **Daily short interest (Ortex $$$/S3)** | HOLD | our biweekly Massive SI already earns a slot; daily adds most in squeeze regimes — revisit if a squeeze-mechanism proposal passes |
@@ -89,9 +89,11 @@ graduates from scout to candidate feature.
 **2026-07-29 (TM-265 WSB full replay):** full WSB submission archive replay COMPLETE for
 **2019-01-01..2025-12-31** using `scripts/wsb_archive_ic.py run` against an Arctic Shift
 cache (`344,120` submissions, `1,231` tickers mentioned, `1,121` tickers scored). Default
-21-calendar-day lookback / 21-trading-day forward horizon / 21-trading-day rebalance panel
-produced `mention_share` pooled IC **0.0058**, **t=0.40** (`n=87`) and `mentions_z`
-pooled IC **-0.0115**, **t=-0.81** (`n=87`). Stability did not rescue it: pre-2025
-`mention_share` IC **0.0005**, `mentions_z` IC **-0.0157**; post-2025 `mention_share`
-IC **0.0260**, `mentions_z` IC **0.0047**, both low-t. **Verdict: family KILLED for
+21-calendar-day lookback / 21-trading-day forward horizon / 10-trading-day rebalance panel
+produced `183` rebalances with active cross-section median `73` names. `mention_share`
+pooled IC was **0.0045**, **t=0.40** and `mentions_z` pooled IC was **-0.0117**,
+**t=-1.23**. Stability did not rescue it: pre-2025 `mention_share` **IC 0.0001,
+t=0.01**, `mentions_z` **IC -0.0136, t=-1.27**; post-2025 `mention_share`
+**IC 0.0215, t=0.84**, `mentions_z` **IC -0.0045, t=-0.21**. The post-break graduate
+bar was `|IC| >= 0.03` and `t >= 2`; both features missed. **Verdict: family KILLED for
 sized/live use; keep only the banked panel/cache as historical evidence.**
