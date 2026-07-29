@@ -38,6 +38,14 @@ RISK_REDUCING_ACTIONS = {"exit", "trim"}
 OPEN_POSITION_STATES = ("opening", "open", "scaling", "trimming", "closing")
 PENDING_INTENT_STATES = ("approved", "submitted", "partial")
 EXITING_INTENT_STATES = ("proposed", "critic_review", "risk_review", "approved", "submitted", "partial")
+NO_SIZING_CLASS = "risk:no sizing headroom (name=N, gross=N)"
+NO_SIZING_ROOT_CAUSES = (
+    "gross_exposure_cap",
+    "minimum_share_price",
+    "pending_risk_reserve",
+    "stale_exits",
+    "queue_ordering",
+)
 
 # --- Money-awareness (the objective) --------------------------------------
 # The report was blind to P&L/deployment/SPY-alpha, so the improvement loop
@@ -60,7 +68,7 @@ def normalize_block_reason(reason: str) -> str:
     """Collapse per-intent detail so identical failure classes group together."""
     reason = (reason or "").strip()
     if reason.startswith("risk:no sizing headroom"):
-        return "risk:no sizing headroom (name=N, gross=N)"
+        return NO_SIZING_CLASS
     reason = re.sub(r"\[[^\]]*\]", "", reason)
     reason = re.sub(r"\d+(\.\d+)?", "N", reason)
     return reason[:90] or "(no reason recorded)"
@@ -177,9 +185,14 @@ def latest_risk_review_limits(conn: sqlite3.Connection, intent_id: str) -> dict:
         limits = json.loads(row["limits_json"] or "{}")
     except (json.JSONDecodeError, TypeError):
         limits = {}
+    try:
+        breaches = json.loads(row["breaches_json"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        breaches = []
     return {
         "reviewed_at": row["reviewed_at"],
         "limits": limits,
+        "breaches": breaches if isinstance(breaches, list) else [],
         "breaches_json": row["breaches_json"],
     }
 
@@ -322,6 +335,124 @@ def current_gross_sizing_snapshot(conn: sqlite3.Connection, ticker: str, price: 
     }
 
 
+def _fmt_money(value: object) -> str:
+    try:
+        return f"${float(value):.2f}"
+    except (TypeError, ValueError):
+        return "$unknown"
+
+
+def no_sizing_root_cause_counts(root_causes: dict) -> dict[str, int]:
+    counts = {cause: 0 for cause in NO_SIZING_ROOT_CAUSES}
+    for cause, data in root_causes.items():
+        counts[cause] = int(data.get("count") or 0)
+    return counts
+
+
+def sizing_headroom_root_cause(
+    review: dict,
+    sizing: dict,
+    current: dict,
+) -> tuple[str, str]:
+    """Classify the exact live input that keeps a no-headroom row binding.
+
+    Stored risk reviews say what bound the original gate hit. For fresh drag we
+    also need a live-current answer, otherwise old rows can look like new risk
+    pressure. Use current portfolio state first, and only fall back to the
+    original review if current inputs are unavailable.
+    """
+    limits = review.get("limits", {})
+    gross_attr = limits.get("gross_exposure_attribution") or {}
+    sizing_attr = limits.get("sizing_block_attribution") or {}
+    breaches = list(sizing_attr.get("binding_breaches") or review.get("breaches") or [])
+    price = float(sizing.get("entry_price") or sizing_attr.get("min_one_share_notional") or 0.0)
+    if current.get("available"):
+        gross_headroom = float(current.get("gross_headroom") or 0.0)
+        name_headroom = float(current.get("name_headroom") or 0.0)
+        pending_new = float(current.get("pending_new_risk_notional") or 0.0)
+        pending_exits = float(current.get("pending_risk_reducing_notional") or 0.0)
+        current_gross = float(current.get("current_gross") or 0.0)
+        gross_cap = float(current.get("gross_cap") or 0.0)
+
+        gross_without_pending = max(0.0, current_gross - pending_new)
+        gross_headroom_without_pending = max(0.0, gross_cap - gross_without_pending)
+        if price > 0 and pending_new > 0 and gross_headroom < price <= gross_headroom_without_pending:
+            return (
+                "pending_risk_reserve",
+                (
+                    f"pending new-risk reserve {_fmt_money(pending_new)} leaves live gross headroom "
+                    f"{_fmt_money(gross_headroom)} below min share {_fmt_money(price)}"
+                ),
+            )
+
+        if price > 0 and pending_exits > 0 and gross_headroom < price <= gross_headroom + pending_exits:
+            return (
+                "stale_exits",
+                (
+                    f"pending risk-reducing exits/trims {_fmt_money(pending_exits)} would free enough gross "
+                    f"headroom for min share {_fmt_money(price)}"
+                ),
+            )
+
+        if not current.get("slot_ok"):
+            return (
+                "queue_ordering",
+                (
+                    f"new-name slot queue is full at {current.get('concurrent_names')}/"
+                    f"{current.get('max_positions')}"
+                ),
+            )
+
+        if price > 0 and 0 < gross_headroom < price and name_headroom >= price:
+            return (
+                "minimum_share_price",
+                (
+                    f"min share {_fmt_money(price)} exceeds live gross headroom "
+                    f"{_fmt_money(gross_headroom)}; name headroom {_fmt_money(name_headroom)} is not binding"
+                ),
+            )
+
+        if "gross_exposure_cap" in breaches or gross_headroom <= 0:
+            return (
+                "gross_exposure_cap",
+                (
+                    f"live gross exposure {_fmt_money(current.get('current_gross'))}/"
+                    f"{_fmt_money(current.get('gross_cap'))} leaves gross headroom "
+                    f"{_fmt_money(gross_headroom)}"
+                ),
+            )
+
+        if "name_concentration_cap" in breaches or (price > 0 and name_headroom < price):
+            return (
+                "name_concentration_cap",
+                f"live name headroom {_fmt_money(name_headroom)} is below min share {_fmt_money(price)}",
+            )
+
+        return (
+            "unknown_current_headroom",
+            f"live can_buy_one_share={current.get('can_buy_one_share')} but no known sizing input matched",
+        )
+
+    if "gross_exposure_cap" in breaches:
+        return (
+            "gross_exposure_cap",
+            (
+                f"stored review gross {_fmt_money(limits.get('current_gross'))}/"
+                f"{_fmt_money(limits.get('gross_cap'))}; live snapshot unavailable={current.get('reason')}"
+            ),
+        )
+    if gross_attr.get("pending_new_risk_notional"):
+        return (
+            "pending_risk_reserve",
+            (
+                f"stored review pending new-risk reserve "
+                f"{_fmt_money(gross_attr.get('pending_new_risk_notional'))}; "
+                f"live snapshot unavailable={current.get('reason')}"
+            ),
+        )
+    return ("unknown_snapshot_unavailable", f"live snapshot unavailable={current.get('reason')}")
+
+
 def concurrent_name_snapshot(conn: sqlite3.Connection) -> dict:
     contributors: dict[str, set[str]] = {}
     try:
@@ -458,6 +589,7 @@ def classify_risk_block(row: sqlite3.Row) -> dict:
         )
         gross_attr = limits.get("gross_exposure_attribution") or {}
         sizing_attr = limits.get("sizing_block_attribution") or {}
+        root_cause, root_detail = sizing_headroom_root_cause(review, sizing, current)
         blocked_at_bits = [
             f"reviewed_at={review.get('reviewed_at') or 'unknown'}",
             f"requested={sizing.get('size', 'unknown')}@{sizing.get('entry_price', 'unknown')} notional={sizing.get('notional', 'unknown')}",
@@ -506,8 +638,11 @@ def classify_risk_block(row: sqlite3.Row) -> dict:
             "active": active,
             "class_key": f"{class_prefix}{normalize_block_reason(reason)}",
             "summary_key": normalize_block_reason(reason),
+            "root_cause": root_cause,
+            "root_detail": root_detail,
             "evidence": (
                 f"intent {row['id']} action={row['action']} blocked as {reason}; "
+                f"root_cause={root_cause}; {root_detail}; "
                 f"{evidence_prefix}; " + "; ".join(blocked_at_bits)
             ),
         }
@@ -770,24 +905,71 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
             bucket_set = active_classes if classified["active"] else legacy_false_positives
             bucket = bucket_set.setdefault(
                 classified["class_key"],
-                {"count": 0, "summary_key": classified["summary_key"], "evidence": []},
+                {
+                    "count": 0,
+                    "summary_key": classified["summary_key"],
+                    "evidence": [],
+                    "intent_ids": [],
+                    "root_causes": {},
+                },
             )
             bucket["count"] += 1
+            if len(bucket["intent_ids"]) < 8:
+                bucket["intent_ids"].append(row["id"])
             if len(bucket["evidence"]) < 3:
                 bucket["evidence"].append(classified["evidence"])
+            root_cause = classified.get("root_cause")
+            if root_cause:
+                root_bucket = bucket["root_causes"].setdefault(
+                    root_cause,
+                    {"count": 0, "representative_intent_ids": [], "details": []},
+                )
+                root_bucket["count"] += 1
+                if len(root_bucket["representative_intent_ids"]) < 5:
+                    root_bucket["representative_intent_ids"].append(row["id"])
+                root_detail = classified.get("root_detail")
+                if root_detail and len(root_bucket["details"]) < 3:
+                    root_bucket["details"].append(root_detail)
 
         for key, meta in sorted(active_classes.items(), key=lambda kv: -kv[1]["count"]):
             count = meta["count"]
             if count < 3:
                 continue  # noise floor: a class must recur to be a signal
+            sizing_attr = None
+            if meta["summary_key"] == NO_SIZING_CLASS:
+                sizing_attr = {
+                    "class": meta["summary_key"],
+                    "fresh_still_binding_count": count,
+                    "representative_intent_ids": meta["intent_ids"][:5],
+                    "root_cause_counts": no_sizing_root_cause_counts(meta["root_causes"]),
+                    "root_causes": dict(
+                        sorted(
+                            meta["root_causes"].items(),
+                            key=lambda kv: (-kv[1]["count"], kv[0]),
+                        )
+                    ),
+                }
             signals.append({
                 "id": f"blocked-{slugify(meta['summary_key'])}"[:64],
                 "severity": min(95, 40 + count * 4),
                 "summary": f"{count} intents blocked in {BLOCK_LOOKBACK_DAYS}d by the same class: {meta['summary_key']}",
                 "evidence": [
                     f"trade_intents state='blocked', class '{meta['summary_key']}', count={count} over {BLOCK_LOOKBACK_DAYS}d",
+                    f"representative_intent_ids={','.join(meta['intent_ids'][:5])}",
+                    *(
+                        [
+                            "root cause counts: "
+                            + ", ".join(
+                                f"{cause}={cause_count}"
+                                for cause, cause_count in sizing_attr["root_cause_counts"].items()
+                            )
+                        ]
+                        if sizing_attr
+                        else []
+                    ),
                     *meta["evidence"],
                 ],
+                **({"sizing_headroom_attribution": sizing_attr} if sizing_attr else {}),
                 "suggested_issue": {
                     "title": f"Eliminate recurring intent-block class: {meta['summary_key'][:70]}",
                     "acceptance_criteria": (
@@ -804,6 +986,20 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                 continue
             disposition = legacy_artifact_disposition(cur.connection, meta["summary_key"])
             if disposition:
+                sizing_attr = None
+                if meta["summary_key"] == NO_SIZING_CLASS:
+                    sizing_attr = {
+                        "class": meta["summary_key"],
+                        "historical_artifact_count": count,
+                        "representative_intent_ids": meta["intent_ids"][:5],
+                        "root_cause_counts": no_sizing_root_cause_counts(meta["root_causes"]),
+                        "root_causes": dict(
+                            sorted(
+                                meta["root_causes"].items(),
+                                key=lambda kv: (-kv[1]["count"], kv[0]),
+                            )
+                        ),
+                    }
                 signals.append({
                     "id": f"historical-artifacts-{slugify(meta['summary_key'])}"[:64],
                     "severity": 5,
@@ -825,8 +1021,10 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                             f"{count} residual blocked rows still re-evaluate to pass under the current gate stack "
                             "or current portfolio state"
                         ),
+                        f"representative_intent_ids={','.join(meta['intent_ids'][:5])}",
                         *meta["evidence"],
                     ],
+                    **({"sizing_headroom_attribution": sizing_attr} if sizing_attr else {}),
                     "suggested_issue": None,
                 })
                 continue

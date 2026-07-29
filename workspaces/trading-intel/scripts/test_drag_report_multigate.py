@@ -261,6 +261,58 @@ class GateAttributionTests(unittest.TestCase):
         legacy = next(signal for signal in signals if "legacy false positives" in signal["summary"])
         self.assertTrue(any("can_buy_one_share=True" in item for item in legacy["evidence"]))
 
+    def test_collect_signals_attributes_fresh_no_sizing_headroom_root_cause(self):
+        conn = _make_sizing_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO positions VALUES ('AAA', 'open', 1000.0, 10.0, 100.0)")
+        limits = {
+            "equity": 1750.0,
+            "gross_cap": 1050.0,
+            "current_gross": 1000.0,
+            "gross_headroom": 50.0,
+            "name_cap": 175.0,
+            "name_existing": 0.0,
+            "name_headroom": 175.0,
+            "gross_exposure_attribution": {
+                "position_gross": 1000.0,
+                "pending_new_risk_notional": 0.0,
+                "pending_risk_reducing_notional": 0.0,
+                "open_orders": [],
+            },
+            "sizing_block_attribution": {
+                "min_one_share_notional": 100.0,
+                "binding_breaches": ["gross_exposure_cap"],
+            },
+        }
+        for idx in range(3):
+            iid = f"ti-fresh-sizing-{idx}"
+            cur.execute(
+                "INSERT INTO trade_intents VALUES (?, 'open', 'blocked', '2099-01-01T00:00:00Z', ?, 'BBB', 1, '100.0')",
+                (iid, "risk:no sizing headroom (name=175.0, gross=50.0)"),
+            )
+            cur.execute(
+                "INSERT INTO risk_reviews VALUES (?, ?, '2099-01-01T00:01:00Z', ?, ?)",
+                (f"rr-fresh-{idx}", iid, json.dumps(limits), json.dumps(["gross_exposure_cap"])),
+            )
+        conn.commit()
+
+        signals = drag_report.collect_signals(conn.cursor())
+        conn.close()
+
+        signal = next(signal for signal in signals if signal["id"] == "blocked-risk-no-sizing-headroom-name-n-gross-n")
+        attr = signal["sizing_headroom_attribution"]
+        self.assertEqual(attr["fresh_still_binding_count"], 3)
+        self.assertEqual(
+            attr["representative_intent_ids"],
+            ["ti-fresh-sizing-0", "ti-fresh-sizing-1", "ti-fresh-sizing-2"],
+        )
+        self.assertEqual(attr["root_causes"]["minimum_share_price"]["count"], 3)
+        self.assertEqual(attr["root_cause_counts"]["pending_risk_reserve"], 0)
+        self.assertEqual(attr["root_cause_counts"]["stale_exits"], 0)
+        self.assertEqual(attr["root_cause_counts"]["queue_ordering"], 0)
+        self.assertTrue(any("representative_intent_ids=ti-fresh-sizing-0" in item for item in signal["evidence"]))
+        self.assertTrue(any("minimum_share_price=3" in item for item in signal["evidence"]))
+
     def test_cleanup_marks_no_sizing_headroom_as_historical_artifacts(self):
         conn = _make_sizing_conn()
         cur = conn.cursor()
