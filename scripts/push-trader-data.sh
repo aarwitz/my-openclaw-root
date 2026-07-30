@@ -7,13 +7,13 @@ set -uo pipefail
 # Fast data-only publish: regenerates the trader-intel snapshot (data.json) and
 # pushes it to the Cloudflare KV namespace TRADER_DATA, which the Pages Function
 # /api/trader-data serves to the app. This decouples data freshness from code
-# deploys (publish-trader-intel.sh) — a KV put takes seconds, a full deploy
+# deploys (deploy-lidi-solutions.sh) — a KV put takes seconds, a full deploy
 # takes minutes and counts against Pages deploy limits.
 #
 # Intended cadence: every 10 minutes during US market hours (host cron), plus
 # it runs harmlessly off-hours (snapshot just re-reads the same state).
 #
-# Auth: same strategy as publish-trader-intel.sh — wrangler OAuth session
+# Auth: same strategy as deploy-lidi-solutions.sh — wrangler OAuth session
 # preferred, credentials/cloudflare API token as fallback.
 #
 # Exit codes: 0 pushed, 1 snapshot/push failed, 2 environment missing.

@@ -31,7 +31,7 @@ it). Never `ssh aaron@RSL` — on 2026-07-29 two agents independently ssh'd into
 they were already on and concluded a deploy source was "unreachable". Everything deploys
 from HERE: the tm.lidisolutions.ai worker from `~/repos/lidi-task-manager` (only via
 `~/.openclaw/scripts/deploy-tm.sh`), the lidisolutions.ai site from `~/repos/lidi-solutions`
-(via `~/.openclaw/scripts/publish-trader-intel.sh`). When unsure what code is live, run
+(via `~/.openclaw/scripts/deploy-lidi-solutions.sh`). When unsure what code is live, run
 `~/.openclaw/scripts/run-with-trace.sh --tag verify ~/.openclaw/scripts/provenance-check.py`
 — never guess from grep.
 

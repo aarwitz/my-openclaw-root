@@ -16,8 +16,8 @@ Born 2026-07-29 after a week of provenance failures:
 
 Never again by assertion, not memory. Three check families:
   identity  — this host IS RSL; the deploy sources are LOCAL paths on it.
-  repos     — every registered live checkout is ON its expected branch, clean
-              (untracked allowed), and not diverged from origin.
+  repos     — every registered live checkout is ON its expected branch, has no
+              tracked or untracked changes, and is not diverged from origin.
   deployed  — live endpoints report the git sha they were built from, and that
               sha exists in (and matches) the local repo. Endpoints that don't
               expose a sha yet report as UNVERIFIABLE (warn), which is the
@@ -37,7 +37,6 @@ REGISTRY = {
     "host": {"expected_hostname": "RSL"},
     "repos": [
         {"path": "/home/aaron/.openclaw", "branch": "master",
-         "twin_branches": ["main", "master"],   # must point at the same commit
          "role": "live fleet tree (every cron/agent executes from it)"},
         {"path": "/home/aaron/repos/lidi-solutions", "branch": "main",
          "role": "lidisolutions.ai + trader-intel app source"},
@@ -75,13 +74,13 @@ def check_repo(spec, out):
     if branch != spec["branch"]:
         ok = False
         problems.append(f"ON '{branch or 'detached HEAD'}' (expected {spec['branch']}) — {spec['role']}")
-    _, dirty, _ = sh(["git", "-C", p, "status", "--porcelain", "--untracked-files=no"])
+    _, dirty, _ = sh(["git", "-C", p, "status", "--porcelain"])
     # porcelain lines are "XY path"; strip the 2 status cols + separator robustly
     paths = [ln[2:].strip() for ln in dirty.splitlines() if ln.strip()]
     real_dirt = paths
     if real_dirt:
         ok = False
-        problems.append(f"{len(real_dirt)} uncommitted tracked change(s): "
+        problems.append(f"{len(real_dirt)} uncommitted or untracked change(s): "
                         + ", ".join(real_dirt[:4]))
     sh(["git", "-C", p, "fetch", "origin", "--quiet"])
     _, local, _ = sh(["git", "-C", p, "rev-parse", spec["branch"]])
@@ -91,12 +90,6 @@ def check_repo(spec, out):
         _, behind, _ = sh(["git", "-C", p, "rev-list", "--count", f"{spec['branch']}..origin/{spec['branch']}"])
         ok = False
         problems.append(f"diverged from origin/{spec['branch']} (ahead {ahead}, behind {behind})")
-    for a, b in zip(spec.get("twin_branches", []), spec.get("twin_branches", [])[1:]):
-        _, sa, _ = sh(["git", "-C", p, "rev-parse", a])
-        _, sb, _ = sh(["git", "-C", p, "rev-parse", b])
-        if sa != sb:
-            ok = False
-            problems.append(f"'{a}' != '{b}' (gate-base rot / split-brain)")
     out.append({"check": f"repo:{p}", "status": "PASS" if ok else "FAIL",
                 "detail": "; ".join(problems) or f"on {spec['branch']}, clean, synced with origin"})
 

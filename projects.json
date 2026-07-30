@@ -23,7 +23,7 @@
         "bash ~/.openclaw/scripts/test-coding-lane-regression.sh",
         "python3 ~/.openclaw/scripts/system-health-sweep.py"
       ],
-      "deploy": "~/.openclaw/scripts/run-with-trace.sh --tag manual ~/.openclaw/scripts/publish-trader-intel.sh",
+      "deploy": "~/.openclaw/scripts/run-with-trace.sh --tag manual ~/.openclaw/scripts/deploy-lidi-solutions.sh",
       "status": "active",
       "notes": "Trading logic changes flow as rule_proposals (human-gated); web/app code via normal PR lane.",
       "sprint_id": 5,

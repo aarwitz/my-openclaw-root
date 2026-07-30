@@ -189,7 +189,7 @@ def prepare_launch_repo(
             "the live fleet may be running non-base code"
         )
     dirty = subprocess.run(
-        ["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+        ["git", "-C", repo, "status", "--porcelain"],
         capture_output=True, text=True, check=False,
     )
     if dirty.returncode != 0:

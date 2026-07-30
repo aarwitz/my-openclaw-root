@@ -102,7 +102,7 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
   concluded a deploy source was unreachable). Everything below runs HERE: the gateway
   container, the tm.lidisolutions.ai worker source + deploys (`~/repos/lidi-task-manager`,
   deploy ONLY via `scripts/deploy-tm.sh`), and the lidi-solutions site source + deploys
-  (`~/repos/lidi-solutions`, deploy via `scripts/publish-trader-intel.sh`). Provenance is
+  (`~/repos/lidi-solutions`, deploy via `scripts/deploy-lidi-solutions.sh`). Provenance is
   asserted, not remembered: `scripts/provenance-check.py` (in the health sweep) verifies
   host identity, every live checkout's branch/cleanliness/sync, and that live deployments
   report a git sha known to their repo (`/api/version`, `/version.json`).

@@ -416,7 +416,7 @@ cron→SQLite migration in this build). The overseer drives the desk:
     serves it. Host cron cadence: every 10 min during market hours, hourly
     off-hours. Runtime jobs never write the tracked `lidi-solutions` checkout;
     a KV put takes seconds and has no deploy-count cost.
-  - **Full deploy (code changes):** `scripts/publish-trader-intel.sh`
+  - **Full site deploy (code changes):** `scripts/deploy-lidi-solutions.sh`
     (vite build + `wrangler pages deploy`) or the canonical GitHub `main`
     deployment. The reviewed `data.json` baked into that commit is the app's
     fallback when `/api/trader-data` is unavailable.

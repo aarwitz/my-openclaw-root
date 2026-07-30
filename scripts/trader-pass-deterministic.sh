@@ -217,7 +217,7 @@ run_step "app_snapshot" 20 python3 workspaces/developer/scripts/audit_app_snapsh
 if [[ "$PUBLISH" -eq 1 && "$SKIP_SNAPSHOT" -eq 0 ]]; then
   # Data-only publish (KV put via /api/trader-data, seconds) — since 2026-07-02 the
   # app reads data from KV, so passes no longer need a full vite build + Pages
-  # deploy. Code changes still ship via publish-trader-intel.sh (manual / on merge).
+  # deploy. Site code changes ship via deploy-lidi-solutions.sh (manual / on merge).
   run_step "publish" 120 bash "$OPENCLAW/scripts/push-trader-data.sh"
 fi
 
