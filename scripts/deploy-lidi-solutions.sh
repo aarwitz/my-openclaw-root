@@ -88,11 +88,18 @@ verify_production() {
   [[ "$live_sha" == "$GIT_SHA" ]] ||
     fatal "live /version.json reports '$live_sha', expected '$GIT_SHA'"
 
-  for route in / /solutions /solutions/tapp /solutions/trader_intel/app/; do
+  for route in / /solutions /solutions/tapp; do
     status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
       --max-time 15 "$PRODUCTION_ORIGIN$route")"
     [[ "$status" == "200" ]] || fatal "$route returned HTTP $status"
   done
+
+  local trader_redirect=""
+  trader_redirect="$(curl --silent --show-error --output /dev/null \
+    --write-out '%{http_code} %{redirect_url}' --max-time 15 \
+    "$PRODUCTION_ORIGIN/solutions/trader_intel/app/")"
+  [[ "$trader_redirect" == "302 $PRODUCTION_ORIGIN/solutions/trader_intel/app/login" ]] ||
+    fatal "protected Trader Intel route returned '$trader_redirect'"
 
   status="$(curl --silent --show-error --output "$DEPLOY_TMP/trader-live.json" \
     --write-out '%{http_code}' --max-time 15 "$PRODUCTION_ORIGIN/api/trader-live")"
