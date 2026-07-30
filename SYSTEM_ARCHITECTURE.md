@@ -410,14 +410,16 @@ cron→SQLite migration in this build). The overseer drives the desk:
 - **Snapshot publishing is two-tier (2026-07-02):** data freshness is decoupled
   from code deploys.
   - **Data-only (fast, primary):** `scripts/push-trader-data.sh` regenerates
-    `data.json` and pushes it to the Cloudflare KV namespace `TRADER_DATA`
+    the runtime snapshot under `~/.openclaw/state/trader-intel-snapshot/` and
+    pushes `data.json` to the Cloudflare KV namespace `TRADER_DATA`
     (id `bc7ab40d…`); the Pages Function `/api/trader-data` (session-gated)
     serves it. Host cron cadence: every 10 min during market hours, hourly
-    off-hours. A KV put takes seconds and has no deploy-count cost.
+    off-hours. Runtime jobs never write the tracked `lidi-solutions` checkout;
+    a KV put takes seconds and has no deploy-count cost.
   - **Full deploy (code changes):** `scripts/publish-trader-intel.sh`
-    (vite build + `wrangler pages deploy`), still run by each trader pass.
-    The `data.json` baked into the deploy is the app's fallback when
-    `/api/trader-data` is unavailable.
+    (vite build + `wrangler pages deploy`) or the canonical GitHub `main`
+    deployment. The reviewed `data.json` baked into that commit is the app's
+    fallback when `/api/trader-data` is unavailable.
 - **Live paper-ledger bridge (same-origin Pages Function):**
   - `/api/trader-live` returns internal-paper equity, positions, orders, and
     ledger history from the session-gated `TRADER_DATA` snapshot.

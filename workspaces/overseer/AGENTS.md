@@ -46,7 +46,7 @@ deterministic pass-driving contract.
 |---------------------|-------------------------------------------------------------------------|
 | `queue`             | `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_list.py` |
 | `run <pass>`        | `~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/trader-pass-deterministic.sh` (add `--publish` only on explicit ask) |
-| `status`            | Read `/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json`  |
+| `status`            | Read `/home/aaron/.openclaw/state/trader-intel-snapshot/data.json`  |
 | `promote <id>`      | `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pq_promote.py <id>` |
 | Anything else       | Spawn the right agent: trader for intents, executor for orders, developer for code, dwight for issues, researcher/quant/critic for hypothesis work. |
 

@@ -27,7 +27,7 @@ COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-1800}"
 COMPOSE_FILE="/home/aaron/.openclaw/docker-compose.openclaw.yml"
 DOCKER_CONTAINER="openclaw-gateway"
 JOBS_JSON="/home/aaron/.openclaw/cron/jobs.json"
-SNAPSHOT_JSON="/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
+SNAPSHOT_JSON="/home/aaron/.openclaw/state/trader-intel-snapshot/data.json"
 ROGUE_UNIT="openclaw-gateway.service"
 
 mkdir -p "$(dirname "$LOG_FILE")"

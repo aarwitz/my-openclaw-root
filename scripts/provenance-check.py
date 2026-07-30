@@ -40,10 +40,6 @@ REGISTRY = {
          "twin_branches": ["main", "master"],   # must point at the same commit
          "role": "live fleet tree (every cron/agent executes from it)"},
         {"path": "/home/aaron/repos/lidi-solutions", "branch": "main",
-         # regenerated every 10 min by push-trader-data (mjs snapshot + chat sync) —
-         # perpetually dirty by design, so exempt from the dirty-tree assertion
-         "generated": ["public/solutions/trader_intel/app/data.json",
-                       "public/solutions/trader_intel/app/chats/"],
          "role": "lidisolutions.ai + trader-intel app source"},
         {"path": "/home/aaron/repos/lidi-task-manager", "branch": "main",
          "role": "tm.lidisolutions.ai worker source (deploys from THIS machine)"},
@@ -80,10 +76,9 @@ def check_repo(spec, out):
         ok = False
         problems.append(f"ON '{branch or 'detached HEAD'}' (expected {spec['branch']}) — {spec['role']}")
     _, dirty, _ = sh(["git", "-C", p, "status", "--porcelain", "--untracked-files=no"])
-    gen = tuple(spec.get("generated", []))
     # porcelain lines are "XY path"; strip the 2 status cols + separator robustly
     paths = [ln[2:].strip() for ln in dirty.splitlines() if ln.strip()]
-    real_dirt = [q for q in paths if not (gen and q.startswith(gen))]
+    real_dirt = paths
     if real_dirt:
         ok = False
         problems.append(f"{len(real_dirt)} uncommitted tracked change(s): "

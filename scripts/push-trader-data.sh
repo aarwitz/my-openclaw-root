@@ -20,7 +20,8 @@ set -uo pipefail
 
 LIDI_REPO="${TRADER_INTEL_REPO:-${LIDI:-$HOME/repos/lidi-solutions}}"
 KV_NAMESPACE_ID="bc7ab40d92b04c8f90e9448b4896689a"
-DATA_JSON="$LIDI_REPO/public/solutions/trader_intel/app/data.json"
+RUNTIME_DIR="${TRADER_INTEL_RUNTIME_DIR:-$HOME/.openclaw/state/trader-intel-snapshot}"
+DATA_JSON="$RUNTIME_DIR/data.json"
 WRANGLER_OAUTH="$HOME/.config/.wrangler/config/default.toml"
 CRED_DIR="$HOME/.openclaw/credentials/cloudflare"
 TOKEN_FILE="$CRED_DIR/account-token"
@@ -29,6 +30,18 @@ META_FILE="$CRED_DIR/account-meta.json"
 if [[ ! -d "$LIDI_REPO" ]]; then
   echo "FATAL: lidi-solutions repo missing at $LIDI_REPO" >&2
   exit 2
+fi
+mkdir -p "$RUNTIME_DIR"
+
+# Direct host-cron publishes share the same writer lock as trader/guard/learning
+# passes. A publish invoked by trader-pass inherits the already-held lock.
+if [[ "${TRADING_MONEY_LOCK_HELD:-0}" != "1" ]]; then
+  exec 9>"$HOME/.openclaw/state/trading-money-path.lock"
+  if ! flock -w 60 9; then
+    echo "FATAL: timed out waiting for trading money-path lock" >&2
+    exit 1
+  fi
+  export TRADING_MONEY_LOCK_HELD=1
 fi
 
 if [[ -f "$WRANGLER_OAUTH" ]]; then
@@ -44,18 +57,23 @@ fi
 cd "$LIDI_REPO" || exit 2
 
 # D53: sample the desk book's intraday equity before each snapshot so the
-# 1D/1W chart has real points (10-min cadence from this cron).
-python3 "$LIDI_REPO/../../.openclaw/workspaces/executor/scripts/sim_broker.py" mark --book desk >/dev/null 2>&1 || true
+# 1D/1W chart has real points. Fail closed: publishing a stale account mark
+# behind a fresh generated_at is forbidden.
+if ! python3 "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" mark --book desk >/dev/null; then
+  echo "FATAL: internal paper mark failed; refusing KV publish" >&2
+  exit 1
+fi
 
-# 2026-07-24: rebuild the python base EVERY cycle, not only during trader passes.
-# The mjs overlay recycles brokerPositions from the existing data.json, so a single
-# stale/bad base write (e.g. a pass racing a code deploy) used to persist zeroed
-# Day-P&L for hours. Non-fatal: on failure the overlay recycles the previous base.
-python3 "$HOME/.openclaw/workspaces/developer/scripts/snapshot_builder.py" --out "$DATA_JSON" \
-  || echo "WARN: python base rebuild failed; overlay will recycle previous base" >&2
+# Rebuild the Python ledger base every cycle. Failure is fatal: the JS overlay
+# rejects missing/stale bases and must never recycle an old account snapshot.
+if ! python3 "$HOME/.openclaw/workspaces/developer/scripts/snapshot_builder.py" --out "$DATA_JSON"; then
+  echo "FATAL: internal paper base snapshot failed" >&2
+  exit 1
+fi
 
 echo "[push-data] snapshot"
-if ! node scripts/snapshot-trader-intel.mjs; then
+if ! TRADER_INTEL_OUT_DIR="$RUNTIME_DIR" TRADER_INTEL_SKIP_DIST=1 \
+    node scripts/snapshot-trader-intel.mjs; then
   echo "FATAL: snapshot-trader-intel.mjs failed" >&2
   exit 1
 fi
@@ -70,6 +88,11 @@ import json,sys
 d=json.load(open('$DATA_JSON'))
 assert d.get('contract_version','').startswith('trader-intel/'), 'bad contract'
 assert d.get('generated_at'), 'no generated_at'
+assert (d.get('topology') or {}).get('topology_version') == 'v5', 'bad topology'
+assert (d.get('broker') or {}).get('source') == 'sim', 'bad broker source'
+assert 'account_number' not in (d.get('broker') or {}), 'raw account identifier'
+assert (d.get('broker') or {}).get('pnl_available') is True, 'inconsistent broker pnl'
+assert not ((d.get('broker') or {}).get('normalization_issues') or []), 'position normalization issues'
 bp = d.get('brokerPositions') or []
 # direction is set unconditionally by the canonical enrichment — its absence means
 # the enrichment never ran and Day P&L would render \$0.00 across the app.
@@ -77,6 +100,11 @@ assert (not bp) or all(p.get('direction') for p in bp), 'brokerPositions missing
 "; then
   echo "FATAL: data.json failed contract sanity check — not pushing" >&2
   exit 1
+fi
+
+if [[ "${TRADER_DATA_DRY_RUN:-0}" == "1" ]]; then
+  echo "[push-data] dry-run ok; validated snapshot not uploaded"
+  exit 0
 fi
 
 # Pin wrangler: bare `npx wrangler` resolves via PATH — under host cron that hit the

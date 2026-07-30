@@ -38,7 +38,7 @@ from broker import get_account, list_orders, list_positions  # noqa: E402  (adap
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 DEFAULT_OUT = Path(
-    "/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
+    os.path.expanduser("~/.openclaw/state/trader-intel-snapshot/data.json")
 )
 CRON_JOBS_PATH = Path(os.path.expanduser("~/.openclaw/cron/jobs.json"))
 CRON_RUNS_DIR = Path(os.path.expanduser("~/.openclaw/cron/runs"))

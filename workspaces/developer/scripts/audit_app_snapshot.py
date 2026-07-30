@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 DEFAULT_DATA_JSON = Path(
-    "/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
+    os.path.expanduser("~/.openclaw/state/trader-intel-snapshot/data.json")
 )
 FRESH_HOURS = 24
 RISK_TOLERANCE_PCT = 0.2

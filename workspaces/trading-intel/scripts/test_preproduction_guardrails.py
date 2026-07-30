@@ -518,6 +518,24 @@ class ShellContinuityTests(unittest.TestCase):
         self.assertLess(guard.index("gate_evaluator.py"), guard.index("execute_intent.py"))
         self.assertLess(guard.index("gate_risk_intents.py"), guard.index("execute_intent.py"))
 
+    def test_runtime_snapshots_never_mutate_the_website_checkout(self) -> None:
+        pipeline = (ROOT / "scripts/trader-pass-deterministic.sh").read_text()
+        publisher = (ROOT / "scripts/push-trader-data.sh").read_text()
+        provenance = (ROOT / "scripts/provenance-check.py").read_text()
+        overlay = Path(
+            "/home/aaron/repos/lidi-solutions/scripts/snapshot-trader-intel.mjs"
+        ).read_text()
+        tracked_path = "public/solutions/trader_intel/app/data.json"
+
+        self.assertIn("state/trader-intel-snapshot", pipeline)
+        self.assertIn("state/trader-intel-snapshot", publisher)
+        self.assertNotIn(tracked_path, pipeline)
+        self.assertNotIn(tracked_path, publisher)
+        self.assertIn("TRADER_INTEL_OUT_DIR", pipeline)
+        self.assertIn("TRADER_INTEL_OUT_DIR", publisher)
+        self.assertIn("TRADER_INTEL_SKIP_DIST", overlay)
+        self.assertNotIn('"generated": [', provenance)
+
     def test_postmortem_audit_ids_are_unique_per_hypothesis(self) -> None:
         first = write_postmortems._postmortem_id("H-ONE")
         second = write_postmortems._postmortem_id("H-TWO")
