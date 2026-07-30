@@ -143,6 +143,16 @@ def check_pages_architecture(out):
             project = json.loads(resp.read().decode())["result"]
         source = project.get("source") or {}
         config = source.get("config") or {}
+        canonical_id = (project.get("canonical_deployment") or {}).get("id")
+        deployments_req = urllib.request.Request(
+            f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/"
+            "lidi-solutions/deployments?page=1&per_page=25",
+            headers={"Authorization": f"Bearer {token}", "User-Agent": "provenance-check/1.0"},
+        )
+        with urllib.request.urlopen(deployments_req, timeout=15) as resp:
+            deployments_body = json.loads(resp.read().decode())
+        deployments = deployments_body.get("result") or []
+        deployment_total = (deployments_body.get("result_info") or {}).get("total_count")
     except Exception as exc:
         out.append({
             "check": "pages_architecture",
@@ -163,10 +173,16 @@ def check_pages_architecture(out):
         problems.append(f"preview deployment setting={config.get('preview_deployment_setting')!r}")
     if not expected_domains.issubset(set(project.get("domains") or [])):
         problems.append("expected Pages domains missing")
+    if deployment_total != 1 or [item.get("id") for item in deployments] != [canonical_id]:
+        problems.append(
+            f"Pages deployment inventory is not canonical-only "
+            f"(total={deployment_total}, listed={len(deployments)})"
+        )
     out.append({
         "check": "pages_architecture",
         "status": "FAIL" if problems else "PASS",
-        "detail": "; ".join(problems) or "Git source retained; automatic production/preview deploys disabled",
+        "detail": "; ".join(problems) or
+                  "Git source retained; automatic deploys disabled; one canonical deployment",
     })
 
     obsolete_url = "https://lidi-solutions.aaronhorowits97.workers.dev"
