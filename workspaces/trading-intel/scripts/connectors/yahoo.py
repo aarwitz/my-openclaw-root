@@ -1,8 +1,8 @@
 """Yahoo Finance connector — keyless backup for VIX, SPY, and treasury yields.
 
 We use the public v8/finance/chart endpoint with a browser User-Agent. This is
-intentionally a *backup* path: the primary data source for the regime classifier
-remains FRED + Alpaca. Yahoo is used when those fail.
+intentionally a *backup* path: the primary regime sources are FRED, Cboe, and
+Massive/FMP. Yahoo is used when those fail.
 """
 
 from __future__ import annotations

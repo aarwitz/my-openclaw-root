@@ -5,7 +5,6 @@ Use each skill's `SKILL.md` for invocation rules and `REFERENCE_FULL.md` only fo
 
 | Skill | Primary contract focus | Deep reference |
 |---|---|---|
-| alpaca | paper account readiness, positions/orders, live quote corroboration | workspace/skills/alpaca/REFERENCE_FULL.md |
 | browser_app_QA | browser UI evidence capture and verification handoff | workspace/skills/browser_app_QA/REFERENCE_FULL.md |
 | cloudflare | DNS/Pages/account ops with secret-safe minimal change workflow | workspace/skills/cloudflare/REFERENCE_FULL.md |
 | codex-execution-harness | execution-first implementation loop with mandatory validation evidence | workspace/skills/codex-execution-harness/REFERENCE_FULL.md |

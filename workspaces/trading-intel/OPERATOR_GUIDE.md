@@ -1,206 +1,147 @@
-# Operator Guide — Trading Intelligence
+# Operator Guide — AutoTrade
 
-Your daily interface with Druck via Telegram (`@druck_rsl_bot` in the Trading Desk group, topic Ask Druck, topic_id 641).
+Status: active. Reconciled 2026-07-30.
 
-Companion doc: `HUMAN_USE_GUIDE.md` for efficient prompt patterns, notification strategy, and system-to-system interfacing.
+AutoTrade is an internal-paper simulation. The owned SQLite ledger is the only
+account and execution surface; no external broker switch or fallback exists.
+Druck’s Telegram messages are narration, not the source of truth.
 
-Role split:
-- Druck (`trader`) is the Telegram chat front door, orchestrator, and trading-infrastructure developer.
-- `executor` is the deterministic execution lane and the only agent allowed to submit/cancel Alpaca orders.
+## Current posture
 
----
+- Strategy verdict: **NO EDGE / do not scale**. The robust 1,542-name replay
+  found zero FDR survivors and all 100 mechanisms are deprecated.
+- Open-risk authoring is quarantined. Cash is intentional while no robust
+  mechanism is active; idle-cash reduction is not a success target.
+- Existing paper positions remain subject to stops, falsifiers, horizons, risk,
+  reconciliation, marks, and attribution.
+- The locked forward shadow evaluation begins 2026-08-03 and must run at least
+  60 sessions without tuning from its outcomes.
 
-## System state right now
+Do not copy position counts or P&L from this document. Query current state:
 
-- **Status:** clean slate, no positions, no pauses, no active hypotheses.
-- **Regime:** not yet assessed. Druck needs to run a regime classification before opening new positions.
-- **First action:** ask Druck to assess the current regime and produce thesis candidates.
-
----
-
-## Starting a trading cycle
-
-### Step 1 — Regime assessment
-
-```
-@druck_rsl_bot
-Assess current regime using the live deterministic classifier. Pull SPY trend, VIX term structure,
-credit spreads, and yield curve. Snapshot the result to the DB and summarize.
+```bash
+python3 ~/.openclaw/workspaces/trader/scripts/summary_report.py
+python3 ~/.openclaw/workspaces/executor/scripts/sim_broker.py integrity --book desk
+python3 ~/.openclaw/workspaces/trading-intel/scripts/integrity_check.py
 ```
 
-Druck will read the regime rules from `regime_rules` and write a row to the `regime` table. You will see the current state (risk_on / neutral / caution / risk_off / crisis) and which signals drove it.
+Operational scripts must normally run through
+`~/.openclaw/scripts/run-with-trace.sh`.
 
-### Step 2 — Request thesis candidates
+## Telegram contract
 
-```
-@druck_rsl_bot
-Produce top 3 thesis candidates for this regime. Include evidence, expected edge vs
-SPY and 3% cash, and a concrete falsifier for each.
-```
+Druck sends at most one useful, action-first message per scheduled pass.
+“Pass completed,” “note sent,” raw IDs, and a second cron delivery receipt are
+bugs. A quiet pass is one short sentence. Health pages are separate,
+deterministic alerts.
 
-Druck follows the DRUCK_UPDATE format. Each candidate becomes a `hypothesis` row in state `draft`.
+Ask in plain language for:
 
-### Step 3 — Approve or reject
+- the current regime, ledger, exposure, and benchmark snapshot;
+- what changed in positions or cash and why;
+- the strongest research hypotheses and their falsifiers;
+- pending proposals or blocked pipeline state;
+- a fresh critic review or an exit/trim proposal.
 
-After critic review, Druck will present each hypothesis for your approval before sending execution requests to executor.
+Treat every Telegram number as a summary of canonical state. If it conflicts
+with the scripts above, the scripts/ledger win and the narration bug should be
+filed.
 
-```
-@druck_rsl_bot /approve hypo_abc123
-@druck_rsl_bot /reject hypo_abc123 rationale: too dependent on single data point
-```
+## Scheduled behavior
 
----
+Weekday passes run around 09:00, 09:30, 11:00, 13:30, and 15:30 ET. A pass:
 
-## Daily Telegram commands
+1. verifies the internal-paper-only architecture;
+2. serializes on the money-path lock;
+3. refreshes regime, valuation, signals, predictions, and reviews;
+4. applies protective exits through the normal gates;
+5. refuses new risk while robust active mechanism count is zero;
+6. executes only approved internal-paper intents;
+7. reconciles, marks, attributes, learns, and rebuilds the GUI snapshot;
+8. returns non-zero if any stage failed.
 
-| Command | What it does |
-|---|---|
-| `/summary` | Full system snapshot: regime, active hypotheses, open positions, intents, any pauses |
-| `/hypothesis [id]` | List all active hypotheses, or show one in detail |
-| `/intent [id]` | List open trade intents, or show one in detail |
-| `/approve <id>` | Approve a hypothesis or trade intent to advance it |
-| `/reject <id> [reason]` | Reject with a reason — written to audits |
-| `/exit <ticker>` | Request a market close on a position |
-| `/trim <ticker> <pct>` | Trim a position by a percentage |
-| `/regime` | Show the current regime snapshot and which signals are driving it |
-| `/critic <hypo_id>` | Request a fresh critic challenge on a hypothesis |
-| `/archivist` | Request the archivist to resolve any completed hypotheses |
-| `/audit [n]` | Show the last n audit rows (default 10) |
+The internal simulator fills only marketable limits immediately. It has no
+resting-order queue. An intent deferred while the market is closed is not an
+open order and must be freshly rechecked at the open.
 
----
+## Non-bypassable execution path
 
-## Understanding Druck's output
+New risk must follow:
 
-Every substantive Druck reply is structured as:
-
-```
-DRUCK_UPDATE
-request_id: <id or none>
-thesis: <1-3 line summary>
-evidence_with_sources:
-- <source + finding>
-expected_edge_vs_sp500: <daily/weekly/monthly/quarterly>
-expected_edge_vs_cash: <daily/weekly/monthly/quarterly>
-falsifier: <the condition that would prove this wrong>
-next_action: <what happens next and when>
-```
-
-When internal diagnostics are needed, Druck surfaces only the material trace needed to explain the decision. Keep the final Telegram reply compact and readable; suppress routine tool chatter and failure spillover.
-
----
-
-## Understanding pauses
-
-If Druck detects a problem, it opens a `system_pauses` row and enters `exits_trims_only` mode — no new opens or adds until resolved.
-
-Common triggers:
-- Broker/DB position divergence (Alpaca positions not reflected in the DB)
-- Stale regime snapshot (>36 hours old)
-- Missing critic review on a pending intent
-
-To see what's paused:
-```
-@druck_rsl_bot /summary
+```text
+ready hypothesis
+  → prediction created before the intent
+  → trader-authored intent
+  → substantive Critic review
+  → deterministic gates
+  → Risk review
+  → approved
+  → internal-paper execution
+  → fill/position lineage
+  → reconciliation and attribution
 ```
 
-To manually clear after you've verified the cause:
-```
-python3 ~/.openclaw/workspaces/trader/scripts/flatten_and_reset.py   # if positions need wiping
-```
-Or ask Druck to resolve and clear after you've confirmed the state is clean.
+Required gates include fresh sourced evidence, factor overlap, provenance,
+two developed/adjudicated critic challenges, explainability, size/slippage,
+stop rule, tranche consistency, and a pre-intent forecast with
+`p_correct >= 0.52`, positive P50, and positive Kelly sizing. Risk-reducing
+exit/trim intents are exempt from new-edge gates but still traverse execution,
+lineage, and reconciliation.
 
----
+## Proposals
 
-## Autonomous behavior (what Druck/executor do without prompting)
+No proposal is permission to change live parameters until it is decided and,
+where necessary, implemented/reviewed in code. List the live queue with:
 
-Per the schedule in `docs/05_IMPLEMENTATION_POLICY.md` section 3:
-
-| Time (US/Eastern) | What runs |
-|---|---|
-| 09:00 | Pre-market decision pass |
-| 09:30 | Market-open reaction pass |
-| 11:00 | Confirmation / invalidation pass |
-| 13:30 | Replacement / rotation pass |
-| 15:30 | Close-risk pass |
-| Event-driven | On Alpaca order/position events |
-| Sunday 09:00 | Weekly portfolio pattern extraction (Archivist) |
-
-Druck will post updates to Telegram at each pass if there is anything material to report. Executor handles broker-side submission/state sync during those passes.
-
-Execution timing default:
-- Executor should prefer resting broker-native limit/bracket-style order staging for approved price-sensitive setups instead of relying on you to notice an intraday dip manually.
-- The execution reference is [reference/execution_timing_framework.md](/home/aaron/.openclaw/workspaces/trading-intel/reference/execution_timing_framework.md).
-
-Whole-pipeline contract:
-- If you request "run the whole pipeline", Druck must execute researcher -> quant -> critic -> trader -> executor in that order.
-- A trader-only synthesis is not sufficient for whole-pipeline requests.
-- If any stage blocks, Druck should report the blocked stage and concrete failure reason.
-
-Practical meaning:
-- `09:00` builds the execution watchlist and defines entry bands.
-- `09:30` reacts to opening dislocations against that plan.
-- `11:00` and `13:30` reassess or rotate resting orders.
-- `15:30` cleans up stale resting buys and tightens close-risk posture.
-
-Minimum actionable quote context:
-- quote timestamp in UTC and ET,
-- session label (premarket/regular/after-hours),
-- move vs prior close,
-- move vs post-event reference,
-- hold/extend/fade reaction state.
-
-If any of these fields are missing, the setup should remain watch/blocked-data.
-
----
-
-## Approval gates — what Druck/executor check before submitting any trade
-
-Every trade intent must clear all of these before executor submits to Alpaca:
-
-1. Valid `hypothesis_id` in state `ready` or `active`
-2. Critic has reviewed and approved the hypothesis
-3. Data freshness: all source signals < 36 hours old
-4. Explainability: thesis + falsifier + provenance + counterargument all present
-5. Fill realism: sizing respects ADV fraction limits and includes slippage estimate
-6. Expected edge beats both SPY and 3% annualized cash yield after slippage
-7. Reconciliation gate: no open unresolved divergences
-
-If any gate fails, the intent stays in `draft` or `critic_review` and Druck tells you why.
-
----
-
-## Operator scripts
-
-Located at `~/.openclaw/workspaces/trader/scripts/`:
-
-| Script | Purpose |
-|---|---|
-| `summary_report.py` | Print the same output `/summary` generates — useful to verify DB state directly |
-| `flatten_and_reset.py` | Close all Alpaca positions at market and clear any active system pause |
-| `reconcile_legacy_positions.py` | Import pre-existing Alpaca positions into the DB as tracked legacy positions |
-| `../trading-intel/reference/validation_corpus/export_learning_queue.py` | Export resolved hypotheses to a review queue for corpus promotion |
-
----
-
-## Corpus growth loop (10-15 min/week)
-
-As Druck resolves hypotheses, you can promote high-quality outcomes into the validation corpus:
-
-1. `python3 reference/validation_corpus/export_learning_queue.py` — exports resolved outcomes to `tmp/learning_queue.jsonl`
-2. Review the queue; author good ones as raw cases in `reference/validation_corpus/raw_cases/`
-3. `python3 reference/validation_corpus/build_masked_from_raw.py` — converts to anonymized evaluation cases
-4. `python3 reference/validation_corpus/validate_corpus.py` — validates counts and schema
-
-See `reference/validation_corpus/CONTINUOUS_LEARNING_APPROVAL_LOOP.md` for full detail.
-
----
-
-## Authority hierarchy (what wins when things conflict)
-
-```
-~/.openclaw/SYSTEM_ARCHITECTURE.md (canonical)  >  01_OPERATING_AUTHORITY.md
-    >  03_EXECUTION_STATE_MACHINE.md  >  sql/schema.sql
-    >  04_SHARED_STATE_SCHEMA.md  >  05_IMPLEMENTATION_POLICY.md
+```bash
+python3 ~/.openclaw/workspaces/developer/scripts/apply_proposal.py --list
 ```
 
-Any change to these docs requires a `DECISION_LOG.md` entry.
+Decisions are explicit and audited:
+
+```bash
+python3 ~/.openclaw/workspaces/developer/scripts/apply_proposal.py \
+  --reject <proposal-id> --decider human --reason "<specific reason>"
+```
+
+Applying a proposal may only perform the narrow DB actions supported by the
+script; code/config changes still require review, tests, commit, and deployment.
+
+## Pauses and failures
+
+Do not wipe or flatten the book to clear a health finding. The legacy reset and
+reconciliation scripts were deliberately deleted because they could destroy
+lineage or recreate stale state.
+
+For a failure:
+
+1. run the integrity, summary, and simulator checks above;
+2. inspect the failing stage in the traced pass output;
+3. preserve the ledger and audit history;
+4. repair the smallest authoritative source;
+5. re-run money-path tests and reconciliation;
+6. verify the GUI snapshot and health sweep.
+
+Missing marks, foreign-key violations, matured unresolved predictions,
+closed trades without attribution, or a reintroduced broker path are critical.
+`NO_EDGE` is an honest strategy warning, not a machine outage.
+
+## Simulator limits
+
+The simulator models spread and participation but not queue position,
+stochastic partial fills, halts, name-specific borrow, dividend withholding,
+margin interest, options, or full intraday impact. Results are paper evidence,
+not live-execution equivalence.
+
+## Authority hierarchy
+
+```text
+SYSTEM_ARCHITECTURE.md
+  > docs/01_OPERATING_AUTHORITY.md
+  > docs/03_EXECUTION_STATE_MACHINE.md
+  > sql/schema.sql
+  > docs/04_SHARED_STATE_SCHEMA.md
+  > docs/05_IMPLEMENTATION_POLICY.md
+```
+
+Architecture changes require an entry in `DECISION_LOG.md`.

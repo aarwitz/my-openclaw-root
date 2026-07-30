@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bessent · compute_attribution.py
+"""Developer · compute_attribution.py
 
 Walk closed positions and produce attribution rows: realized portfolio return
 per horizon vs SPY benchmark return over the same window. Writes `attribution`
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 from connectors.marketdata import ConnectorError, daily_bars  # noqa: E402
 
@@ -42,17 +43,26 @@ def _parse(d: str | None) -> datetime | None:
     if not d:
         return None
     try:
-        dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
+        # Several early broker timestamps contain nanoseconds, while Python's
+        # datetime parser accepts microseconds. Truncate only the fractional
+        # component; preserve the timezone suffix.
+        normalized = re.sub(r"(\.\d{6})\d+(?=Z|[+-]\d\d:\d\d|$)", r"\1", d)
+        dt = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError:
         return None
     return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
 
-def _spy_return(open_dt: datetime, close_dt: datetime) -> float | None:
-    try:
-        bars = daily_bars("SPY", days=400)
-    except ConnectorError:
-        return None
+def _spy_return(
+    open_dt: datetime,
+    close_dt: datetime,
+    bars: list[dict] | None = None,
+) -> float | None:
+    if bars is None:
+        try:
+            bars = daily_bars("SPY", days=400)
+        except ConnectorError:
+            return None
     rows = sorted(bars, key=lambda b: b["t"])
     if not rows:
         return None
@@ -76,6 +86,68 @@ def _spy_return(open_dt: datetime, close_dt: datetime) -> float | None:
     return round(100.0 * (p1 - p0) / p0, 4)
 
 
+def _realized_return_from_fills(conn, position) -> tuple[float | None, str]:
+    """Reconstruct a closed position's realized return from its actual fills.
+
+    ``positions.unrealized_pnl_pct`` is a mark-time field. Early close paths
+    sometimes left it at zero or at the entry mark, so using it for realized
+    attribution silently rewrote losses as flat trades.
+    """
+    open_dt = _parse(position["opened_at"])
+    close_dt = _parse(position["closed_at"])
+    if not (open_dt and close_dt):
+        return None, "unparseable_position_window"
+    rows = conn.execute(
+        """
+        SELECT o.side, o.qty, o.avg_fill_price, o.filled_at
+        FROM orders o
+        JOIN trade_intents ti ON ti.id=o.trade_intent_id
+        WHERE ti.hypothesis_id=?
+          AND UPPER(o.symbol)=UPPER(?)
+          AND o.status='filled'
+          AND o.avg_fill_price IS NOT NULL
+        ORDER BY o.filled_at, o.broker_order_id
+        """,
+        (position["hypothesis_id"], position["ticker"]),
+    ).fetchall()
+    # Reconciliation can lag an immediate simulated fill by a few minutes.
+    grace_s = 10 * 60
+    fills = []
+    for row in rows:
+        filled_at = _parse(row["filled_at"])
+        if filled_at is None:
+            continue
+        if (filled_at - open_dt).total_seconds() < -grace_s:
+            continue
+        if (filled_at - close_dt).total_seconds() > grace_s:
+            continue
+        fills.append(row)
+
+    buy_qty = buy_cost = sell_qty = sell_proceeds = 0.0
+    for row in fills:
+        qty = float(row["qty"] or 0)
+        price = float(row["avg_fill_price"] or 0)
+        if qty <= 0 or price <= 0:
+            continue
+        if str(row["side"]).lower() == "buy":
+            buy_qty += qty
+            buy_cost += qty * price
+        elif str(row["side"]).lower() == "sell":
+            sell_qty += qty
+            sell_proceeds += qty * price
+    if buy_cost > 0 and sell_qty + 1e-6 >= buy_qty > 0:
+        return round((sell_proceeds / buy_cost - 1.0) * 100.0, 6), "filled_orders"
+
+    # Compatibility fallback for rows whose historical broker order was never
+    # captured. Require a real exit mark distinct from basis; a zero stale
+    # unrealized field is not admissible realized evidence.
+    basis = position["cost_basis"]
+    exit_price = position["current_price"]
+    if basis not in (None, 0) and exit_price is not None and float(exit_price) != float(basis):
+        return round((float(exit_price) / float(basis) - 1.0) * 100.0, 6), "exit_mark_fallback"
+    return None, "missing_terminal_fills"
+
+
 def _horizon_for(open_dt: datetime, close_dt: datetime) -> str:
     days = (close_dt - open_dt).total_seconds() / 86400.0
     if days < 1.5:
@@ -92,7 +164,7 @@ def _horizon_for(open_dt: datetime, close_dt: datetime) -> str:
 def process(conn) -> list[dict]:
     rows = conn.execute(
         "SELECT id, hypothesis_id, ticker, opened_at, closed_at, "
-        "pnl_slippage_adjusted, unrealized_pnl_pct, cost_basis, current_value "
+        "pnl_slippage_adjusted, unrealized_pnl_pct, cost_basis, current_price, current_value "
         "FROM positions WHERE state='closed' AND closed_at IS NOT NULL"
     ).fetchall()
     # Only skip positions already attributed WITH a realized edge; rows left NULL by the
@@ -101,6 +173,10 @@ def process(conn) -> list[dict]:
         "SELECT position_id FROM attribution "
         "WHERE position_id IS NOT NULL AND realized_edge_vs_spy_bps IS NOT NULL"
     )}
+    try:
+        spy_bars = daily_bars("SPY", days=400)
+    except ConnectorError:
+        spy_bars = []
     out = []
     for r in rows:
         if r["id"] in existing:
@@ -110,8 +186,8 @@ def process(conn) -> list[dict]:
         if not (open_dt and close_dt):
             continue
         horizon = _horizon_for(open_dt, close_dt)
-        port_ret = r["unrealized_pnl_pct"]  # nearest available; ideal: realized
-        spy_ret = _spy_return(open_dt, close_dt)
+        port_ret, return_source = _realized_return_from_fills(conn, r)
+        spy_ret = _spy_return(open_dt, close_dt, spy_bars)
         edge_bps = None
         if port_ret is not None and spy_ret is not None:
             edge_bps = round((float(port_ret) - float(spy_ret)) * 100.0, 1)  # pct → bps
@@ -121,6 +197,7 @@ def process(conn) -> list[dict]:
             "opened_at": r["opened_at"], "closed_at": r["closed_at"],
             "portfolio_return_pct": port_ret, "spy_return_pct": spy_ret,
             "realized_edge_vs_spy_bps": edge_bps,
+            "return_source": return_source,
         })
     return out
 

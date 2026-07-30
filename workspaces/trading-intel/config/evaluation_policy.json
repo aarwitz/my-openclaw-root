@@ -1,0 +1,23 @@
+{
+  "version": "preproduction_v1",
+  "created_at": "2026-07-30T00:00:00Z",
+  "development_validation": {
+    "start": "2020-06-18",
+    "status": "reused_and_contaminated_by_iteration",
+    "allowed_use": "debugging, candidate comparison, and regression checks",
+    "prohibited_claim": "untouched proof of production edge"
+  },
+  "forward_shadow_holdout": {
+    "start": "2026-08-03",
+    "minimum_end": "2026-10-30",
+    "minimum_sessions": 60,
+    "status": "locked_future_window",
+    "rules": [
+      "Freeze the evaluated mechanism set and thresholds before the first session.",
+      "Do not tune from outcomes inside the window.",
+      "Score every eligible signal, including no-trades and blocked trades.",
+      "Report date-clustered cost-net alpha, calibration, drawdown, and turnover.",
+      "Do not claim production edge before the minimum window completes."
+    ]
+  }
+}

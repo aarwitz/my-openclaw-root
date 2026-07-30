@@ -24,7 +24,7 @@ All policy and schema rules live at:
 - Own the product app contract (`data.json`) via `scripts/snapshot_builder.py`.
 - Own schema evolution: write migrations, update `sql/schema.sql`, keep canonical and live DB
   in sync.
-- Own data connectors (FRED, Alpaca market data, CBOE, Finnhub, NewsAPI, FMP) - wire missing
+- Own data connectors (Massive, FRED, CBOE, Finnhub, NewsAPI, FMP) - wire missing
   ones, monitor freshness, fix breakage.
 - Own the audit/watchdog scripts that detect pipeline stalls, snapshot staleness, benchmark
   drift, and broker-DB divergence beyond executor's reach.

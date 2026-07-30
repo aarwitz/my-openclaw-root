@@ -780,7 +780,7 @@ def main(argv=None) -> int:
     try:
         equity, day_pl = _equity_and_daypl()
     except ConnectorError as exc:
-        print(json.dumps({"error": f"alpaca_account: {exc}", "fail_closed": True,
+        print(json.dumps({"error": f"internal_paper_account: {exc}", "fail_closed": True,
                           "left_in_risk_review": ids}), file=sys.stderr)
         return EXIT_FAIL_LOUD
     if equity <= 0:

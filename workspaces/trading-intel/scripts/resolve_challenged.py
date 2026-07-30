@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/executor/scripts"))))
-from connectors.marketdata import daily_bars  # noqa: E402  (Massive-backed; Alpaca-free)
+from connectors.marketdata import daily_bars  # noqa: E402  (canonical market-data facade)
 
 DB_PATH = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 CLAUDE_BIN = os.path.expanduser("~/.local/bin/claude")

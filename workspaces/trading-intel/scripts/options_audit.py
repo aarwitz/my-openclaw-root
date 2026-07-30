@@ -133,7 +133,7 @@ def _spearman(xs, ys):
 
 def screen() -> None:
     """Pooled monthly cross-sectional IC of each option feature vs fwd 21d
-    SPY-relative return (prices via the existing FMP/Alpaca-backed store)."""
+    SPY-relative return (prices via the existing Massive/FMP-backed store)."""
     import mechanism_backtest as mb
     conn = sqlite3.connect(FEAT)
     tickers = [r[0] for r in conn.execute(

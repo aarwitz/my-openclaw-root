@@ -19,6 +19,7 @@ Core pieces:
 from __future__ import annotations
 
 import math
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Beta distribution (regularized incomplete beta, continued-fraction form)
@@ -113,6 +114,29 @@ def decay_weight(age_days: float, half_life_days: float) -> float:
     if age_days <= 0:
         return 1.0
     return 0.5 ** (age_days / half_life_days)
+
+
+def allocate_prediction_credit(links: list[dict[str, Any]]) -> list[tuple[dict[str, Any], float]]:
+    """Allocate one unit of outcome evidence across a prediction's mechanisms.
+
+    A prediction is one realized experiment, regardless of how many correlated
+    mechanisms were linked to it. Giving every link weight 1.0 manufactures
+    sample size and lets richer annotations learn faster than sparse ones.
+    Duplicate mechanism ids are removed and the remaining links share a total
+    credit budget of exactly one.
+    """
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for link in links:
+        mechanism_id = str(link.get("id") or "")
+        if not mechanism_id or mechanism_id in seen:
+            continue
+        seen.add(mechanism_id)
+        unique.append(link)
+    if not unique:
+        return []
+    weight = 1.0 / len(unique)
+    return [(link, weight) for link in unique]
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +250,11 @@ def return_band_v2(
         longer get the same band.
       * **P50** is nudged toward fair value by the margin of safety, scaled by how
         much reverts over the horizon and by valuation confidence, then hard-capped
-        to one reward unit so a noisy DCF can never dominate the causal edge.
+        to one reward unit so a noisy DCF can never dominate the predictive edge.
     """
     prof = HORIZON_PROFILE.get(horizon, HORIZON_PROFILE["swing_1_5d"])
     edge = 2.0 * p_correct - 1.0
-    causal_p50 = edge * prof["reward"]
+    predictive_p50 = edge * prof["reward"]
 
     val_pull = 0.0
     if margin_of_safety is not None:
@@ -238,7 +262,7 @@ def return_band_v2(
         conf = max(0.0, min(1.0, val_confidence))
         val_pull = (margin_of_safety * 100.0) * frac * conf
         val_pull = max(-prof["reward"], min(prof["reward"], val_pull))  # cap to one reward unit
-    p50 = causal_p50 + val_pull
+    p50 = predictive_p50 + val_pull
 
     if realized_vol_annual and realized_vol_annual > 0:
         days = HORIZON_DAYS.get(horizon, 3)

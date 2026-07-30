@@ -13,9 +13,9 @@ All four signals are computed deterministically from public sources. No model-de
 
 | Signal | Source | Computation |
 | --- | --- | --- |
-| `spy_trend` | Alpaca Market Data API (daily bars, `SPY`) | Close vs 200-day simple moving average; also 50-day vs 200-day cross. |
+| `spy_trend` | Massive daily bars with FMP failover (`SPY`) | Close vs 200-day simple moving average; also 50-day vs 200-day cross. |
 | `credit_spreads` | FRED series `BAMLH0A0HYM2` (ICE BofA US High Yield OAS), daily | Latest value plus 20-day delta. |
-| `vix_term_structure` | Alpaca Market Data (`VIX`, `VIX3M`) or CBOE published values | Ratio `VIX / VIX3M` (contango when `< 1.0`, backwardation when `> 1.0`). |
+| `vix_term_structure` | Cboe published values with yfinance failover (`VIX`, `VIX3M`) | Ratio `VIX / VIX3M` (contango when `< 1.0`, backwardation when `> 1.0`). |
 | `yield_curve` | FRED series `T10Y2Y` (10y - 2y Treasury), daily | Latest level in basis points, plus 60-day slope of the series. |
 
 Each signal is computed at the close of the prior US trading day. The `signals_json` payload

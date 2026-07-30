@@ -42,6 +42,7 @@ def _make_conn() -> sqlite3.Connection:
         "pct_deployed REAL, pct_blocked REAL, pct_idle REAL, pct_stale REAL, pct_waiting REAL, "
         "usd_blocked REAL, usd_idle REAL, usd_stale REAL, usd_waiting REAL, edge_rate REAL, loss_json TEXT)"
     )
+    cur.execute("CREATE TABLE mechanisms (id TEXT, status TEXT)")
     return conn
 
 
@@ -380,6 +381,7 @@ class GateAttributionTests(unittest.TestCase):
     def test_idle_cash_signal_exposes_structured_attribution(self):
         conn = _make_conn()
         cur = conn.cursor()
+        cur.execute("INSERT INTO mechanisms VALUES ('robust-edge', 'active')")
         cur.execute(
             "INSERT INTO capital_efficiency_snapshots VALUES ("
             "'2099-01-01T00:00:00Z', 100000, 45000, 55000, "
@@ -400,6 +402,18 @@ class GateAttributionTests(unittest.TestCase):
         self.assertEqual(attr["gates"]["expected_loss_usd"], 40)
         self.assertEqual(attr["waiting"]["expected_loss_usd"], 200)
         self.assertTrue(any("idle attribution from stored DB snapshot" in item for item in signal["evidence"]))
+
+    def test_idle_cash_is_not_drag_without_robust_active_edge(self):
+        conn = _make_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO capital_efficiency_snapshots VALUES ("
+            "'2099-01-01T00:00:00Z', 100000, 90000, 10000, "
+            "10, 0, 90, 0, 0, 0, 90000, 0, 0, 0, ?)",
+            (json.dumps({"idle_no_qualified_ideas": 5000}),),
+        )
+        self.assertIsNone(drag_report.idle_cash_drag_signal(cur))
+        conn.close()
 
     def test_signal_hypothesis_evidence_rows_are_gate_usable(self):
         now = "2099-01-01T00:00:00Z"

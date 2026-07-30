@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Market-data façade — the single seam for prices / quotes / clock.
 
-Backed by Massive (→ FMP), replacing the Alpaca market-data feed as the last step
-of the D52 cutover (2026-07-22). Drop-in for the former
-`from connectors.alpaca import daily_bars, latest_trade, market_clock,
-is_trading_day, spy_trend, ConnectorError` — so removing Alpaca is a mechanical
-import repoint at ~13 call sites, and the provider is swapped HERE, once, ever
-after.
+Backed by Massive (→ FMP) as the canonical market-data facade. The public API
+preserves the stable consumer contract used throughout the desk, so provider
+changes stay isolated here.
 
 Deterministic + stdlib only:
   * daily_bars / latest_trade  → Massive (unthrottled, split-adjusted) → FMP.
   * market_clock / is_trading_day → a computed NYSE session calendar (no broker
     round-trip): regular 09:30–16:00 ET, half-days close 13:00 ET, full US market
     holidays incl. Good Friday (computus) and the NYSE observed-day rules.
-  * spy_trend → SMA50/200 over Massive SPY closes (same shape as the old helper).
+  * spy_trend → SMA50/200 over Massive SPY closes.
 """
 from __future__ import annotations
 
@@ -81,21 +78,24 @@ def latest_trade(symbol: str) -> dict[str, Any] | None:
     """LIVE last-trade price for execution-time freshness — {'price','ts','source'} or None.
 
     Massive snapshot endpoint (Polygon-compatible), lastTrade → day close → prevDay close;
-    uncached (marks must be fresh). ~15-min delayed on this tier = the Alpaca free feed it replaces.
+    uncached (marks must be fresh). This tier may be about 15 minutes delayed.
     """
-    try:
-        d = massive._get(f"{massive.BASE}/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}")
-    except ConnectorError:
-        return None
-    t = d.get("ticker") or {}
-    price = (
-        (t.get("lastTrade") or {}).get("p")
-        or (t.get("day") or {}).get("c")
-        or (t.get("prevDay") or {}).get("c")
-    )
-    if not price:
-        return None
-    return {"price": float(price), "ts": t.get("updated"), "source": "massive"}
+    return massive.latest_trade(symbol)
+
+
+def latest_trades(symbols: list[str] | tuple[str, ...] | set[str]) -> dict[str, dict]:
+    """Bounded bulk live marks; returns only symbols the provider could mark."""
+    return massive.latest_trades(symbols)
+
+
+def cached_daily_bars(symbol: str, max_age_h: float = 36.0) -> list[dict]:
+    """Offline-only daily bars from the Massive cache."""
+    return massive.cached_daily_bars(symbol, max_age_h=max_age_h)
+
+
+def cached_daily_close(symbol: str, max_age_h: float = 36.0) -> dict | None:
+    """Offline-only prior close; never initiates a provider request."""
+    return massive.cached_daily_close(symbol, max_age_h=max_age_h)
 
 
 # --------------------------------------------------------------------------- NYSE calendar
@@ -184,6 +184,23 @@ def is_trading_day(date_iso: str) -> bool:
     return _is_session(date.fromisoformat(date_iso[:10]))
 
 
+def daily_bar_complete(date_iso: str, now: datetime | None = None) -> bool:
+    """Whether an NYSE daily bar can be treated as a completed close.
+
+    Daily feature generation must not infer this from ``is_open``: the market is
+    also closed before 09:30, on holidays, and after an early close.  A past
+    session is complete; today's session is complete only after its scheduled
+    close; future and non-session dates are never valid daily closes.
+    """
+    bar_date = date.fromisoformat(date_iso[:10])
+    now_et = (now or datetime.now(timezone.utc)).astimezone(_et())
+    if not _is_session(bar_date) or bar_date > now_et.date():
+        return False
+    if bar_date < now_et.date():
+        return True
+    return now_et >= datetime.combine(bar_date, _close_time(bar_date), _et())
+
+
 def _next_session(d: date) -> date:
     d += timedelta(days=1)
     while not _is_session(d):
@@ -193,7 +210,7 @@ def _next_session(d: date) -> date:
 
 def market_clock(now: datetime | None = None) -> dict[str, Any]:
     """Deterministic NYSE clock: {is_open, next_open, next_close, timestamp}. next_open/next_close
-    are ET ISO timestamps (matching the shape the Alpaca clock consumers read)."""
+    are ET ISO timestamps matching the desk's stable clock contract."""
     et = _et()
     now_et = (now or datetime.now(timezone.utc)).astimezone(et)
     today = now_et.date()
@@ -227,7 +244,7 @@ def _now_iso() -> str:
 
 
 def spy_trend() -> dict[str, Any]:
-    """SMA50/200 regime read for SPY (same shape as the retired alpaca.spy_trend)."""
+    """SMA50/200 regime read for SPY using the stable market-data contract."""
     bars = daily_bars("SPY", days=260)
     closes = [b["c"] for b in bars if b.get("c") is not None]
     if len(closes) < 200:

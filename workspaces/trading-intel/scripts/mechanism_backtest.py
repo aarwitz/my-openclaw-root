@@ -17,6 +17,9 @@ Rigor:
   * candidate thresholds are percentiles computed from the TRAIN period only (no test leakage).
   * train/test split by date; significance reported on the TEST holdout; Benjamini-Hochberg FDR +
     Bonferroni across every (mechanism x horizon).
+  * trigger inference clusters same-date stocks into one portfolio observation
+    and uses a Newey-West/HAC standard error across entry dates. Raw ticker
+    samples remain descriptive; they are not treated as independent trials.
   * survivorship-aware: include delisted/failed names; their prices come from FMP.
 
 Reads state/features.sqlite (built by feature_store.py) + FMP prices. Writes survivors to
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import glob
 import json
 import math
 import os
@@ -42,6 +46,8 @@ import worldmodel as wm  # noqa: E402
 import worldmodel_stats as st  # noqa: E402
 
 FEAT_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
+CACHE_DIR = Path(os.path.expanduser("~/.openclaw/state/market-data-cache"))
+ALLOW_NETWORK = False
 HORIZONS = {"swing_5d": 5, "month_21d": 21, "quarter_63d": 63}
 # Data-quality + tradability controls (the fix for penny-stock outlier contamination):
 PRICE_FLOOR = 5.0                          # min entry close — exclude penny stocks
@@ -119,26 +125,65 @@ GEN_FEATURES = ["rsi14", "dist_sma50", "dist_sma200", "mom_12_1", "drawdown_252"
 _MACRO: dict = {}
 
 
+def _cached_massive_prices(symbol: str) -> list[dict]:
+    """Load the newest complete local daily-bar snapshot without network I/O.
+
+    Backtests must be reproducible and must not turn a missing/stale cache into
+    thousands of serial provider calls. Prefer the widest 2015-present cache;
+    fall back to the newest locally cached Massive range.
+    """
+    escaped = glob.escape(symbol.lower())
+    wide = sorted(CACHE_DIR.glob(f"massive_{escaped}_1d_2015-01-01_*.json"), reverse=True)
+    candidates = wide or sorted(CACHE_DIR.glob(f"massive_{escaped}_1d_*.json"), reverse=True)
+    for path in candidates:
+        try:
+            bars = json.loads(path.read_text()).get("bars") or []
+        except (OSError, json.JSONDecodeError):
+            continue
+        usable = [
+            b for b in bars
+            if b.get("t") and b.get("c") is not None and float(b["c"]) > 0
+        ]
+        if usable:
+            return sorted(usable, key=lambda b: b["t"])
+    return []
+
+
+def _backtest_prices(symbol: str) -> list[dict]:
+    cached = _cached_massive_prices(symbol)
+    if cached or not ALLOW_NETWORK:
+        return cached
+    return fs._prices(symbol, 4000)
+
+
+def _fred_series(series_id: str) -> list[tuple[str, float]]:
+    """Read the frozen local FRED series unless network use is explicit."""
+    if not ALLOW_NETWORK:
+        path = CACHE_DIR / f"fred_{series_id.lower()}.json"
+        try:
+            rows = json.loads(path.read_text()).get("series") or []
+            return [(str(d), float(v)) for d, v in rows]
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+    from connectors import fred
+    try:
+        return fred.fetch_series(series_id)
+    except Exception:
+        return []
+
+
 def _macro_series():
     """Global point-in-time macro features from FRED (daily, non-revised market data → no look-ahead).
     The transmission signal for jobs/CPI/Fed surprises is the RATE MOVE (the surprise is already priced
     into rates). Same value for all tickers on a date → merged into each ticker's feature dict."""
     if _MACRO:
         return _MACRO
-    from connectors import fred
-
     def chg(series_id, win):
-        try:
-            s = fred.fetch_series(series_id)
-        except Exception:
-            return []
+        s = _fred_series(series_id)
         return sorted((s[i][0], s[i][1] - s[i - win][1]) for i in range(win, len(s)))
 
     def level(series_id):
-        try:
-            return sorted(fred.fetch_series(series_id))
-        except Exception:
-            return []
+        return sorted(_fred_series(series_id))
     _MACRO.update({
         "rate_10y_chg_63d": chg("DGS10", 63),            # 10y nominal yield, 3-mo change (rates rising/falling)
         "real_yield_chg_63d": chg("DFII10", 63),         # 10y real yield 3-mo change
@@ -167,8 +212,9 @@ def load_ticker(conn, ticker):
     feats: dict[str, list] = {}
     for name, as_of, val in rows:
         feats.setdefault(name, []).append((as_of, val))
-    # price series from FMP (deep, split-adjusted, works for delisted)
-    px = fs._prices(ticker, 4000)
+    # Frozen local Massive snapshot by default; explicit --allow-network is
+    # required to refresh missing data.
+    px = _backtest_prices(ticker)
     dates = [b["t"] for b in px]
     close = {b["t"]: b["c"] for b in px}
     dvol = {b["t"]: b["c"] * b.get("v", 0) for b in px}    # dollar-volume for liquidity floor
@@ -306,6 +352,29 @@ def _ttest_moments(n, s, ss):
     return (m, 0.5 * math.erfc(t / math.sqrt(2)))
 
 
+def _hac_mean_p(series: list[float], max_lag: int) -> tuple[float, float]:
+    """One-sided mean>0 test with Newey-West autocorrelation correction."""
+    n = len(series)
+    if n < 3:
+        return (sum(series) / n if n else 0.0, 1.0)
+    mean = sum(series) / n
+    residual = [x - mean for x in series]
+    lag = min(max(0, int(max_lag)), n - 1)
+    long_run_var = sum(x * x for x in residual) / n
+    for k in range(1, lag + 1):
+        gamma = sum(
+            residual[i] * residual[i - k] for i in range(k, n)
+        ) / n
+        long_run_var += 2.0 * (1.0 - k / (lag + 1.0)) * gamma
+    if long_run_var <= 0:
+        return (mean, 1.0 if mean <= 0 else 0.0)
+    standard_error = math.sqrt(long_run_var / n)
+    if standard_error <= 0:
+        return (mean, 1.0 if mean <= 0 else 0.0)
+    z = mean / standard_error
+    return mean, 0.5 * math.erfc(z / math.sqrt(2))
+
+
 def gen_candidates(pools):
     """The system CREATES mechanisms: single-feature triggers at TRAIN-derived quintiles, both
     directions (no test leakage). The AlphaAgent originality/complexity guard = single-feature, deduped."""
@@ -413,6 +482,10 @@ def run(universe, spy, test_start):
     mechs = list(SEEDS) + gen_candidates(pools) + gen_multi(pools)
     cellmeta = {(m[0], hn): m for m in mechs for hn in HORIZONS}
     cells = {k: [0, 0, 0, 0, 0.0, 0.0] for k in cellmeta}   # [n_tr,h_tr,n_te,h_te,s_te,ss_te]
+    # Same-date names share market/sector shocks. Collapse their test excess
+    # returns to one equal-weight portfolio observation before inference.
+    test_date_clusters = {k: {} for k in cellmeta}  # {(mid,horizon): {entry_date: [sum,n]}}
+    test_tickers = {k: set() for k in cellmeta}
 
     # ---- PASS 2: trigger moments ----
     for t in universe:
@@ -432,22 +505,41 @@ def run(universe, spy, test_start):
                         c[0] += 1; c[1] += int(win)
                     else:
                         c[2] += 1; c[3] += int(win); c[4] += exc; c[5] += exc * exc
+                        bucket = test_date_clusters[(mid, hn)].setdefault(d, [0.0, 0])
+                        bucket[0] += exc
+                        bucket[1] += 1
+                        test_tickers[(mid, hn)].add(t)
     conn.close()
 
     results, tp, keys = [], [], []
     for (mid, hn), (_, rationale, conds, direction, kind) in cellmeta.items():
         n_tr, h_tr, n_te, h_te, s, ss = cells[(mid, hn)]
         base_dir = base_long[hn] if direction == "long" else 1 - base_long[hn]
-        m_exc, p_mean = _ttest_moments(n_te, s, ss)
-        p_hit = st.binom_test(h_te, n_te, base_dir) if n_te else 1.0
+        date_series = [
+            total / count
+            for _, (total, count) in sorted(test_date_clusters[(mid, hn)].items())
+            if count
+        ]
+        cluster_n = len(date_series)
+        ticker_n = len(test_tickers[(mid, hn)])
+        # Entry-date portfolios can still overlap for H sessions. HAC with up
+        # to H date lags is conservative for event mechanisms and state scans.
+        m_exc, p_mean = _hac_mean_p(date_series, H)
+        p_hit = None  # raw-name binomial independence is not defensible
         a_, b_ = 1 + h_tr, 1 + (n_tr - h_tr)
         results.append({"id": mid, "rationale": rationale, "horizon": hn, "direction": direction,
                         "conds": conds, "kind": kind, "base": round(base_dir, 3), "tr_n": n_tr, "te_n": n_te,
+                        "cluster_n": cluster_n,
+                        "ticker_n": ticker_n,
                         "hit_te": round(h_te / n_te, 3) if n_te else None,
-                        "alpha_te_pct": round(100 * m_exc, 3) if n_te else None,
-                        "test_p": round(p_mean, 5), "hit_p": round(p_hit, 5),
+                        "alpha_te_pct": round(100 * m_exc, 3) if cluster_n else None,
+                        "test_p": round(p_mean, 5), "hit_p": p_hit,
                         "weight_mean": round(wm.beta_mean(a_, b_), 3)})
-        if n_te >= 30:
+        # A time-series effect in one or two stocks is not a portable market
+        # mechanism. Require both independent entry-date clusters and
+        # cross-sectional breadth before a hypothesis enters multiplicity
+        # correction or becomes promotion-eligible.
+        if cluster_n >= 30 and ticker_n >= 20:
             tp.append(p_mean); keys.append((mid, hn, "trig"))
 
     # ---- cross-sectional factor results ----
@@ -474,10 +566,16 @@ def run(universe, spy, test_start):
             mid = f"xs_{f}_{variant}"
             results.append({"id": mid, "rationale": f"cross-sectional {f} {variant} quintile, monthly 21d",
                             "horizon": "month_21d", "direction": dirn, "conds": [[f, variant, 0.2]], "kind": "cross",
-                            "base": 0.5, "tr_n": 0, "te_n": len(series), "hit_te": None,
+                            "base": 0.5, "tr_n": 0, "te_n": len(series),
+                            "cluster_n": len(series), "hit_te": None,
+                            "ticker_n": max(
+                                (len(rows) for rd, rows in buckets.items() if rd >= test_start),
+                                default=0,
+                            ),
                             "alpha_te_pct": round(100 * m, 3), "test_p": round(p, 5), "hit_p": None,
                             "weight_mean": None})
-            tp.append(p); keys.append((mid, "month_21d", "cross"))
+            if results[-1]["cluster_n"] >= 30 and results[-1]["ticker_n"] >= 20:
+                tp.append(p); keys.append((mid, "month_21d", "cross"))
 
     keep = st.benjamini_hochberg(tp, 0.05); bonf = st.bonferroni(tp, 0.05)
     sig = {(keys[i][0], keys[i][1]): {"fdr": keep[i], "bonf": bonf[i]} for i in range(len(keys))}
@@ -486,19 +584,22 @@ def run(universe, spy, test_start):
     return results, base_long, mechs, nseen
 
 
-def persist(results):
+def persist(results, test_start, evaluation_label, price_data_cutoff, universe_n):
     conn = sqlite3.connect(FEAT_DB, timeout=60.0)
     conn.execute("DROP TABLE IF EXISTS discovered_mechanisms")
     conn.execute("""CREATE TABLE discovered_mechanisms(
         id TEXT, horizon TEXT, direction TEXT, rationale TEXT, conds_json TEXT, kind TEXT,
-        base REAL, tr_n INT, te_n INT, hit_te REAL, alpha_te_pct REAL, test_p REAL,
-        fdr_sig INT, bonf_sig INT, weight_mean REAL, created_at TEXT)""")
+        base REAL, tr_n INT, te_n INT, cluster_n INT, ticker_n INT, hit_te REAL, alpha_te_pct REAL, test_p REAL,
+        fdr_sig INT, bonf_sig INT, weight_mean REAL, evaluation_label TEXT, test_start TEXT,
+        price_data_cutoff TEXT, universe_n INT, created_at TEXT)""")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for r in results:
-        conn.execute("INSERT INTO discovered_mechanisms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO discovered_mechanisms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (r["id"], r["horizon"], r["direction"], r["rationale"], json.dumps(r["conds"]),
-                      r["kind"], r["base"], r["tr_n"], r["te_n"], r["hit_te"], r["alpha_te_pct"],
-                      r["test_p"], int(r["sig"]["fdr"]), int(r["sig"]["bonf"]), r["weight_mean"], now))
+                      r["kind"], r["base"], r["tr_n"], r["te_n"], r["cluster_n"], r["ticker_n"],
+                      r["hit_te"], r["alpha_te_pct"], r["test_p"], int(r["sig"]["fdr"]),
+                      int(r["sig"]["bonf"]), r["weight_mean"], evaluation_label,
+                      test_start, price_data_cutoff, universe_n, now))
     conn.commit(); conn.close()
 
 
@@ -506,39 +607,57 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--universe", required=True, help="comma list, or ALL = every built ticker")
     ap.add_argument("--test-start", default="2020-06-18", help="OOS holdout starts here (train < this)")
+    ap.add_argument("--evaluation-label", default="development_reused_holdout",
+                    help="provenance label; the default holdout has been reused for development "
+                         "and is not clean final evidence")
+    ap.add_argument("--allow-network", action="store_true",
+                    help="refresh missing price/macro series from providers; default is frozen local cache")
     a = ap.parse_args()
+    global ALLOW_NETWORK
+    ALLOW_NETWORK = bool(a.allow_network)
     if a.universe.strip().upper() == "ALL":
         c = sqlite3.connect(FEAT_DB)
         universe = [r[0] for r in c.execute("SELECT DISTINCT ticker FROM features WHERE source='price'")]
         c.close()
     else:
         universe = [s.strip().upper() for s in a.universe.split(",") if s.strip()]
-    spx = fs._prices("SPY", 4000)
+    spx = _backtest_prices("SPY")
+    if not spx:
+        raise RuntimeError("no cached SPY bars; refresh market data or use --allow-network")
     spy = {"close": {b["t"]: b["c"] for b in spx}, "dk": [b["t"] for b in spx]}
 
     results, base, mechs, nseen = run(universe, spy, a.test_start)
-    persist(results)
+    persist(results, a.test_start, a.evaluation_label, spx[-1]["t"], len(universe))
 
     ntrig = sum(1 for r in results if r["kind"] != "cross")
     ncross = sum(1 for r in results if r["kind"] == "cross")
-    print(f"\n=== REAL-MECHANISM BACKTEST ===  {nseen} names (incl. delisted)  test holdout >= {a.test_start}")
+    print(f"\n=== REAL-MECHANISM BACKTEST ===  {nseen}/{len(universe)} names with cached bars "
+          f"(incl. delisted)  test holdout >= {a.test_start}  price cutoff={spx[-1]['t']}")
+    if a.evaluation_label == "development_reused_holdout":
+        print("WARNING: this holdout has informed prior iterations; treat it as development "
+              "validation, not untouched production-edge evidence.")
     print(f"tested: {ntrig} trigger cells ({len(SEEDS)} seeds + {len(mechs)-len(SEEDS)} machine-generated, x{len(HORIZONS)} horizons) + {ncross} cross-sectional factors")
     print("base rate P(beat SPY): " + "  ".join(f"{h}={base[h]:.3f}" for h in HORIZONS))
     surv = sorted([r for r in results if r["sig"]["fdr"]], key=lambda r: r["test_p"])
     print("\nSURVIVORS (FDR-significant positive OOS mean-alpha):  ** = also Bonferroni")
-    print(f"  {'mechanism':24} {'horizon':10} {'dir':10} {'n_te':>5} {'alpha%':>7} {'p':>8} {'hit':>5} {'wt':>5}")
+    print(f"  {'mechanism':24} {'horizon':10} {'dir':10} {'n_te':>5} {'dates':>5} "
+          f"{'names':>5} {'alpha%':>7} {'p':>8} {'hit':>5} {'wt':>5}")
     if not surv:
         print("   (none survived — the honest result)")
     for r in surv:
         mark = "**" if r["sig"]["bonf"] else "*"
         hit = f"{r['hit_te']:.2f}" if r["hit_te"] is not None else "  - "
         wt = f"{r['weight_mean']:.2f}" if r["weight_mean"] is not None else "  - "
-        print(f"  {r['id']:24} {r['horizon']:10} {r['direction']:10} {r['te_n']:>5} {r['alpha_te_pct']:>7.3f} {r['test_p']:>8.5f} {hit:>5} {wt:>5} {mark}")
+        print(f"  {r['id']:24} {r['horizon']:10} {r['direction']:10} {r['te_n']:>5} "
+              f"{r['cluster_n']:>5} {r['ticker_n']:>5} {r['alpha_te_pct']:>7.3f} {r['test_p']:>8.5f} "
+              f"{hit:>5} {wt:>5} {mark}")
     print(f"\n(persisted all {len(results)} rows -> features.sqlite::discovered_mechanisms)")
     print("\nTop 12 by OOS mean-alpha (context, pre-correction):")
     for r in sorted([x for x in results if x["alpha_te_pct"] is not None], key=lambda r: -r["alpha_te_pct"])[:12]:
         flag = "FDR" if r["sig"]["fdr"] else "   "
-        print(f"  {flag} {r['id']:24} {r['horizon']:10} {r['direction']:10} n_te={r['te_n']:>5} alpha%={r['alpha_te_pct']:>6} p={r['test_p']}")
+        print(f"  {flag} {r['id']:24} {r['horizon']:10} {r['direction']:10} "
+              f"n_te={r['te_n']:>5} dates={r['cluster_n']:>4} names={r['ticker_n']:>4} "
+              f"alpha%={r['alpha_te_pct']:>6} p={r['test_p']}")
 
 
 if __name__ == "__main__":

@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS risk_reviews (
 CREATE INDEX IF NOT EXISTS idx_risk_target ON risk_reviews(target_type, target_id);
 
 -- ----------------------------------------------------------------------------
--- Orders (mirror of Alpaca order events)
+-- Orders (owned internal paper-broker order events)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS orders (
   broker_order_id   TEXT PRIMARY KEY,
@@ -439,7 +439,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   spy_close          REAL,
   spy_as_of          TEXT,
   account_status     TEXT,
-  source             TEXT NOT NULL DEFAULT 'alpaca_paper'
+  source             TEXT NOT NULL DEFAULT 'internal_paper'
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_captured_at ON portfolio_snapshots(captured_at);
 
@@ -506,6 +506,9 @@ CREATE TABLE IF NOT EXISTS mechanism_observations (
   experiment_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mech_obs_mechanism ON mechanism_observations(mechanism_id, observed_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mech_obs_prediction_mechanism
+  ON mechanism_observations(source_id, mechanism_id)
+  WHERE source_type='prediction' AND source_id IS NOT NULL;
 
 -- ----------------------------------------------------------------------------
 -- predictions (probabilistic hypothesis call + calibration record)

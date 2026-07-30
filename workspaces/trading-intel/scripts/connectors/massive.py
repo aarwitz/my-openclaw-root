@@ -36,10 +36,10 @@ def _key() -> str:
     return k
 
 
-def _get(url: str) -> dict:
+def _get(url: str, *, timeout: float = 30.0, retries: int = 3) -> dict:
     sep = "&" if "?" in url else "?"
     full = url if "apiKey=" in url else f"{url}{sep}apiKey={_key()}"
-    raw = http_get(full, timeout=30.0)          # 429/Retry-After-aware backoff (shared helper)
+    raw = http_get(full, timeout=timeout, retries=retries)
     return json.loads(raw.decode("utf-8", "replace") or "{}")
 
 
@@ -62,28 +62,76 @@ def daily_bars(symbol: str, frm: str = "2015-01-01", to: str | None = None,
     return out
 
 
+def latest_trades(
+    symbols: list[str] | tuple[str, ...] | set[str],
+    *,
+    timeout: float = 8.0,
+) -> dict[str, dict]:
+    """One bounded snapshot request for many symbols.
+
+    Serial per-ticker snapshots made a 38-name book take minutes to mark when
+    DNS or the provider degraded. This call has no retry loop by design: a
+    money-path pass must fail/degrade promptly, not hang behind N×timeouts.
+    """
+    wanted = sorted({str(symbol).upper() for symbol in symbols if str(symbol).strip()})
+    if not wanted:
+        return {}
+    query = urllib.parse.urlencode({"tickers": ",".join(wanted)})
+    try:
+        payload = _get(
+            f"{BASE}/v2/snapshot/locale/us/markets/stocks/tickers?{query}",
+            timeout=timeout,
+            retries=0,
+        )
+    except ConnectorError:
+        return {}
+    out: dict[str, dict] = {}
+    for ticker in payload.get("tickers", []) or []:
+        symbol = str(ticker.get("ticker") or "").upper()
+        price = (
+            (ticker.get("lastTrade") or {}).get("p")
+            or (ticker.get("day") or {}).get("c")
+            or (ticker.get("prevDay") or {}).get("c")
+        )
+        if symbol and price:
+            out[symbol] = {
+                "price": float(price),
+                "ts": ticker.get("updated"),
+                "source": "massive_bulk_snapshot",
+            }
+    return out
+
+
+def cached_daily_bars(symbol: str, max_age_h: float = 36.0) -> list[dict]:
+    """Read the normal daily-bar cache without triggering a network fallback."""
+    today = date.today().isoformat()
+    hit = cache_read(
+        f"massive_{symbol.lower()}_1d_2015-01-01_{today}",
+        max_age_h=max_age_h,
+    )
+    return list((hit or {}).get("bars") or [])
+
+
+def cached_daily_close(symbol: str, max_age_h: float = 36.0) -> dict | None:
+    bars = cached_daily_bars(symbol, max_age_h=max_age_h)
+    if not bars or bars[-1].get("c") is None:
+        return None
+    return {
+        "price": float(bars[-1]["c"]),
+        "ts": str(bars[-1].get("t") or "")[:10],
+        "source": "massive_cached_daily_close",
+    }
+
+
 def latest_trade(symbol: str) -> dict | None:
     """Most-recent trade price via the snapshot endpoint (Polygon-compatible), for live marks.
 
     Returns {"price": float, "ts": <ns epoch|None>, "source": "massive"} or None. Falls back
     lastTrade -> day close -> prevDay close so a quiet/closed tape still yields a mark. Shape
-    matches the prior `alpaca.latest_trade` consumers ({"price": ...}). Deliberately UNCACHED —
-    marks must be fresh (daily_bars is the cached historical path). ~15-min delayed on this tier,
-    equivalent to the Alpaca free feed it replaces.
+    matches the connector-neutral market-data contract ({"price": ...}).
+    Deliberately uncached: daily_bars is the cached historical path.
     """
-    try:
-        d = _get(f"{BASE}/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}")
-    except ConnectorError:
-        return None
-    t = d.get("ticker") or {}
-    price = (
-        (t.get("lastTrade") or {}).get("p")
-        or (t.get("day") or {}).get("c")
-        or (t.get("prevDay") or {}).get("c")
-    )
-    if not price:
-        return None
-    return {"price": float(price), "ts": t.get("updated"), "source": "massive"}
+    return latest_trades([symbol]).get(symbol.upper())
 
 
 def short_interest(ticker: str, cache_h: float = 24.0) -> list[dict]:

@@ -4,7 +4,7 @@ Status: active. Authority order: `~/.openclaw/SYSTEM_ARCHITECTURE.md` (canonical
 
 ## 1. Mandate
 
-Beat the S&P 500 in an Alpaca paper account by exploiting slow market diffusion from primary-source world changes into the best liquid public-market expressions.
+Beat the S&P 500 in the owned internal paper account by exploiting slow market diffusion from primary-source world changes into liquid public-market expressions.
 
 - Benchmark: SPY total return. Secondary benchmark: cash.
 - Measurement windows: rolling 1-month, 3-month, 12-month active return and Sharpe vs SPY.
@@ -21,20 +21,17 @@ Beat the S&P 500 in an Alpaca paper account by exploiting slow market diffusion 
 7. Critic challenges are first-class. Every challenge requires a written response in the audit log before execution.
 8. Archivist is how the system improves. Patterns it extracts feed the other five agents.
 
-## 3. Allowed expression vehicles (first-class from launch)
+## 3. Allowed expression vehicles
 
-- Direct equity (long, short with policy gates)
-- ETF (broad theme expression)
-- LEAPS calls and call spreads (high-conviction, defined horizon)
-- Shorter-dated options (defined catalyst windows only)
-- Pair trades (long primary + short corollary)
-- Competitor shorts (paired with explicit long thesis only)
+- Direct US equity (long or short, subject to risk/borrow-model gates).
+- Liquid US ETF.
+- Pair trades expressed as two separately gated equity/ETF intents.
 
 Constraints:
 
-- Alpaca paper account only at launch.
-- Options usage requires hypothesis confidence `high` and explicit catalyst window.
-- Shorter-dated options: maximum 10% of the underlying position size and require an explicit event date.
+- Internal paper account only.
+- Options, margin, and leveraged broker products are out of scope until their
+  simulator semantics, assignment/corporate-action handling, and tests exist.
 - Competitor shorts: only with an explicit long pair, maximum 50% of the long-side position size.
 
 ## 4. Conviction-weighted sizing
@@ -53,7 +50,8 @@ Maximum position sizes by conviction (percent of portfolio):
 - Core conviction (high, long horizon): 5–10%.
 - Emerging (medium): 3–5%.
 - Starter: 1–2%.
-- Small-cap asymmetry: up to 15% only if average daily volume exceeds $50M.
+- The deterministic Risk gate always binds: ≤10% per name, ≤60% gross, ≤25%
+  per correlation cluster, and ≤48 concurrent names.
 
 Pre-authorized conviction scaling:
 
@@ -83,8 +81,6 @@ Regime is owned by Quant. Executor cannot override regime gates without an Aaron
 
 - Every position carries a stop derived from the falsifier set plus one standard deviation of thesis noise.
 - Maximum loss if stopped: 2–3% of portfolio per position. This sets size automatically.
-- LEAPS: tighter stops (about 10% on premium) due to theta.
-- Shorter-dated options: stops are event-window driven; close on event resolution if thesis not confirmed.
 
 ## 8. Drawdown management
 
@@ -95,17 +91,16 @@ Regime is owned by Quant. Executor cannot override regime gates without an Aaron
 
 ## 9. Autonomous authority for Executor
 
-Executor may autonomously, without per-action human approval, in Alpaca paper:
+Executor may autonomously, without per-action human approval, in the internal paper account:
 
 - Open, add, trim, exit, rotate, cancel orders.
 - Hold cash.
-- Place options orders consistent with this doc.
 
 Executor may not autonomously:
 
 - Override regime gates.
 - Execute a trade without a valid `hypothesis_id` and a Critic review record.
-- Use leverage beyond Alpaca paper defaults.
+- Use leverage, margin, or unsupported vehicles.
 - Use any data source outside the configured shared state.
 
 ## 10. Pause semantics

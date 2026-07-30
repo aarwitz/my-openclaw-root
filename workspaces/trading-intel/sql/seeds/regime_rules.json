@@ -7,7 +7,7 @@
   "thresholds_json": {
     "signals": {
       "spy_trend": {
-        "source": "alpaca_market_data:SPY:1Day",
+        "source": "massive_or_fmp:SPY:1Day",
         "compute": "close_vs_sma200_pct_and_sma50_vs_sma200",
         "states": {
           "risk_on":  { "close_vs_sma200_pct_min": 3.0,  "require_sma50_gt_sma200": true },

@@ -29,8 +29,8 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _db import connect, emit, now_iso  # noqa: E402
-from connectors.marketdata import latest_trade  # noqa: E402  (Massive-backed live price)
+from developer_db import connect, emit, now_iso  # noqa: E402
+from connectors.marketdata import latest_trades, market_clock  # noqa: E402
 
 OPEN_STATES = ("opening", "open", "scaling", "trimming", "closing")
 MODELED_SLIPPAGE_BPS = 8.0  # modeled exit half-spread (matches author_intents)
@@ -66,13 +66,16 @@ def mark_open(conn, *, dry_run: bool) -> list[dict]:
         f"WHERE state IN ({','.join('?' * len(OPEN_STATES))})",
         OPEN_STATES,
     ).fetchall()
+    candidates = [
+        r for r in rows
+        if float(r["qty"] or 0.0) != 0 and float(r["cost_basis"] or 0.0) > 0
+    ]
+    quotes = latest_trades([r["ticker"] for r in candidates])
     out = []
-    for r in rows:
+    for r in candidates:
         qty = float(r["qty"] or 0.0)
         basis = float(r["cost_basis"] or 0.0)
-        if qty == 0 or basis <= 0:
-            continue
-        lt = latest_trade(r["ticker"])
+        lt = quotes.get(str(r["ticker"]).upper())
         price = float(lt["price"]) if lt and lt.get("price") else None
         if not price:
             out.append({"id": r["id"], "ticker": r["ticker"], "skipped": "no_mark"})
@@ -145,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         "sample_open": marked[:3],
         "sample_closed": closed[:3],
     })
+    if skipped and market_clock().get("is_open"):
+        return 2 if len(skipped) == len(opened) else 1
     return 0
 
 

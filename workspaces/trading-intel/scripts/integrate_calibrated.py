@@ -11,8 +11,7 @@ INCREMENTAL BY DEFAULT (2026-06-19) — this NEVER wipes the live learning ledge
 This is what lets us refresh the mechanism set (after a new discovery run) AND keep accruing live learning.
 The two-learning-rates blend (calibrate.py) then shrinks the refreshed prior as live obs accumulate.
 
-  python3 integrate_calibrated.py            # incremental upsert (default; preserves the ledger)
-  python3 integrate_calibrated.py --reset    # full re-bootstrap (the old behaviour; WIPES the ledger)
+  python3 integrate_calibrated.py            # incremental upsert; preserves the ledger
 
 Adding TICKERS never goes through this script at all — tickers enter via the feature store + the live
 scan watchlist, and feed the ledger by trading + being graded (observations are keyed by mechanism).
@@ -25,11 +24,14 @@ import json
 import os
 import sqlite3
 import sys
+import uuid
 from datetime import datetime, timezone
 
 LIVE = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
-PSEUDO_N = 40.0
+# Backtest observations are highly date/sector-correlated. Keep the bootstrap
+# prior deliberately weak so live outcomes can override it quickly.
+PSEUDO_N = 10.0
 HZN = {"swing_5d": "swing_1_5d", "month_21d": "position_1_4w", "quarter_63d": "trend_1_3m"}
 DIRMAP = {"long": "long", "short": "short", "long_short": "long"}
 
@@ -70,18 +72,49 @@ def tokens(mid):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--reset", action="store_true", help="full re-bootstrap (WIPES the live ledger)")
+    ap.add_argument(
+        "--deprecate-all",
+        action="store_true",
+        help="explicit fail-closed quarantine: deprecate every live mechanism while preserving history",
+    )
+    ap.add_argument("--reason", default="", help="required rationale for --deprecate-all")
     a = ap.parse_args()
+    if a.deprecate_all and len(a.reason.strip()) < 20:
+        raise SystemExit("--deprecate-all requires a specific --reason (>=20 characters)")
 
     cal = sqlite3.connect(FEAT)
     cal.row_factory = sqlite3.Row
-    survivors = [dict(r) for r in cal.execute("SELECT * FROM calibrated_mechanisms ORDER BY net_alpha_pct DESC")]
+    labels = {
+        str(r[0] or "")
+        for r in cal.execute(
+            "SELECT DISTINCT evaluation_label FROM discovered_mechanisms"
+        )
+    }
+    survivors = [dict(r) for r in cal.execute(
+        "SELECT * FROM calibrated_mechanisms "
+        "WHERE posterior_mean IS NOT NULL AND source != 'cross' AND bonf_sig=1 "
+        "ORDER BY net_alpha_pct DESC"
+    )]
     cal.close()
-    if not survivors:
-        raise SystemExit("no calibrated_mechanisms found — run promote_mechanisms.py first")
+    development_artifact = any(
+        token in label.lower()
+        for label in labels
+        for token in ("development", "reused", "smoke")
+    )
+    if not a.deprecate_all and development_artifact:
+        raise SystemExit(
+            "refusing live integration from a development/reused holdout artifact; "
+            "complete the locked forward evaluation"
+        )
+    if not survivors and not a.deprecate_all:
+        raise SystemExit(
+            "no robust calibrated mechanisms (bonf_sig=1); preserving the "
+            "quarantined live set"
+        )
 
     conn = sqlite3.connect(LIVE, timeout=60.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     sys.path.insert(0, os.path.dirname(__file__))
     import worldmodel as wm
     exp = (conn.execute("SELECT experiment_id FROM mechanisms WHERE experiment_id IS NOT NULL LIMIT 1").fetchone()
@@ -101,19 +134,6 @@ def main():
     added = updated = deprecated = 0
     try:
         conn.execute("BEGIN")
-        if a.reset:
-            for t in ("mechanism_observations", "predictions", "attribution", "postmortems", "patterns"):
-                try:
-                    conn.execute(f"DELETE FROM {t}")
-                except sqlite3.OperationalError:
-                    pass
-            try:
-                conn.execute("UPDATE hypotheses SET resolved_state=NULL, resolved_at=NULL, archivist_grade=NULL")
-            except sqlite3.OperationalError:
-                pass
-            conn.execute("DELETE FROM mechanisms")
-            existing = {}
-
         cal_ids = set()
         for s in survivors:
             mid = f'{s["id"]}__{s["horizon"]}'
@@ -124,7 +144,9 @@ def main():
             note = json.dumps({"calibrated": True, "source": s["source"], "conds": json.loads(s["conds_json"]),
                                "net_alpha_pct": s["net_alpha_pct"], "test_p": s["test_p"],
                                "bonferroni": bool(s["bonf_sig"]), "hit_rate": s["hit_te"],
-                               "backtest_n": s["te_n"], "skew_edge": bool(s["skew_edge"]),
+                               "backtest_n_raw": s["te_n"],
+                               "backtest_n_date_clusters": s.get("cluster_n", s["te_n"]),
+                               "skew_edge": bool(s["skew_edge"]),
                                "refreshed": now})
             if mid in existing:
                 # PRESERVE live observations; refresh the backtest prior; re-blend the posterior
@@ -153,24 +175,38 @@ def main():
                      "active", note, exp))
                 added += 1
 
-        # deprecate live mechanisms no longer in the calibrated set (KEEP their obs/history)
+        # Deprecate mechanisms no longer in the accepted set (KEEP observations/history).
         for mid in existing:
             if mid not in cal_ids:
                 conn.execute("UPDATE mechanisms SET status='deprecated' WHERE id=?", (mid,))
                 deprecated += 1
+        if a.deprecate_all:
+            conn.execute(
+                "INSERT INTO audits(id,timestamp,actor,entity_type,entity_id,action,"
+                "before_state,after_state,rationale_concise,experiment_id) "
+                "VALUES(?,?,'developer','mechanism_set','all','quarantine_no_robust_edge',"
+                "'active','deprecated',?,?)",
+                (
+                    "AUDIT-" + uuid.uuid4().hex,
+                    now,
+                    a.reason.strip()[:500],
+                    "preproduction_hardening_20260730",
+                ),
+            )
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
 
     led_after = {t: count(t) for t in led_before}
-    print("LIVE INTEGRATION COMPLETE", "(--reset: FULL WIPE)" if a.reset else "(incremental — ledger preserved)")
+    mode = "FAIL-CLOSED QUARANTINE" if a.deprecate_all else "incremental — ledger preserved"
+    print("LIVE INTEGRATION COMPLETE", f"({mode})")
     print(f"  experiment_id={exp}")
     print(f"  mechanisms: +{added} added, {updated} updated (priors refreshed, obs preserved), "
           f"{deprecated} deprecated -> {count('mechanisms')} live ({count('mechanisms') - deprecated} active)")
-    print("  LEDGER (preserved unless --reset):")
+    print("  LEDGER (preserved):")
     for t in led_before:
-        flag = "" if (a.reset or led_before[t] == led_after[t]) else "  <-- CHANGED?!"
+        flag = "" if led_before[t] == led_after[t] else "  <-- CHANGED?!"
         print(f"    {t:24} {str(led_before[t]):>6} -> {led_after[t]}{flag}")
     conn.close()
 

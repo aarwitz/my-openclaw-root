@@ -54,7 +54,7 @@ Default behavior:
 | Agent | Domain | When to escalate |
 |-------|--------|-----------------|
 | **Resi** | AutoTap/AutoTap iOS delivery, builds, tests, QA, screenshots, product-context | Any autotap-capture/build/test/QA or AutoTap product execution |
-| **Druck** | News research, market trends, stock/trading analysis | Any newsapi-ai, finnhub, massive, schwab, alpaca, or published-news/market-data query |
+| **Druck** | News research, market trends, stock/trading analysis | Any newsapi-ai, finnhub, massive, schwab, or published-news/market-data query |
 | **Dwight** | Task Manager platform ownership, sprint management, TM source code | Any TM backend/frontend/source-code change or when Dwight-specific TM oversight is required |
 | **Jerry** | Platform ops, gateway config, GitHub admin, gog, orchestration, Business admin | Default — everything else |
 
@@ -80,7 +80,7 @@ One skill per job. Pick by intent:
 **Delegated to other agents — do not handle in Jerry's context:**
 - autotap-capture / autotap-build / autotap-test / autotap-testing-menu / autotap-visual-qa / product-context → **Resi**
 - task-manager-maintainer → **Dwight**
-- newsapi-ai / finnhub / massive / schwab / alpaca → **Druck**
+- newsapi-ai / finnhub / massive / schwab → **Druck**
 
 ## Hard Invariants
 

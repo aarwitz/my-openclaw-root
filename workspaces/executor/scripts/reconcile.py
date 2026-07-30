@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executor · reconcile.py
 
-Reconcile Alpaca broker positions + orders against canonical DB.
+Reconcile the owned internal paper broker against canonical strategy state.
 Writes a `reconciliation_runs` row with divergences_json.
 
 Divergences detected:
@@ -63,8 +63,8 @@ def _insert_placeholder_hypothesis(conn, symbol: str) -> str:
             hid,
             now,
             json.dumps([symbol.upper()]),
-            f"Broker-synced placeholder hypothesis for {symbol.upper()}",
-            "Auto-created by reconcile.py --repair to mirror broker state.",
+            f"Paper-ledger-synced placeholder hypothesis for {symbol.upper()}",
+            "Auto-created by reconcile.py --repair to mirror internal paper-ledger state.",
         ),
     )
     return hid
@@ -249,10 +249,9 @@ def compute_divergences(conn) -> dict:
                 "symbol": o.get("symbol"),
             })
 
-    # --- Broker-data sanity guard (2026-07-07 incident) ---------------------
-    # Alpaca's positions endpoint transiently served 3 of 24 positions ("$24k
-    # vanished") for a window on 2026-07-07; cash was intact and no sell orders
-    # existed. A liquidation ALWAYS leaves closing orders + proceeds, so:
+    # --- Broker-data sanity guard (retained after the 2026-07-07 incident) ---
+    # Any adapter can transiently return a partial position set. A liquidation
+    # ALWAYS leaves closing orders + proceeds, so:
     # if several DB positions are "missing" at the broker but none of those
     # symbols has a recent filled SELL order, the broker DATA is suspect —
     # flag it and let apply_repairs refuse to act. Repairing against a glitch
@@ -328,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     audit(conn, actor="executor", entity_type="reconciliation_run", entity_id=rid,
           action="reconcile",
-          rationale=f"alpaca vs db: db_pos={result['summary']['db_positions']} "
+          rationale=f"internal paper ledger vs strategy db: db_pos={result['summary']['db_positions']} "
                     f"broker_pos={result['summary']['broker_positions']} "
                     f"divergences={div_count} repaired={len(repairs['repaired'])} "
                     f"unresolved={len(repairs['unresolved'])}")

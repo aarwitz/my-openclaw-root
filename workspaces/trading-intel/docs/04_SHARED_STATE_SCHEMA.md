@@ -149,7 +149,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 
 ### 3.8 `orders`
 
-Mirror of Alpaca order events relevant to this system.
+Owned simulator order/fill records relevant to this system.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -160,7 +160,7 @@ Mirror of Alpaca order events relevant to this system.
 | `qty` | REAL | |
 | `type` | TEXT | `market` / `limit` / `stop` / `stop_limit` |
 | `limit_price` | REAL | nullable |
-| `status` | TEXT | mirror of Alpaca |
+| `status` | TEXT | internal simulator lifecycle |
 | `submitted_at` | TEXT | |
 | `filled_at` | TEXT | nullable |
 | `avg_fill_price` | REAL | nullable |

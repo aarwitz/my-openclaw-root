@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Macro-regime brief for the LLM layer — the structured context that lets the agents APPLY the
 regime-dependent chains (rate->duration, risk-off) by judgment when the regime warrants, while the
-validated mechanical mechanisms (VIX-capitulation, mean-reversion, value, momentum, …) trade on their own.
+validated predictive mechanisms (VIX-capitulation, mean-reversion, value, momentum, …) trade on their own.
 
 Deterministic: pulls current macro state from FRED (rate level/trend, real yields, curve, credit
 spreads, VIX), classifies the regime, and lists which regime-dependent PLAYBOOKS are active. The
@@ -81,7 +81,7 @@ def main():
         playbooks.append("CURVE INVERTED: late-cycle signal; weight balance-sheet quality.")
     if regime == "neutral_narrative_driven":
         playbooks.append("RATES NOT DOMINANT: do NOT over-apply the rate->tech chain (it loses in narrative-driven "
-                         "tape); weight idiosyncratic fundamentals, catalysts, and the validated mechanical edges.")
+                         "tape); weight idiosyncratic fundamentals, catalysts, and validated predictive associations.")
 
     brief = {
         "generated": datetime.now(timezone.utc).isoformat() + "Z",

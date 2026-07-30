@@ -184,19 +184,13 @@ else
   add_manual "FMP api key missing in credentials/financial-modeling-prep-api.json"
 fi
 
-ALPACA_KEY="$(safe_jq '."api key" // empty' /home/aaron/.openclaw/credentials/alpaca-api.json)"
-ALPACA_SECRET="$(safe_jq '."secret" // empty' /home/aaron/.openclaw/credentials/alpaca-api.json)"
-ALPACA_EP="$(safe_jq '."endpoint" // "https://paper-api.alpaca.markets"' /home/aaron/.openclaw/credentials/alpaca-api.json)"
-if [[ -n "$ALPACA_KEY" && -n "$ALPACA_SECRET" ]]; then
-  BODY="$(curl -sS --max-time 12 -H "APCA-API-KEY-ID: ${ALPACA_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET}" "${ALPACA_EP}/clock" 2>&1 || true)"
-  if probe_json_ok "$BODY" '.timestamp != null'; then
-    add_pass "druck/alpaca: clock probe ok"
-  else
-    fail_with_reason "druck/alpaca" "$BODY" "Alpaca probe failed. Verify endpoint/key/secret in credentials/alpaca-api.json"
-  fi
+LEDGER_BODY="$(python3 /home/aaron/.openclaw/workspaces/executor/scripts/sim_broker.py \
+  integrity --book desk 2>&1 || true)"
+if probe_json_ok "$LEDGER_BODY" '.ok == true'; then
+  add_pass "autotrade/internal-paper: ledger integrity ok"
 else
-  add_fail "druck/alpaca: key/secret missing"
-  add_manual "Alpaca key/secret missing in credentials/alpaca-api.json"
+  add_fail "autotrade/internal-paper: ledger integrity failed"
+  add_manual "Run sim_broker.py integrity --book desk and inspect sim_accounts/sim_positions."
 fi
 
 if [[ -f "$SCHWAB_TOKEN" ]]; then

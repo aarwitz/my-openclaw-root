@@ -14,6 +14,7 @@ DB from sql/schema.sql and monkeypatch all network I/O.
 
 import os
 import sqlite3
+import subprocess
 import tempfile
 
 OC = os.path.expanduser("~/.openclaw")
@@ -39,6 +40,20 @@ def scratch_db():
     conn.executescript(open(f"{OC}/workspaces/trading-intel/sql/schema.sql").read())
     conn.commit()
     return conn, path
+
+
+def test_internal_paper_only():
+    result = subprocess.run(
+        ["python3", f"{OC}/scripts/check-internal-paper-only.py"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    check(
+        "retired broker cannot re-enter active architecture",
+        result.returncode == 0,
+        (result.stdout + result.stderr)[-800:],
+    )
 
 
 # ---------------------------------------------------------------- 1. fill math
@@ -96,25 +111,29 @@ def test_stop_breach():
         conn.execute("INSERT INTO positions (id, hypothesis_id, ticker, vehicle, qty, cost_basis, state, opened_at) "
                      "VALUES ('p1','h1','AAA','direct_equity',10,100.0,'open','2026-01-01T00:00:00Z')")
         conn.commit()
-        orig_db, orig_lt, orig_bars = es.DB_PATH, es.latest_trade, es.daily_bars
+        orig_db, orig_lts, orig_bars = es.DB_PATH, es.latest_trades, es.daily_bars
         try:
             es.DB_PATH = path
             es.daily_bars = lambda *a, **k: []          # momentum check fails closed -> hard exit
-            es.latest_trade = lambda t: {"price": 91.9}  # -8.1% — breach
+            es.latest_trades = lambda symbols: {
+                t: {"price": 91.9} for t in symbols
+            }  # -8.1% — breach
             import io, contextlib, json as _json
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 es.main(["--dry-run"])
             out = _json.loads(buf.getvalue())
             check("-8.1% flags breach", len(out["stop_breaches"]) == 1, buf.getvalue()[:120])
-            es.latest_trade = lambda t: {"price": 92.1}  # -7.9% — no breach
+            es.latest_trades = lambda symbols: {
+                t: {"price": 92.1} for t in symbols
+            }  # -7.9% — no breach
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 es.main(["--dry-run"])
             out = _json.loads(buf.getvalue())
             check("-7.9% does not flag", len(out["stop_breaches"]) == 0, buf.getvalue()[:120])
         finally:
-            es.DB_PATH, es.latest_trade, es.daily_bars = orig_db, orig_lt, orig_bars
+            es.DB_PATH, es.latest_trades, es.daily_bars = orig_db, orig_lts, orig_bars
     finally:
         conn.close()
         os.unlink(path)
@@ -158,7 +177,7 @@ def test_proceeds_guard():
 def test_instant_fill_lineage():
     """OUTCOME assertion, not mechanism: a filled desk order must never yield a
     fabricated HYP-SYNC hypothesis. Post-D52 instant sim fills bypassed the
-    lineage path twice (2026-07-06 Alpaca-slow-fill variant, 2026-07-15
+    lineage path twice (2026-07-06 delayed-fill variant, 2026-07-15
     sim-instant-fill variant); this test fails if any future refactor
     reintroduces either."""
     from datetime import datetime, timezone
@@ -221,7 +240,7 @@ def test_risk_caps():
 if __name__ == "__main__":
     sys.path.insert(0, f"{OC}/workspaces/risk/scripts")
     sys.path.insert(0, f"{OC}/workspaces/trader/scripts")
-    for t in (test_fill_price, test_apply_fill_ledger, test_stop_breach, test_proceeds_guard,
+    for t in (test_internal_paper_only, test_fill_price, test_apply_fill_ledger, test_stop_breach, test_proceeds_guard,
               test_instant_fill_lineage, test_risk_caps):
         print(f"== {t.__name__}")
         try:

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 HORIZONS = ["intraday", "swing_1_5d", "position_1_4w", "trend_1_3m", "long_6m_plus"]
 RED_THRESHOLD_BPS = -300

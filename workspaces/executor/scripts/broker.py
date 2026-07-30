@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""Broker adapter — the ONLY seam trading-state consumers import (D52).
+"""Internal paper-broker adapter — the only trading-state seam (D52).
 
-Presents the Alpaca-shaped surface (get_account / list_positions / list_orders /
-get_order / place_order / portfolio_history) backed by either:
-
-  sim     — the internal paper engine (sim_broker ledger, book='desk').
-            Deterministic fills at live quote ± spread, our own equity curve.
-            THE DEFAULT since the 2026-07-07 cutover (Alpaca served phantom
-            account states twice in one week; docs/07 P3).
-  alpaca  — the legacy passthrough. Escape hatch:
-            BROKER_BACKEND=alpaca or ~/.openclaw/config/broker-backend
+Presents the legacy broker-shaped surface (get_account / list_positions /
+list_orders / get_order / place_order / portfolio_history) backed only by the
+internal simulator (sim_broker ledger, book='desk'). There is deliberately no
+runtime switch to an external broker.
 
 Market DATA (daily_bars, latest_trade, market_clock, spy_trend) is NOT this
 module's job — data stays in connectors and gets its own multi-source story.
@@ -17,8 +12,6 @@ module's job — data stays in connectors and gets its own multi-source story.
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -26,24 +19,17 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from connectors import alpaca as _alpaca  # noqa: E402  (legacy alpaca backend only)
 from connectors import massive as _massive  # noqa: E402  (data feed for the sim backend)
-from connectors.alpaca import ConnectorError  # noqa: E402  (re-export for callers)
 
-_BACKEND_FILE = Path(os.path.expanduser("~/.openclaw/config/broker-backend"))
+
+class ConnectorError(RuntimeError):
+    """Internal paper-broker boundary failure."""
+
 DESK_BOOK = "desk"
 
 
 def backend() -> str:
-    b = (os.environ.get("BROKER_BACKEND") or "").strip().lower()
-    if b in ("sim", "alpaca"):
-        return b
-    try:
-        b = _BACKEND_FILE.read_text().strip().lower()
-        if b in ("sim", "alpaca"):
-            return b
-    except Exception:
-        pass
+    """The execution backend is intentionally non-configurable."""
     return "sim"
 
 
@@ -60,17 +46,13 @@ def _sim():
 # ---------------------------------------------------------------- account
 
 def get_account() -> dict:
-    if backend() == "alpaca":
-        return _alpaca.get_account()
     sb = _sim()
     conn = _conn()
     cash = sb.get_cash(conn, DESK_BOOK)
     equity = cash
     positions = sb.positions(conn, DESK_BOOK)
     for sym, pos in positions.items():
-        px = sb._mark_price(sym)
-        if px is None:
-            px = pos.get("cost_basis") or 0.0
+        px = pos.get("current_price") or pos.get("cost_basis") or 0.0
         equity += pos["qty"] * px
     row = conn.execute(
         "SELECT equity FROM book_equity WHERE book=? ORDER BY date DESC LIMIT 1 OFFSET 1",
@@ -89,13 +71,11 @@ def get_account() -> dict:
 
 
 def list_positions() -> list[dict]:
-    if backend() == "alpaca":
-        return _alpaca.list_positions()
     sb = _sim()
     conn = _conn()
     out = []
     for sym, pos in sb.positions(conn, DESK_BOOK).items():
-        px = sb._mark_price(sym) or (pos.get("cost_basis") or 0.0)
+        px = pos.get("current_price") or (pos.get("cost_basis") or 0.0)
         qty = pos["qty"]
         basis = pos.get("cost_basis") or 0.0
         mv = qty * px
@@ -116,8 +96,6 @@ def list_positions() -> list[dict]:
 
 
 def list_orders(status: str = "open", limit: int = 100) -> list[dict]:
-    if backend() == "alpaca":
-        return _alpaca.list_orders(status=status, limit=limit)
     if status == "open":
         return []  # sim fills are immediate
     conn = _conn()
@@ -133,8 +111,6 @@ def list_orders(status: str = "open", limit: int = 100) -> list[dict]:
 
 
 def get_order(order_id: str) -> dict:
-    if backend() == "alpaca":
-        return _alpaca.get_order(order_id)
     conn = _conn()
     r = conn.execute(
         "SELECT order_id, symbol, side, qty, fill_price, filled_at FROM sim_orders "
@@ -147,8 +123,6 @@ def get_order(order_id: str) -> dict:
 
 
 def portfolio_history(period: str = "all", timeframe: str = "1D") -> list[dict]:
-    if backend() == "alpaca":
-        return _alpaca.portfolio_history(period=period, timeframe=timeframe)
     conn = _conn()
     rows = conn.execute(
         "SELECT date, equity FROM book_equity WHERE book=? ORDER BY date", (DESK_BOOK,)).fetchall()
@@ -160,10 +134,6 @@ def portfolio_history(period: str = "all", timeframe: str = "1D") -> list[dict]:
 def place_order(symbol: str, qty: float, side: str, order_type: str = "market",
                 limit_price: float | None = None, time_in_force: str = "day",
                 client_order_id: str | None = None) -> dict:
-    if backend() == "alpaca":
-        return _alpaca.place_order(symbol, qty, side, order_type=order_type,
-                                   limit_price=limit_price, time_in_force=time_in_force,
-                                   client_order_id=client_order_id)
     sb = _sim()
     conn = _conn()
     live = _massive.latest_trade(symbol)  # data feed (Massive), not broker state
@@ -173,10 +143,15 @@ def place_order(symbol: str, qty: float, side: str, order_type: str = "market",
     if ref is None or ref <= 0:
         raise ConnectorError(f"sim place_order: no reference price for {symbol}")
     fill = sb.fill_price(symbol, side, ref)
-    # honor marketable-limit semantics: never fill a buy above / sell below limit
+    # The current simulator supports immediate marketable-limit fills only. A
+    # non-marketable limit must not be fabricated at the limit price.
     if limit_price is not None:
         lp = float(limit_price)
-        fill = min(fill, lp) if side == "buy" else max(fill, lp)
+        marketable = fill <= lp if side == "buy" else fill >= lp
+        if not marketable:
+            raise ConnectorError(
+                f"non-marketable internal-paper limit: {side} {symbol} simulated_fill={fill:.4f} limit={lp:.4f}"
+            )
     oid = client_order_id or f"sim-{uuid.uuid4().hex[:16]}"
     sb.ensure_book(conn, DESK_BOOK, cash=0.0)
     sb.apply_fill(conn, DESK_BOOK, symbol, side, float(qty), float(fill),

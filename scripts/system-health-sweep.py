@@ -160,9 +160,62 @@ def check_config_drift():
         return finding("config_drift", "warn", f"git diff check failed (rc={rc}): {out[:200]}")
     if not out:
         return finding("config_drift", "ok", "openclaw.json + .last-good match committed git state")
-    return finding("config_drift", "crit",
-                    "openclaw.json and/or .last-good have UNCOMMITTED drift from git HEAD — "
-                    "verify this is intentional, not a clobber-self-heal regression: " + out.replace("\n", " | "))
+    pair_match = False
+    try:
+        pair_match = (
+            open(f"{ROOT}/openclaw.json", "rb").read()
+            == open(f"{ROOT}/openclaw.json.last-good", "rb").read()
+        )
+    except OSError:
+        pass
+    ocl = _resolve_openclaw()
+    valid = False
+    if ocl:
+        valid = _run([ocl, "config", "validate"], timeout=25)[0] == 0
+    if pair_match and valid:
+        return finding(
+            "config_drift",
+            "warn",
+            "valid live config and last-good match each other but differ from git HEAD; "
+            "commit the intentional config change after verification: "
+            + out.replace("\n", " | "),
+        )
+    return finding(
+        "config_drift",
+        "crit",
+        "live config drift is unsafe (invalid and/or last-good disagrees); "
+        "inspect before restart: " + out.replace("\n", " | "),
+    )
+
+
+def check_internal_paper_only():
+    """The internal simulator is the only permitted execution/account backend."""
+    checker = f"{ROOT}/scripts/check-internal-paper-only.py"
+    rc, out = _run(["python3", checker], timeout=30)
+    try:
+        report = json.loads(out[out.index("{"):])
+    except Exception:
+        return finding(
+            "internal_paper_only",
+            "crit",
+            f"architecture invariant check unreadable (rc={rc}): {out[:180]}",
+        )
+    violations = report.get("violations", [])
+    if rc != 0 or violations:
+        details = [
+            f"{os.path.relpath(v.get('path', '?'), ROOT)}:{v.get('line', 0)}"
+            for v in violations[:5]
+        ]
+        return finding(
+            "internal_paper_only",
+            "crit",
+            "retired broker path/reference detected: " + ", ".join(details),
+        )
+    return finding(
+        "internal_paper_only",
+        "ok",
+        "execution/account architecture is locked to the internal paper ledger",
+    )
 
 
 def check_tokens():
@@ -353,11 +406,16 @@ def check_debrief_coverage():
     except Exception as e:
         return finding("debrief_coverage", "warn", f"query failed: {e}")
     from datetime import timedelta
-    d = datetime.now(timezone.utc).date()
+    from zoneinfo import ZoneInfo
+    sys.path.insert(0, f"{ROOT}/workspaces/trading-intel/scripts")
+    from connectors.marketdata import is_trading_day
+    d = datetime.now(timezone.utc).astimezone(
+        ZoneInfo("America/New_York")
+    ).date()
     missed, checked = [], 0
     while checked < 5:
         d -= timedelta(days=1)
-        if d.weekday() >= 5:          # skip weekends (holidays will rarely false-positive)
+        if not is_trading_day(d.isoformat()):
             continue
         checked += 1
         if d.isoformat() not in have:
@@ -500,10 +558,13 @@ def check_ledger_backup():
     """Since D52 the internal ledger IS the brokerage; a stale backup means the
     account has no disaster recovery (D54)."""
     import glob
-    files = sorted(glob.glob(f"{ROOT}/backups/ledger/trading-intel-*.sqlite"))
+    files = glob.glob(f"{ROOT}/backups/ledger/trading-intel-*.sqlite")
     if not files:
         return finding("ledger_backup", "crit", "NO ledger backups exist — the desk account has no recovery path")
-    age_h = (datetime.now(timezone.utc).timestamp() - os.path.getmtime(files[-1])) / 3600
+    # Timestamped daily and PRE-* recovery names do not share lexical order.
+    # Freshness is a filesystem fact; select the actual newest completed copy.
+    newest = max(files, key=os.path.getmtime)
+    age_h = (datetime.now(timezone.utc).timestamp() - os.path.getmtime(newest)) / 3600
     if age_h > 30:
         return finding("ledger_backup", "warn", f"newest ledger backup is {age_h:.0f}h old (daily expected)")
     return finding("ledger_backup", "ok", f"newest ledger backup {age_h:.1f}h old ({len(files)} retained)")
@@ -511,51 +572,52 @@ def check_ledger_backup():
 
 def check_learning_loop():
     """The keystone: predictions must RESOLVE once matured or calibration/Kelly
-    starve silently. grade_outcomes reported 'ok, graded 0' for weeks (correct —
-    first cohort matures 2026-07-10) but nothing would notice if it kept saying
-    that AFTER maturity. Approximates trading-day maturity with calendar days
-    (horizon trading days * 1.45); flags matured-but-unresolved predictions."""
+    starve silently. Ask the deterministic backlog resolver for an exact dry-run
+    using its actual trading-session windows; calendar-day approximations emit
+    false critical alerts around weekends and holidays."""
     db = f"{ROOT}/state/trading-intel.sqlite"
     if not os.path.exists(db):
         return finding("learning_loop", "warn", "trading-intel.sqlite not found")
-    horizon_cal = {"intraday": 2, "swing_1_5d": 5, "position_1_4w": 22, "trend_1_3m": 66, "long_6m_plus": 262}
+    resolver = f"{ROOT}/workspaces/trading-intel/scripts/resolve_prediction_backlog.py"
+    rc, out = _run(["python3", resolver, "--db", db, "--dry-run"], timeout=90)
+    if rc != 0:
+        return finding(
+            "learning_loop",
+            "warn",
+            f"prediction resolver dry-run failed (rc={rc}): {out[:180]}",
+        )
     try:
+        report = json.loads(out[out.index("{"):])
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
-        rows = c.execute(
-            "SELECT horizon, predicted_at FROM predictions WHERE resolved_at IS NULL").fetchall()
         resolved = c.execute("SELECT COUNT(*) FROM predictions WHERE resolved_at IS NOT NULL").fetchone()[0]
         c.close()
     except Exception as e:
-        return finding("learning_loop", "warn", f"predictions query failed: {e}")
-    now = datetime.now(timezone.utc)
-    overdue = 0
-    for horizon, predicted_at in rows:
-        try:
-            t0 = datetime.fromisoformat(str(predicted_at).replace("Z", "+00:00"))
-        except Exception:
-            continue
-        # +3 days grace beyond the calendar-approximated horizon before flagging
-        if (now - t0).days > horizon_cal.get(horizon, 22) + 3:
-            overdue += 1
-    if overdue:
+        return finding("learning_loop", "warn", f"prediction resolver output unreadable: {e}")
+    matured = int(report.get("matured", 0) or 0)
+    blocked = int(report.get("data_blocked", 0) or 0)
+    pending = int(report.get("scanned", 0) or 0)
+    if matured:
         return finding("learning_loop", "crit",
-                       f"{overdue} matured prediction(s) unresolved — grade_outcomes is not closing "
-                       f"the loop; calibration and Kelly sizing are running blind ({resolved} resolved lifetime)")
+                       f"{matured} trading-window-matured prediction(s) unresolved "
+                       f"({blocked} data-blocked) — resolver is not closing the loop; "
+                       f"calibration and Kelly sizing are running blind ({resolved} resolved lifetime)")
     return finding("learning_loop", "ok",
-                   f"no matured-unresolved predictions ({len(rows)} pending, {resolved} resolved lifetime)")
+                   f"no trading-window-matured unresolved predictions "
+                   f"({pending} pending, {resolved} resolved lifetime)")
 
 
 def check_offsite_backup():
-    """D57: all backups lived on the live host's own disk. backup-ledger.sh now
-    rsyncs to the mac node and stamps .last-offsite; >48h means one disk again
-    holds the account and all its copies."""
-    marker = f"{ROOT}/backups/ledger/.last-offsite"
-    if not os.path.exists(marker):
-        return finding("offsite_backup", "warn", "no offsite backup has ever succeeded (marker missing)")
-    age_h = (NOW - os.path.getmtime(marker)) / 3600
-    if age_h > 48:
-        return finding("offsite_backup", "warn", f"last offsite backup {age_h:.0f}h ago (mac node unreachable?)")
-    return finding("offsite_backup", "ok", f"offsite copy {age_h:.1f}h old")
+    """The powered-off Mac is an iOS builder, not a trading dependency.
+
+    This desk is an internal-paper simulation. Local WAL-safe, integrity-checked
+    backups are enforced separately by check_ledger_backup; an external recovery
+    target becomes a release prerequisite only if a real-money mode is designed.
+    """
+    return finding(
+        "offsite_backup",
+        "ok",
+        "not required for internal-paper simulation; Mac node is iOS-build-only",
+    )
 
 
 def check_integrity():
@@ -674,7 +736,7 @@ def check_provenance():
 
 
 CHECKS = [
-    check_gateway, check_telegram, check_cron, check_config_drift, check_tokens,
+    check_gateway, check_telegram, check_cron, check_config_drift, check_internal_paper_only, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,

@@ -115,7 +115,7 @@ def _hours_old(retrieved_at_iso: str | None) -> float | None:
     return (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
 
 
-# Connector library: shared FRED + Alpaca helpers under trading-intel/scripts/connectors.
+# Connector library: shared FRED, Cboe/Yahoo, and Massive/FMP helpers.
 # Imported lazily so a broken/missing connector for one signal does not crash the script.
 _CONNECTORS_PATH = Path(
     "/home/aaron/.openclaw/workspaces/trading-intel/scripts"
@@ -154,7 +154,7 @@ def _safe(fn, name: str, source: str) -> SignalReading:
 
 def read_spy_trend() -> SignalReading:
     from connectors.marketdata import spy_trend
-    return _safe(spy_trend, "spy_trend", "alpaca_market_data:SPY:1Day")
+    return _safe(spy_trend, "spy_trend", "massive_or_fmp:SPY:1Day")
 
 
 def read_credit_spreads() -> SignalReading:

@@ -75,28 +75,50 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _regime_current(conn) -> str:
+def _regime_as_of(conn, event_date: str) -> str:
     row = conn.execute(
-        "SELECT current FROM regime ORDER BY determined_at DESC LIMIT 1"
+        "SELECT current FROM regime WHERE determined_at < ? "
+        "ORDER BY determined_at DESC LIMIT 1",
+        (event_date[:10] + "T23:59:59Z",),
     ).fetchone()
     return row["current"] if row else "unknown"
 
 
-def _index_moves() -> dict:
+def _move_as_of(bars: list[dict], event_date: str) -> float | None:
+    """Close-to-close percent move ending on ``event_date``.
+
+    Backfills must never use the newest two bars: that silently writes today's
+    market under an old event date.
+    """
+    eligible = [
+        bar for bar in bars
+        if str(bar.get("t") or "")[:10] <= event_date[:10] and bar.get("c") is not None
+    ]
+    if len(eligible) < 2 or str(eligible[-1].get("t") or "")[:10] != event_date[:10]:
+        return None
+    prev, last = float(eligible[-2]["c"]), float(eligible[-1]["c"])
+    return round((last - prev) / prev * 100.0, 3) if prev else None
+
+
+def _index_moves(event_date: str) -> dict:
     moves: dict[str, float] = {}
     for sym in INDEX_PROXIES:
         try:
-            bars = daily_bars(sym, days=5)
+            bars = daily_bars(sym, days=260)
         except ConnectorError:
             continue
-        if len(bars) >= 2:
-            prev, last = float(bars[-2]["c"]), float(bars[-1]["c"])
-            if prev:
-                moves[sym] = round((last - prev) / prev * 100.0, 3)
+        move = _move_as_of(bars, event_date)
+        if move is not None:
+            moves[sym] = move
     return moves
 
 
-def _tracked_big_moves(conn, min_abs_pct: float = 2.0, cap: int = 12) -> dict:
+def _tracked_big_moves(
+    conn,
+    event_date: str,
+    min_abs_pct: float = 2.0,
+    cap: int = 12,
+) -> dict:
     """Deterministic single-name moves for the tracked universe (book + recent ideas).
 
     Single-name moves used to arrive ONLY via the optional --moves flag, i.e. an LLM
@@ -108,12 +130,15 @@ def _tracked_big_moves(conn, min_abs_pct: float = 2.0, cap: int = 12) -> dict:
     try:
         for r in conn.execute(
             "SELECT DISTINCT UPPER(ticker) t FROM positions "
-            "WHERE state IN ('opening','open','scaling','trimming','closing')"
+            "WHERE opened_at < ? AND (closed_at IS NULL OR closed_at >= ?)",
+            (event_date[:10] + "T23:59:59Z", event_date[:10] + "T00:00:00Z"),
         ):
             if r["t"]:
                 names.add(r["t"])
         for r in conn.execute(
-            "SELECT tickers FROM hypotheses WHERE created_at >= datetime('now','-30 days')"
+            "SELECT tickers FROM hypotheses WHERE created_at <= ? "
+            "AND created_at >= datetime(?,'-30 days')",
+            (event_date[:10] + "T23:59:59Z", event_date[:10]),
         ):
             try:
                 names.update(str(t).upper() for t in json.loads(r["tickers"] or "[]"))
@@ -124,20 +149,20 @@ def _tracked_big_moves(conn, min_abs_pct: float = 2.0, cap: int = 12) -> dict:
     moves: dict[str, float] = {}
     for sym in sorted(names - set(INDEX_PROXIES)):
         try:
-            bars = daily_bars(sym, days=5)
+            bars = daily_bars(sym, days=260)
         except (ConnectorError, Exception):
             continue
-        if len(bars) >= 2:
-            prev, last = float(bars[-2]["c"]), float(bars[-1]["c"])
-            if prev and abs((last - prev) / prev * 100.0) >= min_abs_pct:
-                moves[sym] = round((last - prev) / prev * 100.0, 3)
+        move = _move_as_of(bars, event_date)
+        if move is not None and abs(move) >= min_abs_pct:
+            moves[sym] = move
     return dict(sorted(moves.items(), key=lambda kv: -abs(kv[1]))[:cap])
 
 
-def _latest_snapshot(conn) -> sqlite3.Row | None:
+def _snapshot_for_date(conn, event_date: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT day_pl, equity FROM portfolio_snapshots "
-        "ORDER BY captured_at DESC LIMIT 1"
+        "WHERE substr(captured_at,1,10)=? ORDER BY captured_at DESC LIMIT 1",
+        (event_date[:10],),
     ).fetchone()
 
 
@@ -186,6 +211,11 @@ def main(argv=None) -> int:
                    choices=("benefited", "suffered", "neutral", "flat"))
     p.add_argument("--sources", default=None, help="JSON array of source URLs/refs")
     p.add_argument("--experiment-id", default=EXPERIMENT_DEFAULT)
+    p.add_argument(
+        "--allow-additional-event",
+        action="store_true",
+        help="permit a second event row for the same date (default enforces one daily debrief)",
+    )
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
 
@@ -220,14 +250,24 @@ def main(argv=None) -> int:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return EXIT_FAIL_LOUD
 
-    observed_moves = _index_moves()
-    observed_moves.update(_tracked_big_moves(conn))   # deterministic single-name moves
+    existing = conn.execute(
+        "SELECT id FROM market_events WHERE event_date=? LIMIT 1", (args.date[:10],)
+    ).fetchone()
+    if existing and not args.allow_additional_event:
+        print(json.dumps({
+            "error": f"market debrief already exists for {args.date[:10]}",
+            "existing_event_id": existing["id"],
+        }), file=sys.stderr)
+        return EXIT_FAIL_LOUD
+
+    observed_moves = _index_moves(args.date)
+    observed_moves.update(_tracked_big_moves(conn, args.date))
     observed_moves.update(extra_moves)                # LLM extras may ADD, never required
 
-    snap = _latest_snapshot(conn)
+    snap = _snapshot_for_date(conn, args.date)
     day_pl = float(snap["day_pl"]) if snap and snap["day_pl"] is not None else None
     alignment = args.alignment or _infer_alignment(day_pl)
-    regime = _regime_current(conn)
+    regime = _regime_as_of(conn, args.date)
 
     event_id = "mev-" + uuid.uuid4().hex[:20]
     attributed = [m[0] for m in mechs]

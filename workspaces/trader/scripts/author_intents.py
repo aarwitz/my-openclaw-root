@@ -68,6 +68,7 @@ KELLY_SCALE = 0.25             # quarter-Kelly
 KELLY_CAP = 0.10               # never suggest > 10% of equity pre-risk-gate
 RETRIEVE_EPISODES = "/home/aaron/.openclaw/workspaces/trading-intel/scripts/retrieve_episodes.py"
 MAX_POSITIONS_ASSUMED = int(os.environ.get("TRADER_MAX_POSITIONS_ASSUMED", "48"))
+MIN_P_CORRECT = float(os.environ.get("TRADER_MIN_P_CORRECT", "0.52"))
 
 
 def _now_iso() -> str:
@@ -104,7 +105,8 @@ def _regime_current(conn) -> str:
 def _latest_prediction(conn, hyp_id: str):
     """Most recent unresolved world-model prediction for this hypothesis."""
     return conn.execute(
-        "SELECT id, p_correct, return_p10, return_p50, return_p90, horizon "
+        "SELECT id, predicted_at, p_correct, return_p10, return_p50, return_p90, "
+        "horizon, mechanism_ids_json "
         "FROM predictions WHERE hypothesis_id = ? AND resolved_at IS NULL "
         "ORDER BY predicted_at DESC LIMIT 1",
         (hyp_id,),
@@ -120,23 +122,26 @@ def _kelly_sizing(pred, equity: float, *, kelly_scale: float = KELLY_SCALE,
     not author an intent with no probabilistic edge.
     """
     if pred is None:
-        return {"sizing_basis": "baseline_1pct", "kelly_fraction": None,
-                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+        return {"sizing_basis": "none", "kelly_fraction": None,
+                "notional_raw": 0.0, "skip": True, "reason": "missing_prediction",
                 "p_correct": None}
     p = float(pred["p_correct"])
+    p50 = float(pred["return_p50"]) if pred["return_p50"] is not None else 0.0
+    if p < MIN_P_CORRECT or p50 <= 0:
+        return {"sizing_basis": "none", "kelly_fraction": 0.0,
+                "notional_raw": 0.0, "skip": True,
+                "reason": f"weak_prediction:p={p:.4f},p50={p50:.4f}",
+                "p_correct": p, "prediction_id": pred["id"]}
     up = float(pred["return_p90"]) if pred["return_p90"] is not None else 0.0
     down = abs(float(pred["return_p10"])) if pred["return_p10"] is not None else 0.0
     if up <= 0 or down <= 0:
-        return {"sizing_basis": "baseline_1pct", "kelly_fraction": None,
-                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+        return {"sizing_basis": "none", "kelly_fraction": None,
+                "notional_raw": 0.0, "skip": True, "reason": "invalid_return_band",
                 "p_correct": p, "prediction_id": pred["id"]}
     frac = wm.kelly_fraction(p, up, down, kelly_scale=kelly_scale, cap=kelly_cap)
     if frac <= 0:
-        # Neutral or slightly negative prediction bands should not zero the queue when
-        # the desk still has a ready hypothesis. Fall back to the baseline starter size
-        # and let the episode context + downstream risk gate shape the final exposure.
-        return {"sizing_basis": "baseline_1pct", "kelly_fraction": 0.0,
-                "notional_raw": SIZE_PCT_OF_EQUITY * equity, "skip": False,
+        return {"sizing_basis": "none", "kelly_fraction": 0.0,
+                "notional_raw": 0.0, "skip": True, "reason": "nonpositive_kelly",
                 "p_correct": p, "prediction_id": pred["id"]}
     return {"sizing_basis": "kelly", "kelly_fraction": round(frac, 4),
             "notional_raw": frac * equity, "skip": False, "p_correct": p,
@@ -451,16 +456,16 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     )
     if sizing.get("skip"):
         return {"id": hid, "ticker": ticker, "skip": True,
-                "reason": f"no_probabilistic_edge (p={sizing.get('p_correct')}, kelly=0)"}
+                "reason": f"no_probabilistic_edge:{sizing.get('reason')} "
+                          f"(p={sizing.get('p_correct')}, kelly={sizing.get('kelly_fraction')})"}
 
-    baseline_notional = governor["size_pct"] * equity
-    raw_notional = max(float(sizing["notional_raw"]), baseline_notional)
+    raw_notional = float(sizing["notional_raw"])
     dyn_ceiling = min(governor["notional_ceiling"], governor["kelly_cap_effective"] * equity)
-    notional = max(governor["notional_floor"], min(dyn_ceiling, raw_notional * episode_mult * horizon_mult))
+    notional = min(dyn_ceiling, raw_notional * episode_mult * horizon_mult)
     notional = min(notional, cash_remaining)
-    if notional < min(governor["notional_floor"], cash_remaining):
+    if notional < governor["notional_floor"]:
         return {"id": hid, "ticker": ticker, "skip": True,
-                "reason": f"insufficient_cash_remaining={cash_remaining:.2f}"}
+                "reason": f"edge_sized_notional={notional:.2f} below floor={governor['notional_floor']:.2f}"}
     qty = int(math.floor(notional / last))
     if qty < 1:
         if last <= cash_remaining and last <= KELLY_CAP * equity:
@@ -493,7 +498,7 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
 
     intent_id = "ti-" + uuid.uuid4().hex[:24]
     ec_id = "ec-" + uuid.uuid4().hex[:24]
-    conviction = sizing.get("kelly_fraction") or SIZE_PCT_OF_EQUITY
+    conviction = sizing["kelly_fraction"]
     if dry_run:
         return {
             "id": hid, "ticker": ticker, "would_author": True,
@@ -611,6 +616,17 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     conn = _connect()
+    active_edge_count = conn.execute(
+        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
+    ).fetchone()[0]
+    if active_edge_count == 0:
+        print(json.dumps({
+            "authored": 0,
+            "skipped_all": True,
+            "reason": "no robust active mechanisms; open-risk authoring quarantined",
+            "swap_exits": [],
+        }, indent=2))
+        return 0
     regime = _regime_current(conn)
     if regime == "risk_off":
         print(json.dumps({"authored": 0, "skipped_all": True,
@@ -620,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         equity, cash_remaining = _account_snapshot()
     except ConnectorError as exc:
-        print(json.dumps({"error": f"alpaca_account: {exc}",
+        print(json.dumps({"error": f"internal_paper_account: {exc}",
                           "authored": 0}, indent=2))
         return 2
 

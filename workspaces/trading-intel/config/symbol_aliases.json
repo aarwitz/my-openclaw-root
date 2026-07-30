@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "aliases": [
+    {
+      "old": "LAAC",
+      "new": "LAR",
+      "effective_date": "2025-01-24",
+      "reason": "Lithium Americas (Argentina) renamed Lithium Argentina AG and began trading under LAR.",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1440972/000095017025040632/lar-ex99_3.htm"
+    }
+  ]
+}

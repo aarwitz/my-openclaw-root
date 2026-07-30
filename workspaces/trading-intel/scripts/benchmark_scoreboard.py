@@ -2,7 +2,7 @@
 """Deterministic benchmark scoreboard: portfolio vs SPY at every horizon.
 
 The single source of truth for "are we beating the S&P". Reads daily account
-equity from Alpaca portfolio history and SPY daily closes, aligns the two
+equity from the owned paper ledger and SPY daily closes, aligns the two
 series by trading date, and writes one `benchmarks` row per horizon:
 
   intraday        last trading day
@@ -17,8 +17,9 @@ sharpe_estimate = annualised mean/std of daily (portfolio - SPY) excess
 returns over the window (needs >= 5 points, else NULL).
 
 --backfill additionally inserts one `portfolio_snapshots` row per historical
-trading day that has no snapshot yet (source='alpaca_history_backfill') so the
-app can chart the full equity curve. Idempotent: one row per trading date.
+trading day that has no snapshot yet. Rows before the internal-ledger epoch
+are explicitly labeled legacy history; rows from the epoch forward are labeled
+internal paper history. Idempotent: one row per trading date.
 
 Usage:
   python3 benchmark_scoreboard.py [--backfill] [--dry-run] [--run-id ID]
@@ -36,7 +37,7 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/developer/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors.marketdata import ConnectorError, daily_bars  # noqa: E402
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import portfolio_history  # noqa: E402  (adapter, D52)
@@ -162,10 +163,15 @@ def backfill_snapshots(conn, series: list[dict]) -> int:
             "SELECT cash FROM book_equity WHERE book='desk' AND date=?", (cur["date"],)
         ).fetchone()
         cash_val = float(cash_row[0]) if cash_row and cash_row[0] is not None else None
+        source = (
+            "internal_paper_history"
+            if cur["date"] >= SYSTEM_EPOCH
+            else "legacy_external_history"
+        )
         conn.execute(
             "INSERT INTO portfolio_snapshots (id, captured_at, equity, last_equity, day_pl, "
             "cash, buying_power, spy_close, spy_as_of, account_status, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 'alpaca_history_backfill')",
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)",
             (
                 f"PSNAP-{uuid.uuid4().hex[:12]}",
                 f"{cur['date']}T21:00:00Z",  # market close (approx, UTC)
@@ -175,6 +181,7 @@ def backfill_snapshots(conn, series: list[dict]) -> int:
                 cash_val,
                 cur["spy_close"],
                 f"{cur['date']}T21:00:00Z",
+                source,
             ),
         )
         inserted += 1
@@ -185,7 +192,7 @@ def backfill_snapshots(conn, series: list[dict]) -> int:
             entity_type="portfolio_snapshot",
             entity_id=f"backfill-{series[-1]['date']}",
             action="history_backfill",
-            rationale=f"{inserted} daily rows from alpaca portfolio history",
+            rationale=f"{inserted} daily rows from owned paper-ledger history",
         )
     return inserted
 

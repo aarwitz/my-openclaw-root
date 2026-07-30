@@ -36,6 +36,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import worldmodel as wm
+
 DB_PATH = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 ROOT = Path(os.path.expanduser("~/.openclaw"))
 RELINK_PROPOSAL_ID = "rp-brier-root-relink-20260724"
@@ -302,23 +304,25 @@ def _apply_relink_plan(conn: sqlite3.Connection, plan: dict, backup: dict) -> di
         ).rowcount
         obs_deleted += max(0, deleted)
 
-        for link_item in change["new_links"]:
+        for link_item, credit_weight in wm.allocate_prediction_credit(change["new_links"]):
             outcome = _observation_outcome(change["realized_outcome"], int(link_item.get("align", 1) or 1))
             if outcome is None:
                 continue
             conn.execute(
                 "INSERT INTO mechanism_observations (id, mechanism_id, observed_at, "
                 "source_type, source_id, outcome, weight, regime_at_obs, notes, experiment_id) "
-                "VALUES (?, ?, ?, 'prediction', ?, ?, 1.0, ?, ?, ?)",
+                "VALUES (?, ?, ?, 'prediction', ?, ?, ?, ?, ?, ?)",
                 (
                     "mobs-" + uuid.uuid4().hex[:20],
                     link_item["id"],
                     change["resolved_at"] or _now_iso(),
                     change["prediction_id"],
                     outcome,
+                    credit_weight,
                     change["regime_at_prediction"],
                     f"TM-288 relink from prediction {change['prediction_id']} "
-                    f"(align={int(link_item.get('align', 1) or 1)}, thesis={change['realized_outcome']})",
+                    f"(align={int(link_item.get('align', 1) or 1)}, "
+                    f"thesis={change['realized_outcome']}, credit={credit_weight:.6f})",
                     RELINK_PROPOSAL_ID,
                 ),
             )

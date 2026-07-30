@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic builder for the product app's data.json.
 
-Reads canonical SQLite + (optionally) Alpaca + cron-run state, computes the
+Reads canonical SQLite + the internal paper broker + cron-run state, computes the
 shape consumed by `/repos/lidi-solutions/public/solutions/trader_intel/app/`,
 and writes it atomically (temp file + rename).
 
@@ -47,11 +47,12 @@ AGENTS = (
     {"id": "researcher", "name": "Researcher", "emoji": "🔎"},
     {"id": "quant", "name": "Quant", "emoji": "🧮"},
     {"id": "critic", "name": "Critic", "emoji": "⚖️"},
-    {"id": "archivist", "name": "Archivist", "emoji": "📚"},
     {"id": "trader", "name": "Trader", "emoji": "💰"},
+    {"id": "risk", "name": "Risk", "emoji": "🛡️"},
     {"id": "executor", "name": "Executor", "emoji": "⚙️"},
-    {"id": "developer", "name": "Developer", "emoji": "🛠️"},
+    {"id": "archivist", "name": "Archivist", "emoji": "📚"},
     {"id": "overseer", "name": "AutoTrade", "emoji": "🤖"},
+    {"id": "developer", "name": "Developer", "emoji": "🛠️"},
 )
 
 # Temporary deterministic corporate-action overrides until a full upstream
@@ -443,47 +444,25 @@ def _snapshot_spy_comparison(points: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _enrich_positions_canonical(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Make the Holdings/Portfolio numbers PERFECT from canonical truth (2026-07-24,
-    operator-requested). The sim adapter's rows carried no intraday fields (Day P&L
-    rendered $0.00 forever), inconsistent unrealized dollars, and long-only arithmetic
-    that breaks on shorts. Per symbol:
-      * unrealized_pl / unrealized_plpc from the MARKED canonical positions
-        (mark_positions is sign-aware; shorts correct), falling back to mv - cost.
-      * unrealized_intraday_pl + change_today from prev close via marketdata bars —
-        the incomplete-bar guard means the last cached bar during a session IS
-        yesterday's close, exactly the intraday reference needed.
-      * direction long/short from qty sign.
+    """Add display-only intraday fields without overriding owned-ledger truth.
+
+    The internal paper adapter already returns sign-correct quantity, value,
+    total cost basis, and unrealized P&L. The strategy ``positions`` table is a
+    downstream mirror with an independently refreshed mark; mixing its P&L
+    into adapter rows can produce impossible combinations (ledger price/value
+    plus strategy P&L from a different timestamp). Only enrich:
+      * unrealized_intraday_pl + change_today from the prior daily close.
+      * direction long/short from quantity sign.
     """
     try:
         from connectors.marketdata import daily_bars
     except Exception:
         daily_bars = None
-    canon: dict[str, dict[str, float]] = {}
-    try:
-        c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-        c.row_factory = sqlite3.Row
-        for r in c.execute(
-            "SELECT UPPER(ticker) t, SUM(pnl_ideal) pl, "
-            "SUM(COALESCE(current_value, qty*cost_basis)) mv, "
-            "SUM(qty*cost_basis) cost "
-            "FROM positions WHERE state IN ('opening','open','scaling','trimming','closing') "
-            "GROUP BY UPPER(ticker)"
-        ):
-            canon[r["t"]] = {"pl": r["pl"], "mv": r["mv"], "cost": r["cost"]}
-        c.close()
-    except sqlite3.Error:
-        pass
     for row in rows:
         sym = str(row.get("symbol") or row.get("ticker") or "").upper()
         qty = _safe_float(row.get("qty"), 0.0) or 0.0
         price = _safe_float(row.get("current_price"), None)
         row["direction"] = "short" if qty < 0 else "long"
-        cn = canon.get(sym)
-        if cn and cn.get("pl") is not None:
-            row["unrealized_pl"] = round(float(cn["pl"]), 2)
-            cost = cn.get("cost")
-            if cost:
-                row["unrealized_plpc"] = round(float(cn["pl"]) / abs(float(cost)), 6)
         if daily_bars is not None and price and qty:
             try:
                 bars = [b for b in daily_bars(sym, days=6) if b.get("c")]
@@ -513,7 +492,7 @@ def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[
         ]
         broker = {
             "status": acct.get("status"),
-            "source": acct.get("source", "alpaca"),
+            "source": acct.get("source", "sim"),
             "account_number": acct.get("account_number"),
             "equity": _safe_float(acct.get("equity"), 0.0),
             "last_equity": _safe_float(acct.get("last_equity"), 0.0),
@@ -522,7 +501,7 @@ def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[
             "day_pl": _safe_float(acct.get("equity"), 0.0)
             - _safe_float(acct.get("last_equity"), 0.0),
             "available": True,
-            "name": "alpaca_paper",
+            "name": "internal_paper",
             "pnl_available": len(blocking_norm_issues) == 0,
             "normalization_issues": norm_issues,
         }
@@ -530,7 +509,7 @@ def _load_broker_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]], list[
     except ConnectorError as exc:
         return (
             {
-                "name": "alpaca_paper",
+                "name": "internal_paper",
                 "available": False,
                 "note": f"connector_error: {str(exc)[:180]}",
             },
@@ -727,13 +706,16 @@ def _build_system_health(
 
 
 def _load_sim_books(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Internal paper-engine books (docs/07): daily equity curves + holdings.
-    'shadow' validates our ledger vs Alpaca; 'model' is the GBM ranker's live
-    long-only top-decile track record (P2)."""
+    """Operational internal-paper books only.
+
+    Historical shadow rows are retained in SQLite for audit continuity but are
+    inert and intentionally absent from the GUI/agent snapshot.
+    """
     books: dict[str, Any] = {}
     try:
         for book, cash, starting, created in conn.execute(
-                "SELECT book, cash, starting_cash, created_at FROM sim_accounts"):
+                "SELECT book, cash, starting_cash, created_at FROM sim_accounts "
+                "WHERE book IN ('desk','model')"):
             curve = [
                 {"date": d, "equity": _safe_float(e), "cash": _safe_float(c)}
                 for d, e, c in conn.execute(

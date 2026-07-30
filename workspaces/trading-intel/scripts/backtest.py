@@ -7,7 +7,8 @@ against strictly-future bars. It tests each signal's edge against the EMPIRICAL 
 rate and against SPY (never vs 50%), splits a final holdout it never fits on, and
 applies Benjamini-Hochberg across signals so we don't fool ourselves.
 
-Reads split-adjusted Alpaca bars. Writes results to ~/.openclaw/state/backtest.sqlite.
+Reads point-in-time feature-store prices sourced from Massive/FMP. Writes
+results to ~/.openclaw/state/backtest.sqlite.
 **Never touches the live trading-intel.sqlite** — safe to run before the world-model reset.
 
   python3 backtest.py --days 2000 --test-months 6 [--universe AAPL,MSFT,...] [--equity-signal trend]

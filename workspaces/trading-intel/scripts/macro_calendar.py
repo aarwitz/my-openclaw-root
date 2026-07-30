@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/developer/scripts")
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors._http import ConnectorError  # noqa: E402
 from connectors.fred import fetch_series  # noqa: E402
 

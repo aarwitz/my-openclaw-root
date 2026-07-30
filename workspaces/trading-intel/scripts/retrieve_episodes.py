@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/developer/scripts")
-from _db import connect, now_iso  # noqa: E402
+from developer_db import connect, now_iso  # noqa: E402
 
 CONF_PRIOR = {"high": 0.15, "medium": 0.08, "low": 0.03}
 

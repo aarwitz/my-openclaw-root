@@ -2,20 +2,20 @@
 """Archivist · calibrate.py — the world-model learning engine.
 
 Runs the closed feedback loop that turns realized outcomes into model updates.
-Three stages, executed in order:
+Two active stages, executed in order:
 
-  1. resolve_predictions   — for every unresolved `predictions` row whose
-     hypothesis has been graded (`hypotheses.resolved_state` set), compute the
-     Brier component, mark the prediction resolved, and emit one append-only
-     `mechanism_observations` row per linked mechanism (respecting alignment:
-     an *opposing* mechanism scores a HIT when the thesis turned out WRONG).
+  Prediction outcome resolution is deliberately NOT performed here. It belongs
+  to `resolve_prediction_backlog.py`, which grades every forecast from its own
+  timestamp and horizon. Resolving from `hypotheses.resolved_state` mixed trade
+  lifecycle outcomes with forecast outcomes and could resolve a long-horizon
+  call early after a stop.
 
-  2. recompute_mechanisms  — for every mechanism, re-derive its Beta posterior
+  1. recompute_mechanisms  — for every mechanism, re-derive its Beta posterior
      from the full `mechanism_observations` ledger with half-life decay, then
      write back observed_hits / observed_misses / posterior_mean / CI.
      This is AUTONOMOUS: data accumulation never needs human approval.
 
-  3. propose_structural    — draft gated `rule_proposals` for changes that DO
+  2. propose_structural    — draft gated `rule_proposals` for changes that DO
      need a human: candidate→active promotion, active→deprecated retirement,
      and a scoring-recalibration review when aggregate Brier degrades.
      Structural changes are proposals only; a human approves/applies them.
@@ -170,9 +170,9 @@ def resolve_predictions(conn, now, exp, dry_run) -> list[dict]:
         brier = round((float(r["p_correct"]) - bit) ** 2, 6)
         resolved_at = r["resolved_at"] or _now_iso()
 
-        links = _mechanism_links(r["mechanism_ids_json"])
+        links = wm.allocate_prediction_credit(_mechanism_links(r["mechanism_ids_json"]))
         obs_written = 0
-        for link in links:
+        for link, credit_weight in links:
             align = link["align"]
             # Supporting mechanism is right when the thesis is right; an opposing
             # mechanism is right when the thesis is WRONG.
@@ -183,10 +183,11 @@ def resolve_predictions(conn, now, exp, dry_run) -> list[dict]:
                 conn.execute(
                     "INSERT INTO mechanism_observations (id, mechanism_id, observed_at, "
                     "source_type, source_id, outcome, weight, regime_at_obs, notes, "
-                    "experiment_id) VALUES (?, ?, ?, 'prediction', ?, ?, 1.0, ?, ?, ?)",
-                    (oid, link["id"], resolved_at, r["id"], mobs,
+                    "experiment_id) VALUES (?, ?, ?, 'prediction', ?, ?, ?, ?, ?, ?)",
+                    (oid, link["id"], resolved_at, r["id"], mobs, credit_weight,
                      r["regime_at_prediction"],
-                     f"from prediction {r['id']} (align={align}, thesis={outcome})", exp),
+                     f"from prediction {r['id']} (align={align}, thesis={outcome}, "
+                     f"credit={credit_weight:.6f})", exp),
                 )
             obs_written += 1
 
@@ -421,7 +422,10 @@ def main(argv=None) -> int:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return EXIT_FAIL_LOUD
 
-    resolved = [] if args.no_resolve else resolve_predictions(conn, now, exp, args.dry_run)
+    # Compatibility: keep --no-resolve accepted for old callers, but never
+    # resolve forecasts from a hypothesis lifecycle grade. Prediction-level
+    # grading is owned by resolve_prediction_backlog.py / grade_outcomes.py.
+    resolved = []
     mech_changes = [] if args.no_recompute else recompute_mechanisms(conn, now, exp, args.dry_run)
     calib = compute_calibration(conn)
     expectancy = mechanism_expectancy(conn)
@@ -434,6 +438,7 @@ def main(argv=None) -> int:
     print(json.dumps({
         "dry_run": bool(args.dry_run),
         "experiment_id": exp,
+        "prediction_resolution_owner": "resolve_prediction_backlog.py",
         "predictions_resolved": len(resolved),
         "mechanisms_recomputed": sum(1 for c in mech_changes if c["moved"]),
         "mechanisms_total": len(mech_changes),

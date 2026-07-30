@@ -6,12 +6,18 @@ set -uo pipefail
 #
 # Since the D52 cutover the internal ledger IS the brokerage: positions, cash,
 # fills, and the equity curve live in state/trading-intel.sqlite. Losing it is
-# no longer "re-sync from Alpaca" — it is the account ceasing to exist.
+# there is no external account to reconstruct it from — loss means the simulated
+# account ceases to exist.
 #
 # - sqlite3 online-backup API via python (safe under WAL, no locking games)
 # - integrity_check on the COPY before it counts as a backup
 # - retention: 14 daily + first-of-month kept 12 months
-# - features.sqlite (5.5GB, reproducible from vendors) gets weekly VACUUM INTO
+# - features.sqlite (reproducible from vendors) gets weekly VACUUM INTO
+#
+# The Mac node is intentionally not a backup target: it is powered on only for
+# iOS builds and must never be an AutoTrade availability dependency. If this
+# internal-paper system ever gains a real-money mode, independent off-host
+# recovery is a release prerequisite, not an optional best-effort rsync.
 
 OC="$HOME/.openclaw"
 DST="$OC/backups/ledger"
@@ -49,18 +55,6 @@ s.execute(f"VACUUM INTO '{sys.argv[2]}'")
 print(f"features snapshot ok: {sys.argv[2]}")
 PY
   ls -t features-*.sqlite 2>/dev/null | tail -n +3 | xargs -r rm -f
-fi
-# D57: offsite copy — one disk must never hold the account AND all its backups.
-# mac-dev is a laptop (often asleep): soft-fail, stamp on success, sweep warns
-# when the marker goes >48h stale.
-OFFSITE="taylorolsen-vogt@100.125.133.123"
-NEWEST=$(ls -t "$DST"/trading-intel-*.sqlite | head -1)
-if timeout 120 rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=8" \
-    "$NEWEST" "$OFFSITE:openclaw-backups/ledger/" 2>/dev/null; then
-  touch "$DST/.last-offsite"
-  echo "offsite ok: $(basename "$NEWEST")"
-else
-  echo "offsite SKIPPED (mac unreachable) — sweep will warn at 48h"
 fi
 
 echo "ledger backup complete $STAMP"

@@ -50,6 +50,31 @@ def _rows(conn, q, *a):
 
 def data_reality(conn) -> list[dict]:
     out = []
+    # SQLite does not enforce foreign keys unless every writer opts in. A
+    # clean table count can therefore hide learning records whose mechanism or
+    # hypothesis was deleted. Treat every orphan as a hard integrity failure.
+    try:
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        sample = ", ".join(
+            f"{r[0]} rowid={r[1]} -> {r[2]}" for r in violations[:5]
+        )
+        out.append({
+            "family": "data",
+            "id": "integrity:foreign_keys",
+            "status": "RED" if violations else "OK",
+            "detail": (
+                f"{len(violations)} orphaned foreign-key reference(s)"
+                + (f": {sample}" if sample else "")
+            ),
+        })
+    except sqlite3.Error as exc:
+        out.append({
+            "family": "data",
+            "id": "integrity:foreign_keys",
+            "status": "RED",
+            "detail": f"cannot run foreign_key_check: {exc}",
+        })
+
     for tbl, col, where, max_frac, label in NULL_HOLE_CHECKS:
         try:
             r = conn.execute(f"SELECT COUNT(*) n, SUM({col} IS NULL) nulls FROM {tbl} WHERE {where}").fetchone()
@@ -65,6 +90,37 @@ def data_reality(conn) -> list[dict]:
             "family": "data", "id": f"nullhole:{tbl}.{col}",
             "status": "RED" if frac > max_frac else "OK",
             "detail": f"{label}: {r['nulls']}/{n} NULL ({frac:.0%})",
+        })
+
+    # A resolved prediction without a numeric return was historically created
+    # by the retired hypothesis-level grader before the forecast matured.
+    # Explicit bad-input invalidations are the only legitimate exception.
+    try:
+        n = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM predictions p
+            WHERE p.resolved_at IS NOT NULL
+              AND (p.realized_return_pct IS NULL OR p.realized_excess_pct IS NULL)
+              AND NOT EXISTS (
+                SELECT 1 FROM audits a
+                WHERE a.entity_type='prediction' AND a.entity_id=p.id
+                  AND a.action='invalidate_bad_inputs'
+              )
+            """
+        ).fetchone()[0]
+        out.append({
+            "family": "data",
+            "id": "integrity:prediction_grade_numeric",
+            "status": "RED" if n else "OK",
+            "detail": f"{n} resolved prediction(s) lack numeric realized return/excess",
+        })
+    except sqlite3.Error as exc:
+        out.append({
+            "family": "data",
+            "id": "integrity:prediction_grade_numeric",
+            "status": "RED",
+            "detail": f"cannot verify numeric prediction grades: {exc}",
         })
 
     # Consistency: does the RISK MODEL see the same book the DB holds? (frozen-source detector)
@@ -101,23 +157,44 @@ def data_reality(conn) -> list[dict]:
     except sqlite3.Error:
         pass
 
-    # PARTIAL-BAR leakage tripwire: features stamped as_of=today while the session is open are
-    # incomplete-bar prints the backtest semantics never saw (2026-07-24 incident: 493 rows).
+    # PARTIAL-BAR leakage tripwire: only close-derived `price` features stamped
+    # for an incomplete daily bar are contamination.  Same-day news/FMP rows are
+    # legitimately knowable intraday and must not be mislabeled (2026-07-30:
+    # 11 FMP + 36 news rows produced a false "47 partial rows" CRIT).
     try:
         import os as _os
         from datetime import datetime as _dt, timezone as _tz
         sys.path.insert(0, _os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))
-        from connectors.marketdata import market_clock as _mc
-        if _mc().get("is_open"):
-            fdb = sqlite3.connect("file:" + _os.path.expanduser("~/.openclaw/state/features.sqlite") + "?mode=ro", uri=True)
-            today = _dt.now(_tz.utc).astimezone().date().isoformat()
-            n = fdb.execute("SELECT COUNT(*) FROM features WHERE as_of>=?", (today,)).fetchone()[0]
-            fdb.close()
-            out.append({"family": "data", "id": "data:partial_bar_leak",
-                        "status": "RED" if n else "OK",
-                        "detail": f"{n} feature rows stamped with today's INCOMPLETE bar while the session is open"})
-    except Exception:
-        pass
+        from connectors.marketdata import daily_bar_complete as _bar_complete
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        today = _dt.now(_tz.utc).astimezone(
+            _ZoneInfo("America/New_York")
+        ).date().isoformat()
+        fdb = sqlite3.connect(
+            "file:" + _os.path.expanduser("~/.openclaw/state/features.sqlite") + "?mode=ro",
+            uri=True,
+        )
+        n = fdb.execute(
+            "SELECT COUNT(*) FROM features WHERE source='price' AND as_of>=?",
+            (today,),
+        ).fetchone()[0]
+        fdb.close()
+        complete = _bar_complete(today)
+        leaking = n if not complete else 0
+        out.append({
+            "family": "data", "id": "data:partial_bar_leak",
+            "status": "RED" if leaking else "OK",
+            "detail": (
+                f"{leaking} close-derived price feature rows stamped with an "
+                f"incomplete {today} daily bar"
+            ),
+        })
+    except Exception as exc:
+        out.append({
+            "family": "data", "id": "data:partial_bar_leak",
+            "status": "RED",
+            "detail": f"cannot verify daily-bar completeness; failing closed: {exc}",
+        })
 
     # UNMARKABLE positions: mark_positions couldn't price an open position with any provider.
     # That position's stops/falsifiers can never fire — it is unprotected capital. Root causes:
@@ -202,23 +279,34 @@ def loop_closure(conn) -> list[dict]:
             "AND a.realized_edge_vs_spy_bps IS NOT NULL)"
         ).fetchone()[0]
         closed = conn.execute("SELECT COUNT(*) FROM positions WHERE state='closed' AND closed_at IS NOT NULL").fetchone()[0]
-        out.append({"family": "loop", "id": "contract:closed->attribution",
-                    "status": "RED" if (closed and gap / closed > 0.3) else "OK",
-                    "detail": f"{gap}/{closed} closed trades have no realized-edge attribution "
-                              "— the per-trade P&L loop is open"})
+        out.append({
+            "family": "loop",
+            "id": "contract:closed->attribution",
+            "status": "RED" if gap else "OK",
+            "detail": (
+                f"{gap}/{closed} closed trades have no realized-edge attribution"
+                if gap
+                else f"all {closed} closed trades have realized-edge attribution"
+            ),
+        })
     except sqlite3.Error:
         pass
 
-    # Learning loop starving: predictions long past horizon still unresolved.
+    # Learning loop starving: use the resolver's exact trading-session maturity
+    # windows. Calendar age is not maturity for a 21-session forecast.
     try:
-        stale = conn.execute(
-            "SELECT COUNT(*) FROM predictions WHERE resolved_at IS NULL AND predicted_at < datetime('now','-30 days')"
-        ).fetchone()[0]
+        from resolve_prediction_backlog import resolve_prediction_backlog
+        maturity = resolve_prediction_backlog(conn, dry_run=True)
+        stale = int(maturity.get("matured", 0) or 0)
+        blocked = int(maturity.get("data_blocked", 0) or 0)
         out.append({"family": "loop", "id": "learn:unresolved_backlog",
-                    "status": "RED" if stale > 20 else ("WARN" if stale > 5 else "OK"),
-                    "detail": f"{stale} predictions >30d old still unresolved"})
-    except sqlite3.Error:
-        pass
+                    "status": "RED" if stale else "OK",
+                    "detail": f"{stale} trading-window-matured predictions unresolved "
+                              f"({blocked} blocked by missing market data)"})
+    except Exception as exc:
+        out.append({"family": "loop", "id": "learn:unresolved_backlog",
+                    "status": "RED",
+                    "detail": f"cannot verify exact prediction maturity: {exc}"})
 
     # Challenged->resolve loop: 'challenged' theses that rot un-resolved = the research-decision
     # loop is open (the desk notices it's wrong and does nothing). resolve_challenged should drain it.
@@ -314,16 +402,25 @@ def research_coverage(conn) -> list[dict]:
     misses = []
     for tk, (dt, mv) in sorted(big.items(), key=lambda x: -abs(x[1][1])):
         h = conn.execute(
-            "SELECT thesis_summary, state FROM hypotheses WHERE tickers LIKE ? "
-            "AND date(created_at) <= date(?, '+2 days') ORDER BY created_at DESC LIMIT 1",
-            (f'%"{tk}"%', dt),
+            "SELECT h.thesis_summary, h.state, "
+            "(SELECT p.return_p50 FROM predictions p WHERE p.hypothesis_id=h.id "
+            " AND date(p.predicted_at) < date(?) ORDER BY p.predicted_at DESC LIMIT 1) return_p50 "
+            "FROM hypotheses h WHERE h.tickers LIKE ? "
+            "AND date(h.created_at) BETWEEN date(?, '-10 days') AND date(?, '-1 day') "
+            "ORDER BY h.created_at DESC LIMIT 1",
+            (dt, f'%"{tk}"%', dt, dt),
         ).fetchone()
         if not h:
-            misses.append(f"{tk} {mv:+.1f}% {dt}: no thesis (missed story)")
+            misses.append(f"{tk} {mv:+.1f}% {dt}: no timely pre-event thesis (missed story)")
             continue
         covered += 1
         th = (h["thesis_summary"] or "").lower()
-        our_short = any(w in th for w in _BEAR_WORDS)
+        forecast = h["return_p50"]
+        our_short = (
+            float(forecast) < 0
+            if forecast is not None and abs(float(forecast)) > 0.05
+            else any(w in th for w in _BEAR_WORDS)
+        )
         if (mv < 0) == our_short:
             correct += 1
         else:
@@ -333,7 +430,8 @@ def research_coverage(conn) -> list[dict]:
         "family": "research", "id": "research:big_story_direction",
         "status": "RED" if (n and correct / n < 0.4) else "OK",
         "detail": f"direction-correct on {correct}/{n} of the biggest single-name stories (30d), "
-                  f"coverage {covered}/{n}" + ("; " + " | ".join(misses[:4]) if misses else ""),
+                  f"timely pre-event coverage {covered}/{n}"
+                  + ("; " + " | ".join(misses[:4]) if misses else ""),
     }]
 
 

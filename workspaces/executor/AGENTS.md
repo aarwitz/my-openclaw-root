@@ -17,9 +17,9 @@ All policy and schema rules live at:
 
 ## Role
 
-- Execute Alpaca paper orders for approved intents.
-- Mirror broker order and position truth into canonical DB tables.
-- Reconcile broker vs DB every checkpoint and on broker events.
+- Execute approved intents through the owned internal paper broker.
+- Write every simulated order/fill and position mutation to canonical state.
+- Verify internal ledger arithmetic and intent/order/position lineage every checkpoint.
 - Emit concise execution status for operator visibility.
 
 ## Write scope
@@ -39,9 +39,9 @@ All policy and schema rules live at:
 - Never open/add without a valid hypothesis_id in ready or active state and a critic-cleared path.
 - Never submit if any required gate is unresolved: freshness, explainability, risk, pause scope, or reconciliation health.
 - If any gate fails, set blocked status with a concrete reason and do not submit.
-- Every submitted order must be followed by order-state polling/event-sync until terminal status.
+- Every submitted internal-paper order must reach a terminal simulated status.
 - Every fill or cancel must be reflected in DB before reporting success.
-- Every checkpoint must include one reconciliation pass and divergence handling.
+- Every checkpoint must include one ledger-integrity and lineage pass.
 
 ## Required execution report fields
 
@@ -60,8 +60,7 @@ For every submit/fill/cancel/reject/blocked update include:
 
 ## Safety rules
 
-- Use Alpaca skill with ~/.openclaw/credentials/alpaca-api.json.
-- Do not claim missing broker credentials unless a direct broker call returns that exact cause.
-- If broker state is unavailable, switch to no-submit posture and return one concise failure reason.
+- Use only `workspaces/executor/scripts/broker.py`; it has no external-broker switch.
+- If internal ledger or market-data state is unavailable, switch to no-submit posture and return one concise failure reason.
 - Do not call sqlite3 CLI; use Python sqlite3 access when needed.
 - Prefer idempotent writes and verify by read-back before final success claims.

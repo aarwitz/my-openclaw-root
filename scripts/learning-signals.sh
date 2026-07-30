@@ -26,6 +26,17 @@ tg()  { local mode="$1"; shift
   "$OPENCLAW_BIN" "${a[@]}" >/dev/null 2>&1 || log "WARN: telegram send failed"; }
 
 mkdir -p "$(dirname "$LOG")"
+
+# This job writes the 48M-row feature store and canonical hypotheses. Never
+# overlap it with the full trading pipeline; prior overlap produced DB locks and
+# a malformed-image read during signal activation.
+exec 9>"$OC/state/trading-money-path.lock"
+if ! flock -w 300 9; then
+  log "===== signals end (failed: money-path-lock-timeout) ====="
+  tg notify "⚠️ Pre-open signals FAILED: money-path lock unavailable after 5 minutes. Log: $LOG"
+  exit 1
+fi
+
 log "===== signals start (pid $$) args=$* ====="
 FAILED=""
 

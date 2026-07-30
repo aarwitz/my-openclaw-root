@@ -39,15 +39,13 @@ export MASSIVE_API_KEY="$(jq -r '."api key"' /home/aaron/.openclaw/credentials/m
 **Do not use Massive as**
 - the primary catalyst/news authority
 - broker/account state
-- the sole near-open execution confirmation layer when Alpaca is available
 
 ## Routing and preservation policy
 
 Use Massive selectively.
 
-Prefer other providers first for lighter work:
+Prefer other providers first for non-price work:
 - Finnhub for catalyst research and simple price context
-- Alpaca for live/open market checks
 - FMP for analyst sentiment and target context
 
 Reserve Massive for scoring-grade structure work:
@@ -132,30 +130,20 @@ Do not provide order-entry instructions unless Aaron explicitly asks.
 
 ---
 
-## Alpaca Fallback (Rate Limit Handling)
+## Rate-limit handling
 
-**When**: Massive returns `429 Too Many Requests` or quota exceeded error during Druck catalyst research.
+When Massive returns `429` or a quota error:
 
-**Action**: Switch to Alpaca for live snapshot + latest quote as temporary fallback.
-
-**Why**: Alpaca has higher rate limits (100k/min) and is better for position context (actual holdings). Use only when Massive is rate-limited; Massive is still preferred for historical aggregates.
-
-**Fallback pattern**:
-```bash
-# If Massive 429 occurs:
-# 1. Log "Massive quota exceeded; switching to Alpaca snapshot"
-# 2. Use Alpaca: GET /v2/positions (existing holdings) + GET /v2/assets/{symbol} (latest quote)
-# 3. For non-held tickers, return "Alpaca fallback: use /v2/assets/{symbol} for last quote"
-# 4. Continue with Finnhub for earnings, NewsAPI for catalyst, Schwab for account context
-```
-
-**Druck workflow**: If Massive fails during Sat 10:00 ET catalyst pull, Druck will note "Alpaca fallback used for [tickers]" in research log and continue. Do not halt catalyst research on Massive rate limit; pivot to Alpaca intelligently.
+- use a still-fresh local Massive cache for completed bars;
+- use Finnhub only for catalyst/secondary price context;
+- use Schwab only for externally held account context;
+- label missing live confirmation and cap the recommendation at `watch_only`;
+- never invent a quote or silently substitute stale data.
 
 ---
 
 ## See Also
 
-- Alpaca details: ~/.openclaw/workspace/skills/alpaca/SKILL.md
 - FMP analyst/earnings data: ~/.openclaw/workspace/skills/financialmodeling-prep-api/SKILL.md
 - Finnhub earnings/news: ~/.openclaw/workspace/skills/finnhub/SKILL.md
 - Druck Phase II: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md

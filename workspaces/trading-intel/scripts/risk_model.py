@@ -6,7 +6,7 @@ regime) but was blind to **correlation**: you could hold eight names that are al
 same AI-beta bet and every cap was satisfied. This module adds the covariance/factor
 view the gate was missing — pure stdlib (no numpy), matching worldmodel.py.
 
-What it computes from daily returns (Alpaca bars, cached):
+What it computes from daily returns (Massive/FMP bars, cached):
   * the holdings **correlation matrix** and **correlation clusters** (the "same bet"
     detector — connected components at corr >= CORR_THRESHOLD),
   * portfolio **annualized volatility**, parametric **1-day VaR/CVaR**,
@@ -206,8 +206,8 @@ def _desk_book(conn) -> tuple[dict[str, float], float | None]:
     """The LIVE desk book from the canonical store — the internal paper engine's
     book since the 2026-07-07 (D52) cutover.
 
-    Before this, snapshot() read `alpaca.list_positions()`, but the D52 cutover
-    removed Alpaca from the money path and nothing syncs desk fills to it, so the
+    Before this, snapshot() read the retired external broker, but the D52 cutover
+    removed that provider from the money path and nothing syncs desk fills to it, so the
     broker account is frozen at cutover (a stale ~24-name subset). Reading the
     canonical `positions` (+ `book_equity`) makes the risk/beta/exposure view
     reflect the real ~46-name desk book. Holdings are signed market values

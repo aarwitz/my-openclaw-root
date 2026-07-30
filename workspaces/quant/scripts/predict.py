@@ -120,7 +120,8 @@ def load_mechanisms(conn: sqlite3.Connection) -> dict[str, dict]:
     for r in conn.execute(
         "SELECT id, name, antecedent_class, consequent_class, direction, horizon, "
         "posterior_mean, posterior_ci_low, posterior_ci_high, status, "
-        "observed_hits + observed_misses FROM mechanisms"
+        "observed_hits + observed_misses FROM mechanisms "
+        "WHERE status='active' AND id NOT LIKE 'xs\\_%' ESCAPE '\\'"
     ):
         out[r[0]] = {
             "id": r[0], "name": r[1], "antecedent_class": r[2], "consequent_class": r[3],
@@ -200,8 +201,9 @@ def _family_terms(
         m = mechs.get(mid)
         if not m or m["posterior_mean"] is None:
             continue
-        status_mult = 1.0 if m["status"] == "active" else 0.6
-        weight = wm.confidence_weight(m["ci_low"], m["ci_high"]) * status_mult
+        if m["status"] != "active" or mid.startswith("xs_"):
+            continue
+        weight = wm.confidence_weight(m["ci_low"], m["ci_high"])
         align = mechanism_alignment(thesis_dir, m["direction"])
         posterior = m["posterior_mean"]
         if align < 0:

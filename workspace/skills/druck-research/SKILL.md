@@ -12,7 +12,7 @@ Authoritative strategy spec remains: `~/.openclaw/workspaces/druck/AUTONOMOUS_PM
 
 | Phase | Deterministic Action | Fail-Closed Rule |
 |---|---|---|
-| Source ingest | Pull catalyst from Finnhub, structure from Massive, live corroboration from Alpaca, sentiment support from FMP, positions from Schwab/Sheets, macro from SPY+VIX | Missing primary source cannot be treated as neutral |
+| Source ingest | Pull catalyst from Finnhub, structure and live corroboration from Massive, sentiment support from FMP, positions from Schwab/Sheets, macro from SPY+VIX | Missing primary source cannot be treated as neutral |
 | Catalyst gate | Require at least one approved catalyst signal | If none pass -> class max `watch_only` |
 | Setup label | Assign exactly one setup state | Invalid/inconsistent setup -> no `buy_ready` |
 | Score | Compute base score then penalties | Hard-rule caps override score |
@@ -24,8 +24,7 @@ Authoritative strategy spec remains: `~/.openclaw/workspaces/druck/AUTONOMOUS_PM
 
 1. Finnhub = catalyst truth
 2. Massive = price-structure truth
-3. Alpaca = live/open corroboration
-4. FMP = secondary sentiment support only
+3. FMP = secondary sentiment support only
 
 Sentiment cannot override failed catalyst gate.
 

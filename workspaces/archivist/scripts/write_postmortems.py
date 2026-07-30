@@ -38,6 +38,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _postmortem_id(hypothesis_id: str) -> str:
+    """Stable one-to-one identifier for a hypothesis postmortem."""
+    return f"PM-{hypothesis_id}"
+
+
+def _audit_id(postmortem_id: str) -> str:
+    """Stable audit identifier; unlike a seconds timestamp, this cannot collide."""
+    return f"AUDIT-{postmortem_id}"
+
+
 def _theme(conn: sqlite3.Connection, hid: str, resolved_state: str | None) -> tuple[str, str]:
     """(theme, lane) for a resolved hypothesis."""
     lane_row = conn.execute(
@@ -96,7 +106,7 @@ def main(argv=None) -> int:
             pass  # table not migrated yet
 
         ts = _now_iso()
-        pid = "PM-" + ts.replace(":", "").replace("-", "") + "-" + hid[-18:]
+        pid = _postmortem_id(hid)
         thesis = {
             "theme": theme,
             "summary": (h["thesis_summary"] or "")[:240],
@@ -125,7 +135,7 @@ def main(argv=None) -> int:
              json.dumps(thesis), json.dumps(expression), json.dumps({}),
              json.dumps(researcher), json.dumps({"status": "pending"}),
              "world_model_v1"))
-        aid = "AUDIT-" + ts.replace(":", "").replace("-", "") + "-" + pid[:24]
+        aid = _audit_id(pid)
         conn.execute(
             "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
             "rationale_concise) VALUES (?, ?, 'archivist', 'postmortem', ?, "

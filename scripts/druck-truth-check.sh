@@ -71,28 +71,14 @@ else
   fi
 fi
 
-# ── 3) Alpaca Paper ──────────────────────────────────────────────────────────
-ALPACA_KEY="$(jq -r '."api key"' "${CRED}/alpaca-api.json" 2>/dev/null || true)"
-ALPACA_SECRET="$(jq -r '.secret' "${CRED}/alpaca-api.json" 2>/dev/null || true)"
-ALPACA_BASE="https://paper-api.alpaca.markets/v2"
-
-if [[ -z "$ALPACA_KEY" || "$ALPACA_KEY" == "null" ]]; then
-  add_fail "alpaca: credential unreadable"
+# ── 3) Internal paper ledger ──────────────────────────────────────────────────
+LEDGER_OUT="$(python3 /home/aaron/.openclaw/workspaces/executor/scripts/sim_broker.py \
+  integrity --book desk 2>&1 || true)"
+if echo "$LEDGER_OUT" | jq -e '.ok == true' >/dev/null 2>&1; then
+  NAV_CASH="$(echo "$LEDGER_OUT" | jq -r '.cash')"
+  add_pass "internal paper ledger: integrity ok — cash=\$${NAV_CASH}"
 else
-  ALPACA_OUT="$(curl -sf --max-time 10 \
-    -H "APCA-API-KEY-ID: ${ALPACA_KEY}" \
-    -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET}" \
-    "${ALPACA_BASE}/account" 2>&1 || true)"
-  if echo "$ALPACA_OUT" | jq -e '.status == "ACTIVE"' >/dev/null 2>&1; then
-    NAV="$(echo "$ALPACA_OUT" | jq -r '.equity // .portfolio_value // "unknown"')"
-    add_pass "alpaca paper: account ACTIVE — NAV=\$${NAV}"
-  elif echo "$ALPACA_OUT" | jq -e '.status' >/dev/null 2>&1; then
-    STATUS="$(echo "$ALPACA_OUT" | jq -r '.status')"
-    add_warn "alpaca paper: account status=${STATUS}"
-  else
-    REASON="$(classify_error "$ALPACA_OUT")"
-    add_fail "alpaca paper: account probe failed (${REASON}) — ${ALPACA_OUT:0:120}"
-  fi
+  add_fail "internal paper ledger: integrity failed — ${LEDGER_OUT:0:160}"
 fi
 
 # ── 4) FMP ───────────────────────────────────────────────────────────────────

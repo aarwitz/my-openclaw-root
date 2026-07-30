@@ -28,11 +28,18 @@ sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-i
 from connectors import fmp     # noqa: E402
 import feature_store as fs     # noqa: E402
 import worldmodel as wm        # noqa: E402
+import symbol_lifecycle as symbols  # noqa: E402
 
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "UNH",
                      "XOM", "CAT", "WMT", "COST", "KO", "HD", "PG", "JNJ", "CRM", "AMD", "NFLX",
                      "DIS", "BA", "GE", "PFE", "INTC", "MU", "CVX", "ORCL", "QCOM"]
+SUPPORTED_CONDITION_OPS = {">", "<"}
+# Backtest mechanisms share dates, sectors and features, so their log-odds are
+# not independent. Until the scanner has a date-clustered calibration model,
+# never let automatic origination claim more than a modest directional edge.
+MAX_LIVE_P_SHIFT = 0.10
+PROBABILITY_PRIOR_N = 20.0
 
 
 def live_watchlist(top_n=200):
@@ -48,16 +55,21 @@ def live_watchlist(top_n=200):
     except sqlite3.OperationalError:
         pass
     c.close()
-    return list(dict.fromkeys(syms)) or DEFAULT_WATCHLIST
+    return list(dict.fromkeys(symbols.canonical_symbol(s) for s in syms)) or DEFAULT_WATCHLIST
 
 
 def latest_features(conn, ticker):
     """Most-recent value per feature for a ticker (point-in-time = latest as_of)."""
-    out = {}
-    for name, as_of, val in conn.execute(
-        "SELECT name, as_of, value FROM features WHERE ticker=? ORDER BY as_of", (ticker,)):
-        out[name] = (val, as_of)          # later rows overwrite -> latest wins
-    return out
+    # The feature index is (ticker,name,as_of). GROUP BY name can stream that
+    # index; ORDER BY as_of forced a per-ticker sort of the entire history.
+    return {
+        name: (val, as_of)
+        for name, as_of, val in conn.execute(
+            "SELECT name, MAX(as_of) AS latest_as_of, value "
+            "FROM features WHERE ticker=? GROUP BY name",
+            (ticker,),
+        )
+    }
 
 
 _LATEST_MACRO: dict = {}
@@ -83,6 +95,8 @@ def latest_macro():
 
 def cond_holds(conds, feats):
     for name, op, thr in conds:
+        if op not in SUPPORTED_CONDITION_OPS:
+            return False
         v = feats.get(name)
         if v is None:
             return False
@@ -92,6 +106,15 @@ def cond_holds(conds, feats):
         if op == "<" and not v < thr:
             return False
     return True
+
+
+def probability_from_hit_rate(hit_te, te_n):
+    """Conservative probability estimate; never derive probability from alpha."""
+    if hit_te is None or te_n is None or int(te_n) < 30:
+        return None
+    n = float(te_n)
+    hits = max(0.0, min(1.0, float(hit_te))) * n
+    return (hits + 0.5 * PROBABILITY_PRIOR_N) / (n + PROBABILITY_PRIOR_N)
 
 
 def _returns(ticker, n=63):
@@ -164,9 +187,21 @@ def scan(names, min_fired=1):
     direction, and `fired` = the firing mechanisms (id/direction/horizon/posterior)."""
     conn = sqlite3.connect(FEAT)
     conn.row_factory = sqlite3.Row
-    mechs = [dict(r) for r in conn.execute("SELECT * FROM calibrated_mechanisms")]
+    calibrated_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(calibrated_mechanisms)")
+    }
+    mechs = [dict(r) for r in conn.execute(
+        "SELECT * FROM calibrated_mechanisms "
+        "WHERE kind != 'cross' AND hit_te IS NOT NULL AND te_n >= 30"
+    )]
     for m in mechs:
         m["conds"] = json.loads(m["conds_json"])
+        effective_n = (
+            m.get("cluster_n") if "cluster_n" in calibrated_columns else m["te_n"]
+        )
+        m["posterior_mean"] = probability_from_hit_rate(m["hit_te"], effective_n)
+    mechs = [m for m in mechs if m["posterior_mean"] is not None
+             and all(c[1] in SUPPORTED_CONDITION_OPS for c in m["conds"])]
     rw = {}                                          # (id,horizon) -> redundancy_weight (1/cluster_size)
     try:
         for mid, hz, w in conn.execute("SELECT mechanism_id, horizon, redundancy_weight FROM mechanism_clusters"):
@@ -194,7 +229,14 @@ def scan(names, min_fired=1):
         fits = [max(0.0, min(2.0, reg[(mid, hz, rgm)] / base)) for rgm in cur_reg if (mid, hz, rgm) in reg]
         return sum(fits) / len(fits) if fits else 1.0
     rows = []
+    names = list(dict.fromkeys(symbols.canonical_symbol(t) for t in names))
     for t in names:
+        feature_as_of = conn.execute(
+            "SELECT MAX(as_of) FROM features WHERE ticker=? AND source='price'",
+            (t,),
+        ).fetchone()[0]
+        if not symbols.is_live_feature_fresh(feature_as_of):
+            continue
         feats = latest_features(conn, t)
         if not feats:
             continue
@@ -223,8 +265,10 @@ def scan(names, min_fired=1):
                 edge += na * w
             terms.append((p, min(1.0, abs(na) / 2.0 + 0.3) * w))
         p_long, _ = wm.combine_p(0.5, terms, 1.0)
+        p_long = max(0.5 - MAX_LIVE_P_SHIFT, min(0.5 + MAX_LIVE_P_SHIFT, p_long))
         rows.append({"ticker": t, "p_long": p_long, "exp_edge": edge, "n_fired": len(fired),
                      "price": round(close, 2) if close else None,
+                     "feature_as_of": feature_as_of,
                      "direction": "long" if p_long >= 0.5 else "short",
                      "fired": [{"id": m["id"], "direction": m["direction"], "horizon": m["horizon"],
                                 "posterior": m["posterior_mean"], "rationale": m["rationale"]} for m in fired]})

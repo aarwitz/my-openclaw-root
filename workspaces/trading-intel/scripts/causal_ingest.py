@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""causal_ingest.py — BROAD real-world entity/event ingestion into the causal graph (Phase 1, go-broad).
+"""Broad real-world entity/event ingestion into the evidence graph.
 
 Pulls recent news for a set of broad real-world TOPICS (Fed, tariffs, oil, Taiwan, AI chips, nuclear, …)
 from Event Registry, extracts TYPED concepts (person / organization / country / topic), and wires:
   - typed `entities` (person/organization/country/topic) — the real-world nodes,
-  - `co_occurs` candidate edges among co-mentioned concepts (the relationship web),
-  - `affects` candidate edges from a real-world driver concept -> a public-company TICKER (via an alias map),
-so the why-engine can answer "why did <Fed / Taiwan / tariffs> matter" and "why <ticker>" gains real-world
-drivers. All edges enter as CANDIDATE (observed, not yet held-out-validated) with an evidence trail.
+  - ``co_occurs`` hypotheses among co-mentioned concepts,
+  - ``mentioned_with`` hypotheses from a driver concept to a public-company ticker.
+These are retrieval links, not assertions that the driver affected the ticker.
+All edges enter as hypotheses with an evidence trail.
 Symbolic, no embeddings. Reuses causal_graph's entity/edge UPSERT helpers.
 
   python3 causal_ingest.py            # bounded ingest pass + report
@@ -70,14 +70,15 @@ def ingest(topics=TOPICS, per=12, days=10):
             for i in range(len(drivers)):
                 for j in range(i + 1, len(drivers)):
                     cg.edge(c, drivers[i][0], drivers[j][0], "co_occurs", evidence=ev,
-                            status="candidate", when=a.get("date"))
+                            status="hypothesis", when=a.get("date"))
                     n_edge += 1
                 for tk, _ in [(t[0], t[1]) for t in tickers]:
-                    cg.edge(c, drivers[i][0], tk, "affects", evidence=ev, status="candidate", when=a.get("date"))
+                    cg.edge(c, drivers[i][0], tk, "mentioned_with", evidence=ev,
+                            status="hypothesis", when=a.get("date"))
                     n_edge += 1
         print(f"  {topic}: {len(arts)} articles", flush=True)
     c.commit()
-    print(f"\ningested {n_art} articles -> {n_edge} candidate edges")
+    print(f"\ningested {n_art} articles -> {n_edge} hypothesis edges")
     for typ, n in c.execute("SELECT type,COUNT(*) FROM entities GROUP BY type ORDER BY 2 DESC"):
         print(f"  entities {typ:14} {n}")
     c.close()

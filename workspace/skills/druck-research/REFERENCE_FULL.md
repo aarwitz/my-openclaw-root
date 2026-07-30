@@ -16,7 +16,7 @@ Phase II trading research workflow for Druck. Authoritative spec is `~/.openclaw
 ## Inputs (in order, fail closed)
 1. Catalyst evidence — `finnhub` skill (earnings calendar, EPS/rev actuals+estimates, news, analyst revisions)
 2. Price/volume — `massive` skill (daily aggregates → ATR%, dollar volume, 5d %, volume ratio)
-3. Live corroboration near open — `alpaca` skill (latest quote/snapshot/intraday bars)
+3. Live corroboration near open — `massive` snapshot/latest-trade data
 4. Analyst-sentiment support — `financialmodeling-prep-api` skill (grades breadth, price-target context, estimates when plan allows)
 5. Live positions — `schwab` skill (positions endpoint, cached account hash)
 6. Manual Robinhood holdings — `gog sheets get` on `Holdings` tab where account=Robinhood
@@ -25,12 +25,12 @@ Phase II trading research workflow for Druck. Authoritative spec is `~/.openclaw
 ## Source hierarchy
 - Finnhub decides catalyst truth
 - Massive decides price-structure truth
-- Alpaca decides live execution-context truth near the open
+- Massive decides live execution-context truth near the open
 - FMP provides secondary analyst-sentiment confirmation only
 
 ## Routing policy
 - Finnhub first for earnings, events, company news, and simple ticker triage
-- Alpaca first for live/open checks and intraday confirmation
+- Massive snapshots first for live/open checks and intraday confirmation
 - FMP first for analyst-sentiment context
 - Massive only for scoring-grade historical price structure and regime math
 
@@ -52,7 +52,6 @@ Anti-drift rules:
 - Drive folder: `1AjzY_FuvtxrVtf1ejhE-WDHjbGdvU486`
 - Notes doc: `1aWw94Tu8N4MZTmULeQBE3dOFPa1LPb7RZblNsZ_ks1g`
 - Schwab token: `~/.openclaw/credentials/schwab-dev-token.json`
-- Alpaca credentials: `~/.openclaw/credentials/alpaca-api.json`
 
 ## Catalyst gate (must pass at least one)
 | type | source | rule |
@@ -94,8 +93,8 @@ If none pass ⇒ `recommendation_class = watch_only` MAX. No exceptions.
 - total penalties ≤ −20 → max class `watch_only`
 - liquidity_score = 0 → `watch_only`
 - setup = `overextended_chase` → never `buy_ready`
-- if Alpaca live confirmation is required and unavailable near open → max class `watch_only`
-- if Alpaca vs Massive intraday conflict is material → max class `conditional_buy` + `data_discrepancy` note
+- if a fresh Massive live confirmation is required and unavailable near open → max class `watch_only`
+- if live snapshot and completed-bar structure conflict materially → max class `conditional_buy` + `data_discrepancy` note
 
 ## Recommendation thresholds
 - ≥75 + catalyst_pass + no hard rule → `buy_ready`
@@ -136,7 +135,7 @@ Every `buy_ready` row MUST include `falsifier_by_wednesday`: a single line stati
 | Sat 10:00 ET | catalyst pull → raw JSON to Drive `raw/YYYY-MM-DD/` |
 | Sat 11:00 ET | apply gate, classify, write `Candidates` rows with class=pending |
 | Sun 19:00 ET | finalize scores + penalties + regime, assign class, write top-5 to Notes doc |
-| Mon 08:30 ET | regime re-check, refresh quotes + Alpaca live confirmation, post top-5 to Druck Trading Desk Telegram |
+| Mon 08:30 ET | regime re-check, refresh Massive snapshots, post top-5 to Druck Trading Desk Telegram |
 | Fri 16:30 ET | fill Outcomes for past 10 days, mark falsifier_resolved |
 
 ## Non-goals

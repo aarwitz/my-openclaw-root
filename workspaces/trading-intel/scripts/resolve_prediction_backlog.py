@@ -135,21 +135,25 @@ def _emit_mechanism_observations(
         return 0
     correct = outcome == "correct"
     count = 0
-    for link in _mechanism_links(mechanism_ids_json):
+    for link, credit_weight in wm.allocate_prediction_credit(
+        _mechanism_links(mechanism_ids_json)
+    ):
         align = int(link.get("align", 1) or 1)
         mech_correct = correct if align >= 0 else (not correct)
         obs_outcome = "hit" if mech_correct else "miss"
         conn.execute(
             "INSERT INTO mechanism_observations (id, mechanism_id, observed_at, source_type, source_id, outcome, weight, regime_at_obs, notes, experiment_id) "
-            "VALUES (?, ?, ?, 'prediction', ?, ?, 1.0, ?, ?, ?)",
+            "VALUES (?, ?, ?, 'prediction', ?, ?, ?, ?, ?, ?)",
             (
                 "mobs-" + uuid.uuid4().hex[:20],
                 link["id"],
                 observed_at,
                 prediction_id,
                 obs_outcome,
+                credit_weight,
                 regime_at_prediction,
-                f"from prediction {prediction_id} (align={align}, thesis={outcome})",
+                f"from prediction {prediction_id} (align={align}, thesis={outcome}, "
+                f"credit={credit_weight:.6f})",
                 experiment_id,
             ),
         )
@@ -179,6 +183,7 @@ def resolve_prediction_backlog(
         "matured": 0,
         "resolved": 0,
         "expired": 0,
+        "data_blocked": 0,
         "inconclusive": 0,
         "skipped_future": 0,
         "details": [],
@@ -198,24 +203,10 @@ def resolve_prediction_backlog(
         experiment_id = row["experiment_id"] or EXPERIMENT_DEFAULT
         ticker = predict._first_ticker(row["tickers"])
         if not ticker:
-            detail = {"prediction_id": row["id"], "status": "expired", "reason": "missing_ticker"}
+            detail = {"prediction_id": row["id"], "status": "data_blocked",
+                      "reason": "missing_ticker"}
             summary["details"].append(detail)
-            summary["expired"] += 1
-            if not dry_run:
-                with conn:
-                    conn.execute(
-                        "UPDATE predictions SET realized_outcome='inconclusive', resolved_at=? WHERE id=?",
-                        (_now_iso(), row["id"]),
-                    )
-                    _insert_audit(
-                        conn,
-                        prediction_id=row["id"],
-                        action="expire_prediction",
-                        after_state="expired_missing_ticker",
-                        rationale="past horizon with no ticker; prediction expired as inconclusive",
-                        experiment_id=experiment_id,
-                        actor=actor,
-                    )
+            summary["data_blocked"] += 1
             continue
 
         if ticker not in price_cache:
@@ -226,24 +217,14 @@ def resolve_prediction_backlog(
 
         ticker_window = _window_return(price_cache[ticker], row["predicted_at"][:10], horizon_days)
         if ticker_window is None or spy_window is None:
-            detail = {"prediction_id": row["id"], "status": "expired", "reason": "missing_price_window", "ticker": ticker}
+            detail = {"prediction_id": row["id"], "status": "data_blocked",
+                      "reason": "missing_price_window", "ticker": ticker}
             summary["details"].append(detail)
-            summary["expired"] += 1
-            if not dry_run:
-                with conn:
-                    conn.execute(
-                        "UPDATE predictions SET realized_outcome='inconclusive', resolved_at=? WHERE id=?",
-                        (_now_iso(), row["id"]),
-                    )
-                    _insert_audit(
-                        conn,
-                        prediction_id=row["id"],
-                        action="expire_prediction",
-                        after_state="expired_missing_price_window",
-                        rationale=f"past horizon but price window unavailable for {ticker} or SPY; prediction expired as inconclusive",
-                        experiment_id=experiment_id,
-                        actor=actor,
-                    )
+            # Missing market data is not an outcome. Keep the prediction open so
+            # health remains visibly degraded until a symbol-change/data repair
+            # restores the actual window. Marking it inconclusive would silently
+            # turn an infrastructure failure into neutral statistical evidence.
+            summary["data_blocked"] += 1
             continue
 
         direction = predict.thesis_direction(row["thesis_summary"] or "")

@@ -1,79 +1,49 @@
-# 07 — Internal Paper-Trading Engine (design, 2026-07-03)
+# 07 — Internal Paper-Trading Engine
 
-**Decision driver:** Alpaca's paper layer keeps costing us engineering time on
-*their* artifacts, not our alpha: split-desynced position math (CRWD 2026-07-03),
-sparse/level-shifted portfolio history requiring server-side splicing, a
-fail-closed week caused by trusting an external state machine, holiday-blind
-order queuing. Execution simulation is deterministic bookkeeping — exactly what
-this codebase is best at. Market DATA stays external; the BROKER becomes ours.
+Status: active. Reconciled 2026-07-30. The owned simulator is the only broker
+surface. There is no external-broker runtime switch, fallback, credential, or
+parity path.
 
-## What we replace vs keep
+## Books
 
-| Alpaca capability | Verdict | Replacement |
-|---|---|---|
-| Order acceptance/fill simulation | REPLACE | internal fill engine (below) |
-| Positions & account state | REPLACE | our ledger (positions/orders + book equity) |
-| Portfolio history (equity curve) | REPLACE | computed from our own ledger + EOD marks (kills the history-splicing bug class) |
-| Market clock / trading calendar | KEEP (data) | /v2/clock,/v2/calendar are reliable and free |
-| Price bars / latest trade | KEEP (data) | still a quote source, alongside FMP/yahoo |
+- `desk`: the canonical paper account used by the agent pipeline.
+- `model`: quarantined mechanical ranker experiment.
+- Historical `shadow` rows may remain for audit continuity but are inert.
 
-## Fill engine v1 (deterministic, auditable)
+## Fill and ledger contract
 
-- Input: approved `trade_intents` (unchanged state machine — the engine is a
-  drop-in for `execute_intent.py`'s broker calls).
-- Fill rule: marketable limit vs live last trade ± half-spread estimate
-  (spread_est = max(1bp, k/√ADV)); slippage = existing COST_RT model, now
-  EXPLICIT per fill instead of implied.
-- Partial fills: cap participation at 2% of trailing 21d ADV per pass.
-- Corporate actions: splits/dividends applied nightly from FMP corporate-action
-  feed to qty/cost-basis with an `audits` row per adjustment — the CRWD bug
-  becomes impossible to have silently.
-- Marks: EOD close per position; equity curve = cash + Σ(qty × mark), stored in
-  a new `book_equity(book, date, equity, cash)` table. Intraday marks optional
-  from latest_trade.
-- Every fill writes `orders` + `audits` exactly as today (broker_order_id =
-  `sim-<uuid>`).
+- Input is an approved `trade_intent`; only
+  `workspaces/executor/scripts/broker.py` may submit it.
+- A live Massive mark is required. Missing marks fail closed.
+- The simulator crosses an estimated half-spread,
+  `max(1bp, 8/sqrt(ADV$ millions))`.
+- A non-marketable limit never becomes a fabricated fill.
+- Participation is capped at 2% of trailing 21-session dollar volume.
+- `apply_fill` is the single cash/position mutation point. It writes a
+  `sim_orders` row and an audit in the same transaction boundary.
+- Cash, position quantity, basis, and marked value must be finite. The nightly
+  `integrity` check verifies account and mark arithmetic.
 
-## The killer feature: parallel books
+## Marks, cash yield, and corporate actions
 
-Add `book TEXT NOT NULL DEFAULT 'desk'` to positions/orders (+ book_equity).
-Then we can run *experiments as first-class accounts*:
+- Equity is `cash + sum(qty * fresh_mark)`, persisted to `book_equity`.
+- Intraday samples are retained in `book_equity_intraday` for the GUI.
+- Cash yield is credited at most once per book/day and separately attributed.
+- Splits are applied once per book/ticker/ex-date and always audited.
+- If any held name cannot be marked, the engine refuses to write an equity row.
 
-- `desk` — the live desk (current behavior).
-- `model` — the GBM ranker trades its own top-decile book mechanically. This
-  builds the live track record that decides P2 promotion, with REAL fills
-  instead of backtest assumptions.
-- `no-x`, `no-llm`, … — cover/uncover ablation books: same pipeline minus one
-  feature family, measuring each family's live contribution (the operator's
-  cover→model→uncover→backtest loop, running continuously).
-- Scoreboard compares books vs SPY and vs each other; FINDINGS gets a monthly
-  ablation read.
+## Model-book quarantine
 
-## Migration plan (safety first — the desk never stops)
+The `model` book is a forward experiment, not an authorization path into the
+desk book. It is long-only, equal-weight top decile, monthly, with the same
+spread/participation rules. Its results may support a human-reviewed proposal;
+they never self-promote a feature, mechanism, or sizing rule.
 
-- **P0 (this doc)** — design + approval.
-- **P1** — `sim_broker.py` (fill engine + ledger) + migration 0014 (book
-  columns, book_equity). Shadow mode: every REAL Alpaca fill is mirrored into
-  the sim ledger; nightly parity check (qty/basis/equity drift < 5bps).
-- **P2** — `model` book goes live on the sim engine (no Alpaca involvement).
-  Ablation books as wanted.
-  **LIVE 2026-07-06** (`sim_broker.py rebalance-model`, wired into `nightly`).
-  Pre-registered policy: long-only top decile of the nightly GBM ranks
-  (~60 names), equal-weight, INVEST_FRACTION 98%, rebalance on the first
-  nightly run of each calendar month, fills at mark ± half-spread
-  `max(1, 8/√ADV$M)` bps with a 2%-of-ADV participation cap, ranks older
-  than 5 days refuse to trade. First rebalance 2026-07-06: 59 names,
-  $19.78 total spread cost on $98k deployed. The book's `book_equity`
-  curve is the ranker's live forward track record — the promotion evidence
-  (t>3 bar) that a backtest cannot provide. Surfaced in the web app via
-  `snapshot_builder` → `simBooks`.
-- **P3 — LIVE 2026-07-07 (D52).** Operator-directed early cutover after the
-  second broker-side incident in a week. `broker.py` adapter seam, backend
-  `sim` (config/broker-backend), desk book bootstrapped at parity from the
-  live account with full curve continuity, web serving the sim ledger.
-  Alpaca demoted to market-data-only; quote-source diversification (FMP/
-  Massive) is the remaining step to full elimination.
+## Deliberate limitations
 
-Non-goals v1: intraday microstructure realism, options, margin interest. The
-desk trades 21-day-horizon equities in ~$1k clips; fill realism beyond
-spread+participation is false precision.
+The simulator currently models spread and market participation, but not queue
+position, stochastic partial fills, halts, borrow availability/fees by name,
+dividend withholding, margin interest, options, or intraday impact. Until those
+are implemented and tested, production readiness is limited to modest,
+liquid-equity paper orders and results must not be presented as live-execution
+equivalence.

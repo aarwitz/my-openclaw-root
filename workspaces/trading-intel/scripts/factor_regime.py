@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
-from connectors import massive  # noqa: E402  (market-data backbone; Alpaca-free)
+from connectors import massive  # noqa: E402  (canonical market-data backbone)
 
 DB_PATH = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 MOMENTUM_ETF = "MTUM"

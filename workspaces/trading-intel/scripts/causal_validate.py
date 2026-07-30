@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""causal_validate.py — promote CANDIDATE causal edges to VALIDATED only when they survive a held-out
-test, and run a PLACEBO integrity check proving the validated layer isn't spurious. This is the rigor
-moat: an edge is "validated" because reality confirmed it, never because it was asserted.
+"""Validate association edges without making causal claims.
 
-Tractable first cut (more antecedent types as we add measurable activation series):
-  1. VALIDATE-BY-CO-MOVEMENT — for candidate `co_occurs` ticker↔ticker edges (news co-narrative pairs),
-     compute the actual 126d return correlation; if it co-moves (corr >= PROMOTE_CORR) mark the edge
-     VALIDATED with confidence = corr; otherwise leave it candidate ("discussed together but doesn't
-     move together — unproven"). This bridges the narrative layer to held-out evidence.
-  2. PLACEBO TEST — for a sample of validated co-move edges, recompute correlation after SHUFFLING one
-     leg's returns; the mean correlation must collapse toward 0. If it doesn't, the "validation" is an
-     artifact. Reports real-mean vs placebo-mean (the integrity gap).
+For ticker pairs first linked by news co-mention, calculate a 126-session
+return correlation. A sufficiently large correlation promotes the link from
+``hypothesis`` to ``association_validated``. This establishes co-movement,
+not a causal direction. A shuffled-leg placebo checks whether the measured
+correlations are distinguishable from a simple random pairing artifact.
 
   python3 causal_validate.py
 """
@@ -28,7 +23,7 @@ import signal_scan as ss  # noqa: E402  (reuse _returns / _corr)
 
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
 NOW = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-PROMOTE_CORR = 0.50        # a co-narrative pair is validated as a real link if it also co-moves >= this
+PROMOTE_CORR = 0.50
 
 
 def main():
@@ -52,8 +47,8 @@ def main():
     liquid = {r[0] for r in c.execute("SELECT symbol FROM universe WHERE status='active' AND "
                                       "market_cap IS NOT NULL ORDER BY market_cap DESC LIMIT 1200")}
 
-    # 1) VALIDATE-BY-CO-MOVEMENT (liquid pairs only)
-    cands = c.execute("SELECT id,src_id,dst_id FROM causal_edges WHERE rel='co_occurs' AND status='candidate' "
+    # 1) Validate a measurable association (liquid pairs only).
+    cands = c.execute("SELECT id,src_id,dst_id FROM causal_edges WHERE rel='co_occurs' AND status='hypothesis' "
                       "AND src_id LIKE 'ticker:%' AND dst_id LIKE 'ticker:%'").fetchall()
     tested = promoted = 0
     for eid, s, d in cands:
@@ -66,13 +61,13 @@ def main():
         cv = ss._corr(a, b)
         tested += 1
         if cv >= PROMOTE_CORR:
-            c.execute("UPDATE causal_edges SET status='validated', confidence=?, last_seen=? WHERE id=?",
+            c.execute("UPDATE causal_edges SET status='association_validated', confidence=?, last_seen=? WHERE id=?",
                       (round(cv, 3), NOW, eid))
             promoted += 1
     c.commit()
 
-    # 2) PLACEBO TEST on the validated co-move layer
-    val = c.execute("SELECT src_id,dst_id FROM causal_edges WHERE status='validated' "
+    # 2) Placebo test on the association-validated co-move layer.
+    val = c.execute("SELECT src_id,dst_id FROM causal_edges WHERE status='association_validated' "
                     "AND rel IN ('co_moves','co_occurs') AND confidence IS NOT NULL "
                     "ORDER BY RANDOM() LIMIT 120").fetchall()
     real, placebo = [], []
@@ -87,14 +82,14 @@ def main():
     rm = sum(real) / len(real) if real else 0.0
     pm = sum(placebo) / len(placebo) if placebo else 0.0
 
-    print("=== CAUSAL EDGE VALIDATION ===")
-    print(f"  validate-by-co-movement: tested {tested} candidate co-narrative pairs -> "
-          f"PROMOTED {promoted} to validated (they genuinely co-move, corr>={PROMOTE_CORR})")
-    print(f"  left candidate: {tested - promoted} (discussed together but do NOT co-move — unproven)")
-    print(f"\n  PLACEBO integrity test ({len(real)} validated edges):")
+    print("=== ASSOCIATION EDGE VALIDATION ===")
+    print(f"  co-movement test: tested {tested} co-narrative hypotheses -> "
+          f"PROMOTED {promoted} to association_validated (corr>={PROMOTE_CORR})")
+    print(f"  left as hypotheses: {tested - promoted}")
+    print(f"\n  PLACEBO integrity test ({len(real)} association-validated edges):")
     print(f"    real      mean |corr| = {rm:.3f}")
     print(f"    shuffled  mean |corr| = {pm:.3f}   (must collapse toward 0)")
-    verdict = "PASS — validated edges reflect real structure" if (rm - pm) > 0.25 else "WEAK — investigate"
+    verdict = "PASS — associations reflect non-random structure" if (rm - pm) > 0.25 else "WEAK — investigate"
     print(f"    integrity gap = {rm - pm:.3f}  -> {verdict}")
     c.close()
     return 0

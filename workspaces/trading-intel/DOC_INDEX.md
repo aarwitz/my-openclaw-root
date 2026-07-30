@@ -1,10 +1,10 @@
 # Trading Intelligence — Doc Index
 
-Status: doc map for the OpenClaw AutoTrade desk (topology v4 — 9 agents + jerry).
-Effective: 2026-05-28; updated 2026-06-17.
+Status: doc map for the OpenClaw AutoTrade desk (topology v5).
+Effective: 2026-05-28; updated 2026-07-30.
 
 > **Canonical authority:** `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` (topology
-> v4, DB schema v12) is the single source of truth — including the **valuation
+> v5, migrations through 0022) is the single source of truth — including the **valuation
 > engine** (§6.9, `valuations` table, `valuation.py` / `connectors/edgar.py`) and the
 > **covariance/factor risk model** (§7.1, `portfolio_risk` table, `risk_model.py`).
 > The docs below are historical detail; where they disagree, the canonical doc wins.
@@ -16,7 +16,8 @@ Effective: 2026-05-28; updated 2026-06-17.
 3. `docs/03_EXECUTION_STATE_MACHINE.md` — hypothesis, trade intent, order, position lifecycles and gates.
 4. `docs/04_SHARED_STATE_SCHEMA.md` — canonical entity model and SQLite contract.
 5. `docs/05_IMPLEMENTATION_POLICY.md` — schedules, runtime controls, build phases, validation gates.
-6. `docs/08_LEARNING_SYSTEMS_MAP.md` — every learning/memory/adaptive mechanism, one page (fast vs human-gated loops, live counts, known gaps).
+6. `docs/07_INTERNAL_PAPER_ENGINE.md` — internal simulator, ledger, fills, marks, and limitations.
+7. `docs/08_LEARNING_SYSTEMS_MAP.md` — learning/memory/adaptive mechanisms, fast vs human-gated loops, and known gaps.
 
 ## Reference
 
@@ -24,7 +25,6 @@ Effective: 2026-05-28; updated 2026-06-17.
 - `sql/seed_bootstrap.py` — idempotent loader for canonical seed rows.
 - `sql/seeds/regime_rules.json` — active deterministic regime classifier thresholds (loaded into `regime_rules`).
 - `reference/regime_rules.md` — narrative spec for the live regime classifier.
-- `reference/validation_corpus/` — staging area for validation cases (seeds + cases + index).
 - `../researcher/skills/reasoning_chain.md` — active 8-question researcher reasoning chain.
 - `DECISION_LOG.md` — every retire/keep/merge decision with rationale.
 - `FINDINGS.md` — the lab notebook: dated, sourced market/dataset factoids from any agent (curated by archivist; operator reading, not app content).
@@ -38,6 +38,7 @@ Legacy druck workspace state has been removed. This stack is the only active tra
 
 ## Hard rules
 
-- If two docs disagree, the lower-numbered active doc wins, then `sql/schema.sql`.
+- If two docs disagree, `SYSTEM_ARCHITECTURE.md` wins; then the authority
+  hierarchy in `OPERATOR_GUIDE.md` applies.
 - New docs must be approved into `DOC_INDEX.md` before any agent treats them as authoritative.
 - Active authority stack is capped at 5 documents. Anything else lives as reference or archive.

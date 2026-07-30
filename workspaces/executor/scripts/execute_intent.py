@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Executor · execute_intent.py
 
-Pick `trade_intents` rows in state='approved', submit to Alpaca paper, write
-`orders` row, advance intent state. Deterministic, fail-loud.
+Pick `trade_intents` rows in state='approved', submit to the owned internal
+paper broker, write `orders` row, and advance intent state. Deterministic,
+fail-loud.
 
 Goal alignment:
 - G1: only acts on intents that already passed quant + critic + gate_evaluator.
@@ -114,7 +115,7 @@ def _held_qty(conn, ticker: str) -> float | None:
 
 
 def _qty_from_size(size: float, vehicle: str) -> int:
-    """size is in shares for equity vehicles; integer for Alpaca."""
+    """Size is in whole shares for equity vehicles."""
     if vehicle.lower() not in ("equity", "etf", "stock", "direct_equity"):
         raise ValueError(f"vehicle not supported by executor v1: {vehicle}")
     q = int(round(float(size)))
@@ -198,11 +199,11 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
         # mark intent blocked
         conn.execute(
             "UPDATE trade_intents SET state='blocked', blocked_reason=? WHERE id=?",
-            (f"alpaca_submit_failed: {str(exc)[:300]}", intent_id),
+            (f"paper_broker_submit_failed: {str(exc)[:300]}", intent_id),
         )
         audit(conn, actor="executor", entity_type="trade_intent", entity_id=intent_id,
               action="block", before_state="approved", after_state="blocked",
-              rationale=f"alpaca submit failed: {str(exc)[:380]}")
+              rationale=f"internal paper broker submit failed: {str(exc)[:380]}")
         conn.commit()
         return {"intent_id": intent_id, "submitted": False, "error": str(exc)}
 
@@ -296,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             results.append({"intent_id": r["id"], "error": f"{type(exc).__name__}: {exc}"})
     print(json.dumps({"processed": len(results), "results": results,
                       "dry_run": bool(args.dry_run)}, indent=2, default=str))
-    return 0
+    return 1 if any(r.get("error") for r in results) else 0
 
 
 if __name__ == "__main__":

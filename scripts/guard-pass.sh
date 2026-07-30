@@ -26,6 +26,14 @@ tg()  { "$OPENCLAW_BIN" message send --channel telegram --account "$TG_ACCOUNT" 
 OPEN=$(cd "$OC/workspaces/trading-intel/scripts" && "$PY" -c "from connectors.marketdata import market_clock; print(1 if market_clock().get('is_open') else 0)" 2>/dev/null || echo 0)
 if [[ "$OPEN" != "1" ]]; then log "market closed — skip"; exit 0; fi
 
+# Serialize with full/learning pipelines. Wait briefly because protection is
+# important; failing to acquire is an explicit failure, never a silent skip.
+exec 9>"$OC/state/trading-money-path.lock"
+if ! flock -w 30 9; then
+  log "FAIL: money-path lock unavailable after 30s"
+  exit 1
+fi
+
 log "===== guard pass start ====="
 FAILED=""
 step() { local label="$1"; shift
@@ -35,8 +43,59 @@ step() { local label="$1"; shift
 step "mark_positions"     "$PY" "$OC/workspaces/developer/scripts/mark_positions.py"
 step "enforce_falsifiers" "$PY" "$OC/workspaces/trader/scripts/enforce_falsifiers.py"
 step "enforce_stops"      "$PY" "$OC/workspaces/trader/scripts/enforce_stops.py"
-step "execute_intent"     "$PY" "$OC/workspaces/executor/scripts/execute_intent.py"
-step "sync_fills"         "$PY" "$OC/workspaces/executor/scripts/sync_fills.py"
+
+# Protective authors only create proposed intents. Process exactly those intents
+# through the normal gate stack before execution; --all-proposed/--all-pending
+# would also advance unrelated entry orders during a protection-only pass.
+mapfile -t PROTECTIVE_IDS < <("$PY" -c '
+import sqlite3
+c = sqlite3.connect("file:/home/aaron/.openclaw/state/trading-intel.sqlite?mode=ro", uri=True)
+for (iid,) in c.execute("""
+    SELECT id FROM trade_intents
+    WHERE action IN ("exit", "trim")
+      AND triggered_by IN (
+        "stop_rule_enforcer_v1", "stop_rule_soft_enforcer_v1",
+        "falsifier_enforcer_v1", "horizon_enforcer_v1"
+      )
+      AND state IN ("proposed", "critic_review", "risk_review", "approved")
+    ORDER BY created_at
+"""):
+    print(iid)
+')
+
+for iid in "${PROTECTIVE_IDS[@]}"; do
+  STATE=$("$PY" -c 'import sqlite3,sys; c=sqlite3.connect("file:/home/aaron/.openclaw/state/trading-intel.sqlite?mode=ro",uri=True); r=c.execute("SELECT state FROM trade_intents WHERE id=?",(sys.argv[1],)).fetchone(); print(r[0] if r else "missing")' "$iid")
+  if [[ "$STATE" == "proposed" || "$STATE" == "critic_review" ]]; then
+    step "gate_evaluator:$iid" "$PY" "$OC/workspaces/trading-intel/scripts/gate_evaluator.py" --intent-id "$iid"
+  fi
+  STATE=$("$PY" -c 'import sqlite3,sys; c=sqlite3.connect("file:/home/aaron/.openclaw/state/trading-intel.sqlite?mode=ro",uri=True); r=c.execute("SELECT state FROM trade_intents WHERE id=?",(sys.argv[1],)).fetchone(); print(r[0] if r else "missing")' "$iid")
+  if [[ "$STATE" == "risk_review" ]]; then
+    step "risk_gate:$iid" "$PY" "$OC/workspaces/risk/scripts/gate_risk_intents.py" --intent-id "$iid"
+  fi
+  STATE=$("$PY" -c 'import sqlite3,sys; c=sqlite3.connect("file:/home/aaron/.openclaw/state/trading-intel.sqlite?mode=ro",uri=True); r=c.execute("SELECT state FROM trade_intents WHERE id=?",(sys.argv[1],)).fetchone(); print(r[0] if r else "missing")' "$iid")
+  if [[ "$STATE" == "approved" ]]; then
+    step "execute_intent:$iid" "$PY" "$OC/workspaces/executor/scripts/execute_intent.py" --intent-id "$iid"
+  fi
+done
+
+step "sync_fills" "$PY" "$OC/workspaces/executor/scripts/sync_fills.py"
+step "verify_protection" "$PY" -c '
+import sqlite3, sys
+c = sqlite3.connect("file:/home/aaron/.openclaw/state/trading-intel.sqlite?mode=ro", uri=True)
+rows = c.execute("""
+    SELECT id, ticker, state FROM trade_intents
+    WHERE action IN ("exit", "trim")
+      AND triggered_by IN (
+        "stop_rule_enforcer_v1", "stop_rule_soft_enforcer_v1",
+        "falsifier_enforcer_v1", "horizon_enforcer_v1"
+      )
+      AND state IN ("proposed", "critic_review", "risk_review", "approved")
+""").fetchall()
+if rows:
+    print("protective intents stranded: " + ", ".join(f"{i}/{t}/{s}" for i,t,s in rows))
+    sys.exit(1)
+print("all protective intents reached a terminal/submitted state")
+'
 
 DIGEST=$("$PY" - <<'PYEOF'
 import sqlite3
@@ -62,4 +121,4 @@ PYEOF
 [[ -n "${FAILED:-}" ]] && DIGEST="$DIGEST | ⚠ failed: $FAILED"
 tg "$DIGEST"
 log "===== guard pass end (failed: ${FAILED:-none}) ====="
-exit 0
+[[ -z "${FAILED:-}" ]]

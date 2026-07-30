@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
-from connectors.marketdata import daily_bars, latest_trade  # noqa: E402  (market data)
+from connectors.marketdata import daily_bars, latest_trades, market_clock  # noqa: E402
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 STOP_PCT = float(os.environ.get("TRADER_STOP_PCT", "0.08"))
@@ -247,15 +247,20 @@ def main(argv=None) -> int:
     if resolved or postmortems_written:
         conn.commit()
 
+    candidates = [
+        p for p in positions
+        if float(p["cost_basis"] or 0) > 0 and p["ticker"].upper() not in open_exits
+    ]
+    quotes = latest_trades([p["ticker"].upper() for p in candidates])
+    quote_unavailable = []
     results = []
-    for p in positions:
+    for p in candidates:
         tick = p["ticker"].upper()
         basis = float(p["cost_basis"] or 0)
         qty = float(p["qty"])
-        if basis <= 0 or tick in open_exits:
-            continue
-        lt = latest_trade(tick)
+        lt = quotes.get(tick)
         if not lt or not lt.get("price"):
+            quote_unavailable.append(tick)
             continue  # no quote — check again next pass; never act blind
         px = float(lt["price"])
         breach = (px <= basis * (1 - STOP_PCT)) if qty > 0 else (px >= basis * (1 + STOP_PCT))
@@ -334,10 +339,18 @@ def main(argv=None) -> int:
                  "Exit authored; flows the normal gate path."
              )))
         conn.commit()
-    print(json.dumps({"stop_breaches": results, "resolved_stopped_out": resolved,
-                      "postmortems_written": postmortems_written,
-                      "authored": 0 if a.dry_run else len(results),
-                      "dry_run": a.dry_run, "stop_pct": STOP_PCT}, indent=2))
+    report = {"stop_breaches": results, "resolved_stopped_out": resolved,
+              "postmortems_written": postmortems_written,
+              "authored": 0 if a.dry_run else len(results),
+              "quote_unavailable": sorted(quote_unavailable),
+              "quotes_received": len(quotes),
+              "dry_run": a.dry_run, "stop_pct": STOP_PCT}
+    print(json.dumps(report, indent=2))
+    # Missing live quotes while the exchange is open means protection was not
+    # evaluated. Fail loudly and quickly; after-hours there is no stop action
+    # to take and the next open pass will retry.
+    if quote_unavailable and market_clock().get("is_open"):
+        return 2 if len(quote_unavailable) == len(candidates) else 1
     return 0
 
 

@@ -3,10 +3,11 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -uo pipefail
 
 # learning-kg-rebuild.sh — deterministic, ZERO-CODEX daily rebuild of the
-# knowledge graph + causal layer + offline consolidation. Replaces the gateway
+# knowledge graph + evidence-association layer + offline consolidation. Replaces the gateway
 # agentTurn cron job (which spun an LLM agent just to launch these scripts).
-# No LLM, no gateway agent, no Codex. Pings Telegram on failure; sends a quiet
-# (silent) summary on success so the desk's daily KG growth is visible.
+# No LLM, no gateway agent, no Codex. Pings Telegram on failure. Routine
+# rebuild success is log-only: record-count growth is coverage, not learning
+# quality, and must not be narrated as causal progress.
 # Paired host crontab entry: `12 6 * * *`.
 
 OC="$HOME/.openclaw"
@@ -49,7 +50,7 @@ before="$(counts)"; log "before: $before"
 FAILED=""
 run "kg build"         "$PY" "$KG/knowledge_graph.py" build --top-n 1400 \
  && run "kg news"      "$PY" "$KG/knowledge_graph.py" news  --top-n 1400 \
- && run "causal build" "$PY" "$KG/causal_graph.py" build \
+ && run "evidence build" "$PY" "$KG/causal_graph.py" build --rebuild \
  && run "dream"        "$PY" "$KG/dream.py"
 rc=$?
 
@@ -60,18 +61,9 @@ if [[ $rc -ne 0 ]]; then
   tg notify "⚠️ Daily KG rebuild FAILED at: ${FAILED:-unknown} (rc=$rc). before[$before] after[$after]. Log: $LOG"
   exit 1
 fi
-# Human summary, not a stats dump (operator feedback 2026-07-07).
-# Delta must compare consolidated-to-consolidated: `before` includes a day of
-# raw intraday edges that the dream pass dedupes, so before-vs-after reads as a
-# big negative ("-2093 links") even on a day the durable graph GREW (operator
-# confusion 2026-07-08). Baseline = yesterday's post-consolidation counts.
+# Retain a local consolidated baseline for diagnostics. Do not Telegram routine
+# count changes: more links do not imply better prediction or identified cause.
 AFTER_STATE="$HOME/.openclaw/state/kg-last-after.txt"
-prev_after="$(cat "$AFTER_STATE" 2>/dev/null || true)"
 echo "$after" > "$AFTER_STATE"
-if [[ -n "$prev_after" ]]; then
-  delta_edges=$(( $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) - $(echo "$prev_after" | grep -o "edges=[0-9]*" | cut -d= -f2) ))
-  tg silent "🧠 Knowledge graph refreshed overnight — $( [ "$delta_edges" -ge 0 ] && echo "+$delta_edges" || echo "$delta_edges" ) durable causal/entity links vs yesterday (after consolidation)."
-else
-  tg silent "🧠 Knowledge graph refreshed overnight — $(echo "$after" | grep -o "edges=[0-9]*" | cut -d= -f2) links total (first consolidated baseline recorded)."
-fi
+log "routine success is silent; graph counts are coverage diagnostics only"
 exit 0

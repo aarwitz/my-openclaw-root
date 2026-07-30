@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/developer/scripts")
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 EXPERIMENT_ID = "episode_library_v1"
 

@@ -12,7 +12,7 @@ single containerized gateway.
 
 The headline workload is **AutoTrade**: a self-improving, agentic *paper*-trading desk (a hedge-fund
 org of specialised agents) running a research → decision → execution → learning loop against an
-Alpaca paper account. Alongside it run general-purpose assistant/dev agents (Jerry, Dwight, Resi) and
+owned internal paper ledger. Alongside it run general-purpose assistant/dev agents (Jerry, Dwight, Resi) and
 a Task Manager integration.
 
 ## Authoritative docs (read these first, in this order)
@@ -177,8 +177,10 @@ SQLite store. **LLM agents author only judgement/prose and orchestrate — they 
   **fail-closed** — if equity can't be read, intents stay in `risk_review` and it exits non-zero.
 - **World Model & Calibration** (`workspaces/trading-intel/scripts/worldmodel.py` + `mechanisms`,
   `predictions`, `episodes`, `macro_releases`, `valuations`, `portfolio_risk` tables) is the learning
-  engine: Beta-posterior beliefs over causal mechanisms updated from realised outcomes. Two learning
-  rates — *fast/autonomous* (mechanism Beta updates) and *slow/human-gated* (`rule_proposals`).
+  engine: Beta-posterior beliefs over predictive hypotheses updated from realised outcomes. These
+  are associations, not identified causes. Two learning rates — *fast/autonomous* (mechanism Beta
+  updates) and *slow/human-gated* (`rule_proposals`). As of 2026-07-30 all mechanisms are
+  quarantined/deprecated after the robust replay found zero FDR survivors.
 
 ## Orchestration (cron)
 

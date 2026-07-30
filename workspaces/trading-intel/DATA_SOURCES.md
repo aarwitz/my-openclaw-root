@@ -3,9 +3,9 @@
 **Discipline:** a source only feeds *sized trading* after its features pass the FDR-corrected,
 cost-net backtest gate (`mechanism_backtest.py`). Free live-only sources (no history) can be
 **advisory** (shown in UI) or **forward-collected** (build history → validate later), never
-sized un-validated. Status as of **2026-07-03** (full dependency audit; see git history for
-the audit detail). The monthly `data-scout-monthly` cron keeps this file honest — scout
-entries append to the Scout log at the bottom.
+sized un-validated. Active-path status was re-audited **2026-07-30**. The monthly
+`data-scout-monthly` cron keeps the candidate list honest; scout entries append
+to the Scout log at the bottom.
 
 > **Operator action wanted:** fill in the *Cost/yr* column below so add/remove decisions can
 > be made on ROI. FMP is known-expensive; whether it stays depends on what only-FMP data
@@ -15,10 +15,9 @@ entries append to the Scout log at the bottom.
 
 | Source | Cost/yr (fill in) | What we use | Features fed | Only-from-this-source? |
 |---|---|---|---|---|
-| **FMP** | $___ (expensive) | fundamentals ttm, insider tx, analyst grades, EOD prices (20yr incl. delisted), profiles, S&P constituents, stock-peers, screener | 8 fundamentals + insider_net_180d, rating_net_90d, sector_rel_63d, peer_mom_21d, valuation, KG edges | **peers, grades, insider, delisted-history are FMP-only today.** Prices/fundamentals have free substitutes (Alpaca/EDGAR) at engineering cost |
-| **Massive (Polygon)** | $___ (expensive) | daily bars, biweekly short interest, ticker news + article text | news_sent_7d/30d, news_vol_z, days_to_cover, short_int_chg_2m, LLM news features (article text!) | **article TEXT is the LLM-feature fuel — only source we hold.** Options endpoints exist on higher tier (403 today) |
+| **FMP** | $___ (expensive) | fundamentals ttm, insider tx, analyst grades, EOD prices (20yr incl. delisted), profiles, S&P constituents, stock-peers, screener | 8 fundamentals + insider_net_180d, rating_net_90d, sector_rel_63d, peer_mom_21d, valuation, KG edges | **peers, grades, insider, delisted-history are FMP-only today.** Prices/fundamentals have other substitutes at engineering cost |
+| **Massive (formerly Polygon)** | $___ (expensive) | daily bars, bounded bulk live snapshots, biweekly short interest, ticker news + article text | live marks, spy_trend, news_sent_7d/30d, news_vol_z, days_to_cover, short_int_chg_2m, LLM news features | **article text is the LLM-feature fuel — only source we hold.** The bulk snapshot is the primary intraday mark path; failure degrades quickly and loudly |
 | **X (Twitter)** | $___ (paid, confirmed working) | full-archive cashtag mention counts | x_mention_vol_z — top single feature 2024-26 (IC 0.056 mega-caps / 0.034 broad) | yes — no substitute archive |
-| **Alpaca** | free | **DATA ONLY since D52 (2026-07-07)**: IEX bars/quotes + clock/calendar | spy_trend, execution-time quotes, calendar gates | broker layer ELIMINATED (internal engine is the desk broker); next: FMP/Massive quotes to complete the exit |
 | **FRED/Treasury/Cboe** | free | rates curve, credit spreads, VIX term, macro series | 17 macro features; 16 validated macro mechanisms; regime signals | irreplaceable & free |
 | **SEC EDGAR** | free | company facts (XBRL), 10-K/Q full text | valuation cross-check, filing_delta (Lazy-Prices MinHash) | free forever; underused (8-K event timing still open) |
 | **Event Registry** | free tier | entity-tagged recent news + sentiment | catalyst_scan brief (advisory) | replaceable |
@@ -41,12 +40,14 @@ entries append to the Scout log at the bottom.
 
 - **gdelt.py** — orphaned in the Python pipeline (only lidi's intel-pack.ts uses GDELT independently). Candidate for deletion from connectors.
 - **alphavantage.py** — silent no-op (no credential). Either provision a key (free tier) for its NEWS_SENTIMENT history or delete the branch.
-- **yahoo.py** — fallback-only (valuation VIX/yield backup). Keep; it's the free failover.
+- **yahoo.py** — fallback-only (Cboe VIX and FRED yield backup). Keep; it is a degraded, explicitly labeled free failover.
 - **finnhub-api.json, schwab-dev-*.json** — credentials exist, nothing calls them. Schwab token expired. Candidates for the shredder unless Finnhub's free insider/recs become a cross-check column.
 - **FMP price targets WIRED 2026-07-03** (`price-target-news`, PIT by publishedDate): pt_upside, pt_rev_60d, pt_count_90d — in GEN_FEATURES, 600-name backfill running. **Institutional ownership: NOT on our tier** (all /stable paths 40x) — factor into the renewal decision. Estimate *revisions* have no PIT history endpoint; target revisions serve as the proxy.
 - **ThetaData audition RUNNING 2026-07-03**: free-tier terminal live (tools/thetadata/, v2 REST :25510), `options_audit.py` pulling 1yr bulk EOD for top-64 names → options_daily table → IC screen (opt_pcr_vol / opt_vol_z / opt_net_prem). Decision rule per Tier 2.
 - **Deleted 2026-07-03**: gdelt.py + alphavantage.py connectors and the feature_store alphavantage branch (credential-less no-ops).
-- The web layer (`trader-live.ts`) hits Alpaca directly — must be re-pointed when the internal paper engine (docs/07) cuts over.
+- **Broker state:** `workspaces/executor/scripts/broker.py` is internal-paper only.
+  There is no runtime external-broker switch. Market calendar logic is local
+  and exchange-aware; prices come through the connector layer above.
 
 ## Social/retail sentiment (scouted 2026-07-10)
 

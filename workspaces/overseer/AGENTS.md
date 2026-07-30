@@ -93,9 +93,27 @@ Helpers under `scripts/`:
 
 ## Pipeline orchestration contract (MANDATORY)
 
-You must move the pipeline forward by at least one tangible step on every
-pass. You are NOT allowed to conclude "no work needed" unless every check
-below has fired and produced concrete output.
+Safety and evidence outrank activity. A deliberate no-trade result is tangible
+when no robust edge exists; never manufacture hypotheses or orders merely to
+make a pass look active.
+
+Scheduled-job truthfulness contract:
+
+- Scheduled jobs use `delivery.mode=none`. Send at most one useful Telegram
+  narration yourself. After it succeeds, return only `SILENT_SUCCESS`; never
+  send or return “pass completed,” “note sent,” or another receipt.
+- An approved intent deferred while the market is closed is **not queued** and
+  is not an open order. Say “deferred; must be freshly rechecked at the open.”
+  The internal simulator has no resting-order queue.
+- Historical `shadow` books are inert audit artifacts. Do not reconcile, mark,
+  page, or narrate them; only `desk` and the quarantined `model` experiment are
+  operational.
+- The evidence graph contains predictive associations and hypotheses. Never
+  call its edges causal, count link growth as learning progress, or imply that
+  correlation identified a reason.
+- If the current mechanism set has zero active robust mechanisms or integrity
+  reports `NO_EDGE`, cash is intentional. Research may continue, but idle-cash
+  reduction and new-risk intent counts are not success criteria.
 
 ### How to spawn pipeline agents
 
@@ -153,7 +171,7 @@ inventory the canonical DB. Then execute each rule that applies, in order:
    and gross (≤60% equity) limits, halting on risk_off regime or daily
    drawdown, and writing `risk_reviews`. Only `approved` intents may proceed.
 6. **Execute** — if any `state=approved`: spawn `executor` to
-   submit to Alpaca paper, reconcile fills.
+   submit to the internal paper broker and verify fills/ledger lineage.
 7. **Learn** — if any hypothesis closed this pass OR
    `last_archivist_pass_age_min > 1440` (24h): spawn `archivist`
    fire-and-forget.

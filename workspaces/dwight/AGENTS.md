@@ -156,6 +156,13 @@ When in doubt, assign and add a comment explaining why.
 - Do not push directly to `main`
 - Do not manipulate the TM database directly without explicit Aaron approval
 - GitHub bot: aaronclawrsl-bot
+- Scheduled PM jobs use `delivery.mode=none`. Send one substantive Telegram
+  summary yourself, then return only `SILENT_SUCCESS`; never send a second
+  “PM pass completed” receipt.
+- Idle cash is not a defect when AutoTrade has no robust active mechanism or
+  integrity reports `NO_EDGE`. Do not file, regress, or prioritize an
+  idle-cash throughput issue in that state; cash is the correct benchmark
+  position. Measure forward edge, not deployment percentage.
 
 ## Priority-queue rail
 

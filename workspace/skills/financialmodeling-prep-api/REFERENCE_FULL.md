@@ -130,7 +130,7 @@ FMP is not the primary implied-move source in this setup.
 
 **Workaround**:
 - Use Schwab options data when available
-- Otherwise use ATR-based expected move estimates from Massive/Alpaca context
+- Otherwise use ATR-based expected move estimates from Massive context
 - Treat FMP as analyst/fundamental support, not options authority
 
 ---
@@ -147,8 +147,7 @@ FMP is not the primary implied-move source in this setup.
 
 **Fallback discipline**:
 - Finnhub remains primary for earnings actuals/estimates, revisions, and catalyst evidence.
-- Massive/Alpaca remain primary for price and volatility context.
-- Do not substitute Alpaca for analyst estimate sourcing.
+- Massive remains primary for price and volatility context.
 
 ---
 
@@ -265,5 +264,5 @@ AAPL example:
 
 - FMP API docs: https://site.financialmodelingprep.com/developer/docs
 - Druck Phase II spec: ~/.openclaw/workspaces/druck/PHASE_II_PLAN.md
-- Alpaca fallback (rate limits): ~/.openclaw/workspace/skills/alpaca/SKILL.md
+- Massive market data: ~/.openclaw/workspace/skills/massive/SKILL.md
 - Trading Desk sheet: 19LPX1xGCme4umn22GN4Z7WBQxGZBWWcysDjM6JEW-D4

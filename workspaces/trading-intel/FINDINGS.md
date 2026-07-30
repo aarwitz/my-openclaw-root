@@ -48,8 +48,9 @@ incident postmortems) need no tag.
   re-scopes which guards still fire; a guard that can no longer trigger is indistinguishable
   from a guard that always passes."** A regression test must assert the OUTCOME (no filled
   order ever yields a HYP-SYNC hypothesis), not the mechanism. TM issue drafted
-  (inbox/tm-issue-draft-vestigial-organ-audit.md) for the full post-cutover vestigial sweep
-  (shadow parity vs frozen Alpaca account is the next suspect).
+  (inbox/tm-issue-draft-vestigial-organ-audit.md) for the full post-cutover vestigial sweep.
+  The external-account parity path was subsequently retired; internal ledger
+  arithmetic and lineage are now the authoritative invariants.
 
 ## 2026-07-15 — the coin flip isn't fair: a long thesis's true base rate vs SPY is 46.6%, not 50%
 
@@ -186,7 +187,10 @@ incident postmortems) need no tag.
   is selection skill, not learning — the learning claim gets its first graded
   test this month.
 
-## 2026-07-07 — a broker can lie to you transiently: 21 of 24 positions "vanished" and came back
+## 2026-07-07 — HISTORICAL/RETIRED PROVIDER: a broker can lie transiently
+
+This incident record explains the permanent internal-paper decision. It is not
+an available integration, fallback, or restoration path; D89 prohibits one.
 
 - **Alpaca's positions endpoint served a partial account for a window this morning**
   — 3 of 24 positions, equity showing $79,948 vs the real $103,995 — and the desk's

@@ -135,6 +135,106 @@ def get_first_nonempty(issue: Dict[str, Any], keys: List[str]) -> str:
     return ""
 
 
+def git_current_branch(repo_path: str) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_path, "branch", "--show-current"],
+            capture_output=True, text=True, check=False,
+        )
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def expected_base_branch(repo: str) -> str:
+    """Resolve the repository's deployment/base branch without guessing main.
+
+    The OpenClaw live tree is intentionally pinned to master. Other repositories
+    use origin/HEAD when available, then their locally existing main/master ref.
+    """
+    if repo.rstrip("/").endswith(".openclaw"):
+        return "master"
+    remote = subprocess.run(
+        ["git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if remote.returncode == 0 and remote.stdout.strip():
+        return remote.stdout.strip().split("/")[-1]
+    for candidate in ("main", "master"):
+        exists = subprocess.run(
+            ["git", "-C", repo, "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}"],
+            capture_output=True, text=True, check=False,
+        )
+        if exists.returncode == 0:
+            return candidate
+    return "main"
+
+
+def prepare_launch_repo(
+    repo: str,
+    task_id: str,
+    issue_id: str,
+    issue: Dict[str, Any],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Return (launch_repo, original_branch, isolated_worktree).
+
+    A clean base checkout is used directly. A dirty base checkout is preserved
+    untouched and the coding task runs in a new issue-branch worktree.
+    """
+    original_branch = git_current_branch(repo)
+    expected = expected_base_branch(repo)
+    if original_branch != expected:
+        raise RuntimeError(
+            f"{repo} is on '{original_branch}' (expected {expected}) — "
+            "the live fleet may be running non-base code"
+        )
+    dirty = subprocess.run(
+        ["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True, text=True, check=False,
+    )
+    if dirty.returncode != 0:
+        raise RuntimeError(
+            f"could not inspect repository status: "
+            f"{(dirty.stderr or dirty.stdout).strip()[:300]}"
+        )
+    dirt = dirty.stdout.strip()
+    if not dirt:
+        return repo, original_branch, None
+
+    raw_branch = get_first_nonempty(
+        issue, ["branch", "branch_name", "branchName", "git_branch"]
+    )
+    if not raw_branch:
+        title_slug = re.sub(
+            r"[^a-z0-9]+", "-",
+            str(issue.get("title") or "task").lower(),
+        ).strip("-")[:48]
+        raw_branch = f"issue-{issue_id}-{title_slug}"
+    branch = re.sub(r"[^A-Za-z0-9._/-]+", "-", raw_branch).strip("/-")
+    parent = Path("/tmp/openclaw-coding-worktrees")
+    parent.mkdir(parents=True, exist_ok=True)
+    wt_path = parent / f"{Path(repo).name}-{task_id}-{os.getpid()}"
+    branch_exists = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        capture_output=True, text=True, check=False,
+    ).returncode == 0
+    add_cmd = ["git", "-C", repo, "worktree", "add"]
+    if not branch_exists:
+        add_cmd.extend(["-b", branch])
+    add_cmd.extend([str(wt_path), branch if branch_exists else expected])
+    added = subprocess.run(add_cmd, capture_output=True, text=True, check=False)
+    if added.returncode != 0:
+        raise RuntimeError(
+            "could not create isolated worktree for dirty live repo: "
+            f"{(added.stderr or added.stdout).strip()[:300]}"
+        )
+    print(
+        f"Live repo has {len(dirt.splitlines())} dirty tracked file(s); "
+        f"isolated launch in {wt_path} on {branch}."
+    )
+    return str(wt_path), original_branch, str(wt_path)
+
+
 def normalize_owner(owner: str) -> str:
     raw = owner.strip().lower()
     aliases = {
@@ -825,32 +925,23 @@ def run(argv: List[str]) -> int:
             build_issue_launch_signature(issue),
         )
 
-    def git_current_branch(repo_path: str) -> Optional[str]:
-        try:
-            result = subprocess.run(
-                ["git", "-C", repo_path, "branch", "--show-current"],
-                capture_output=True, text=True, check=False,
-            )
-            return result.stdout.strip() or None
-        except Exception:
-            return None
+    original_branch = None
+    isolated_worktree: Optional[str] = None
 
-    original_branch = git_current_branch(repo) if args.execute else None
-
-    # OPERATOR RULE (2026-07-29): the live tree launches from its live branch, clean —
-    # or not at all. TM-288/291 both ran into a checkout left dirty/off-branch by a
-    # sibling run and finished as uncommitted work with no PR (invisible to the
-    # sweeper). Fail fast with a clear reason instead of cross-contaminating.
+    # The live checkout may legitimately be dirty while an operator is
+    # hardening AutoTrade. Never let that block an unrelated coding issue and
+    # never let a coding agent touch those edits: launch dirty-root work in an
+    # isolated git worktree based on the committed live branch.
     if args.execute:
-        expected = "master" if repo.rstrip("/").endswith(".openclaw") else "main"
-        dirt = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
-                              capture_output=True, text=True, check=False).stdout.strip()
-        if original_branch != expected or dirt:
-            print(f"REFUSING launch: {repo} is on '{original_branch}' (expected {expected}) "
-                  f"with {len(dirt.splitlines()) if dirt else 0} dirty file(s). "
-                  "Another run is active or a prior run left debris — recover the tree first "
-                  "(pr-gate-sweeper self-heals hourly).", file=sys.stderr)
+        try:
+            launch_repo, original_branch, isolated_worktree = prepare_launch_repo(
+                repo, task_id, args.issue_id, issue
+            )
+        except RuntimeError as exc:
+            print(f"REFUSING launch: {exc}.", file=sys.stderr)
             return 3
+        if isolated_worktree:
+            cmd[cmd.index("--repo") + 1] = isolated_worktree
 
     completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
     output = (completed.stdout or "") + (completed.stderr or "")
@@ -863,7 +954,7 @@ def run(argv: List[str]) -> int:
     # leave the repo sitting on that branch afterwards (TM-213 left
     # lidi-solutions on its work branch — data-push crons then write against
     # the wrong branch and the operator finds a surprise checkout).
-    if args.execute and original_branch:
+    if args.execute and original_branch and not isolated_worktree:
         now_branch = git_current_branch(repo)
         if now_branch and now_branch != original_branch:
             restore = subprocess.run(
@@ -962,6 +1053,30 @@ def run(argv: List[str]) -> int:
                     release_issue_launch_claim(args.tm_base, args.issue_id, claim_token)
                 except RuntimeError as release_exc:
                     print(f"WARNING: could not release launch claim: {release_exc}", file=sys.stderr)
+
+        if isolated_worktree:
+            wt_dirty = subprocess.run(
+                ["git", "-C", isolated_worktree, "status", "--porcelain"],
+                capture_output=True, text=True, check=False,
+            ).stdout.strip()
+            if completed.returncode == 0 and not wt_dirty:
+                removed = subprocess.run(
+                    ["git", "-C", repo, "worktree", "remove", isolated_worktree],
+                    capture_output=True, text=True, check=False,
+                )
+                if removed.returncode == 0:
+                    print(f"Removed clean isolated worktree {isolated_worktree}")
+                else:
+                    print(
+                        f"WARNING: isolated worktree cleanup failed: "
+                        f"{(removed.stderr or '').strip()[:200]}",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    f"Preserved isolated worktree for recovery: {isolated_worktree} "
+                    f"(rc={completed.returncode}, dirty_files={len(wt_dirty.splitlines()) if wt_dirty else 0})"
+                )
 
     return completed.returncode
 

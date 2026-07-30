@@ -35,7 +35,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 # Usage:
 #   trader-pass-deterministic.sh [--skip-execute] [--skip-snapshot]
 
-set -u
+set -uo pipefail
 
 OPENCLAW="${OPENCLAW:-$HOME/.openclaw}"
 LIDI_REPO="${TRADER_INTEL_REPO:-${LIDI:-$HOME/repos/lidi-solutions}}"
@@ -44,6 +44,8 @@ DIST_DATA_JSON="$LIDI_REPO/dist/solutions/trader_intel/app/data.json"
 SKIP_EXECUTE=0
 SKIP_SNAPSHOT=0
 PUBLISH=0
+PIPELINE_RC=0
+PIPELINE_FAILURES=()
 for arg in "$@"; do
   case "$arg" in
     --skip-execute) SKIP_EXECUTE=1 ;;
@@ -54,11 +56,32 @@ done
 
 cd "$OPENCLAW" || { echo '{"ok":false,"error":"cd failed"}'; exit 2; }
 
+# Architecture invariant before any write or order path. This aborts the pass if
+# a legacy provider credential, connector, backend switch, prompt, or active-code
+# reference is reintroduced.
+if ! python3 "$OPENCLAW/scripts/check-internal-paper-only.py" >/tmp/autotrade-internal-paper-check.json; then
+  python3 -c 'import json; print(json.dumps({"ok": False, "error": "internal-paper-only architecture violation", "report": json.load(open("/tmp/autotrade-internal-paper-check.json"))}))'
+  exit 2
+fi
+
+# One writer pipeline at a time. Eight scheduled roles can otherwise overlap
+# their full/second passes and contend on the trading + feature databases.
+exec 9>"$OPENCLAW/state/trading-money-path.lock"
+if ! flock -n 9; then
+  printf '{"started_at":"%s","skipped":true,"reason":"another money-path pipeline holds the lock","finished_at":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  exit 0
+fi
+
 run_step() {
   local name="$1" cmd_timeout="$2"; shift 2
   local out
   out=$(timeout "$cmd_timeout" "$@" 2>&1)
   local rc=$?
+  if (( rc != 0 )); then
+    PIPELINE_RC=1
+    PIPELINE_FAILURES+=("$name:$rc")
+  fi
   # quote payload for JSON; collapse to single line
   local one
   one=$(printf '%s' "$out" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
@@ -72,14 +95,14 @@ printf '{\n  "started_at": "%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # queued an order into a 3-day weekend gap). On a non-trading day the pass
 # still refreshes data/scoreboard/snapshot but skips authoring and execution.
 # Fail-open on calendar errors (a dead calendar API must not halt the desk on
-# a real trading day — the executor has its own fail-closed clock gate).
+  # a real trading day — the executor has its own fail-closed clock gate).
 TRADING_DAY=$(timeout 20 python3 -c "
 import sys
 sys.path.insert(0, 'workspaces/trading-intel/scripts')
 from datetime import datetime
 from zoneinfo import ZoneInfo
 try:
-    from connectors.alpaca import is_trading_day
+    from connectors.marketdata import is_trading_day
     today = datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d')
     print('1' if is_trading_day(today) else '0')
 except Exception:
@@ -89,6 +112,7 @@ printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]]
 
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
 run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
+run_step "sync_symbol_aliases" 20 python3 workspaces/trading-intel/scripts/sync_symbol_aliases.py
 # Deterministic world-model ORIGINATION. D68: keep the signal lane inside the
 # normal pass so idle cash caused by no qualified ideas is attacked by more
 # candidates flowing through the unchanged score -> critic -> trader -> risk
@@ -138,6 +162,7 @@ run_step "reconcile" 30 python3 workspaces/executor/scripts/reconcile.py --repai
 # D52: mark the internal desk book each pass so book_equity (the equity curve
 # the app serves) stays fresh intraday — daily-keyed, so this upserts today.
 run_step "sim_mark" 60 python3 workspaces/executor/scripts/sim_broker.py mark --book desk
+run_step "compute_attribution" 60 python3 workspaces/developer/scripts/compute_attribution.py
 run_step "portfolio_risk" 120 python3 workspaces/trading-intel/scripts/risk_model.py snapshot
 run_step "scoreboard" 60 python3 workspaces/trading-intel/scripts/benchmark_scoreboard.py --backfill
 # --- learning loop (D56) --------------------------------------------------
@@ -198,4 +223,7 @@ if [[ "$PUBLISH" -eq 1 && "$SKIP_SNAPSHOT" -eq 0 ]]; then
   run_step "publish" 120 bash "$OPENCLAW/scripts/push-trader-data.sh"
 fi
 
+printf ',\n  "pipeline_result": {"rc": %d, "failures": %s}' \
+  "$PIPELINE_RC" "$(printf '%s\n' "${PIPELINE_FAILURES[@]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
 printf ',\n  "finished_at": "%s"\n}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+exit "$PIPELINE_RC"

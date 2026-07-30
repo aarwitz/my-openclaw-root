@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors.marketdata import ConnectorError, daily_bars  # noqa: E402
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import get_account  # noqa: E402  (adapter, D52)
@@ -42,7 +42,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
           spy_close          REAL,
           spy_as_of          TEXT,
           account_status     TEXT,
-          source             TEXT NOT NULL DEFAULT 'alpaca_paper'
+          source             TEXT NOT NULL DEFAULT 'internal_paper'
         )
         """
     )
@@ -92,7 +92,7 @@ def capture(conn: sqlite3.Connection) -> dict:
 
     conn.execute(
         "INSERT INTO portfolio_snapshots (id, captured_at, equity, last_equity, day_pl, cash, buying_power, spy_close, spy_as_of, account_status, source) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'alpaca_paper')",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'internal_paper')",
         (
             row["id"],
             row["captured_at"],

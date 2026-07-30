@@ -8,7 +8,7 @@ Improve autonomous entry timing without turning the system into a constant low-v
 
 Core idea:
 - use scheduled decision passes to prepare execution plans,
-- use resting broker-native orders to react to price,
+- use resting orders in the internal paper broker to react to price,
 - use event-driven order/fill updates for feedback,
 - avoid discretionary market-chasing between checkpoints.
 
@@ -24,7 +24,7 @@ Preferred order behavior for approved setups:
 
 - Do not rely on market orders at the open unless the setup is time-critical and the expected edge still clears slippage-adjusted hurdles.
 - Do not chase a name just because it moved fast between checkpoints.
-- Do not create a new polling loop solely for price alerts when a broker-native order can express the action more directly.
+- Do not create a new polling loop solely for price alerts when a resting internal-paper order can express the action more directly.
 - Do not leave stale resting buy orders live into the close unless the thesis explicitly calls for overnight exposure at that level.
 
 ## 4. Pass-by-pass behavior
@@ -68,7 +68,7 @@ Preferred order behavior for approved setups:
 
 Efficient price-hit awareness without a dedicated price-alert daemon:
 - resting limit/bracket orders provide the action path,
-- Alpaca order/position events provide the notification path,
+- internal order/fill state transitions provide the notification path,
 - scheduled passes provide the reassessment path.
 
 That is materially better than simple alerts because the broker can act at the price rather than merely telling trader that the price was touched.

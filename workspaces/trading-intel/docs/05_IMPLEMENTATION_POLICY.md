@@ -4,7 +4,7 @@ Status: active. Schedules, approved actions, deferred features, build phases, an
 
 ## 1. Approved actions at launch
 
-- Long and short direct equity in Alpaca paper.
+- Long and short direct equity in the internal paper account.
 - ETF positions.
 - LEAPS calls and call spreads consistent with `01_OPERATING_AUTHORITY.md`.
 - Shorter-dated options for explicit catalyst windows.
@@ -12,8 +12,8 @@ Status: active. Schedules, approved actions, deferred features, build phases, an
 
 ## 2. Explicitly deferred at launch
 
-- Live (non-paper) Alpaca account.
-- Margin beyond Alpaca paper defaults.
+- Any live-money broker account.
+- Margin, options, or unsupported leveraged products.
 - Crypto.
 - Futures.
 - Any data source not declared in `DATA_SOURCES.md` (catalog) / `~/.openclaw/SYSTEM_ARCHITECTURE.md` §6.
@@ -56,7 +56,7 @@ Executor:
 - `11:00` confirmation / invalidation pass.
 - `13:30` replacement / rotation pass.
 - `15:30` close-risk pass.
-- Event-driven on Alpaca order or position events.
+- On each deterministic checkpoint and immediately after a simulator fill.
 
 Archivist:
 
@@ -70,9 +70,11 @@ These are baseline cadences. Each agent may run additional event-driven jobs.
 Executor timing behavior must follow `reference/execution_timing_framework.md`.
 
 Operational defaults:
-- Prefer resting broker-native limit or protective orders for already-approved price-sensitive setups instead of waiting for another checkpoint.
+- The v1 simulator supports immediate marketable limits only. Non-marketable
+  limits fail closed; it must not pretend to maintain a resting queue.
 - Use scheduled passes to prepare, reassess, resize, or cancel execution plans rather than to justify reactive market chasing.
-- Use Alpaca order and position events as the primary notification path after an order is staged.
+- Use the simulator transaction result and canonical read-back as the primary
+  notification path after an order is staged.
 - Cancel stale resting buy orders in the `15:30` ET close-risk pass unless the thesis explicitly supports overnight exposure at that level.
 
 ## 3.2 Whole-pipeline invocation policy
@@ -104,7 +106,7 @@ Execution-quality requirement:
 ## 5. Logging and audit
 
 - Every state transition writes an `audits` row.
-- Every Alpaca order writes an `orders` row and an `audits` row referencing it.
+- Every simulator order writes an `orders`/`sim_orders` row and an audit referencing it.
 - Long-form reasoning goes to per-agent journals under `~/.openclaw/state/journals/<agent>/YYYY-MM-DD.md` and is referenced by `audits.journal_ref`.
 - Weekly audit job (Sunday `08:00`) emits a portfolio summary into Druck's Telegram thread.
 
@@ -119,7 +121,7 @@ Phase 1 — Schema and validation:
 
 Phase 2 — Infrastructure:
 
-5. Wire Alpaca paper account read/write through the existing skill.
+5. Initialize and verify the internal paper `desk` book.
 6. Implement Tier-0 data connectors (SEC EDGAR, FRED, ClinicalTrials.gov, EIA, USAspending, BLS, USGS, USPTO, arXiv).
 7. Each connector writes `hypothesis_evidence` with full provenance fields.
 8. Implement fill-realism layer: slippage/spread model by vehicle and ADV bucket, and max-size caps by historical ADV fraction.
@@ -134,12 +136,12 @@ Phase 3 — Agents:
 
 Phase 4 — Calibration:
 
-14. Two-week dry run: executor emits intents but does not submit to Alpaca.
+14. Two-week no-fill dry run: executor emits and validates intents.
 15. Grade intents against actual market movement and calibration quality (confidence vs realized outcomes).
 
 Phase 5 — Live paper (90-day operational validation):
 
-16. Enable Alpaca submission.
+16. Enable internal simulator submission.
 17. Run unmodified for 90 days to validate operations (execution, reconciliation, gating, data freshness).
 18. Do not treat the 90-day run as edge proof. Any live-capital decision requires at least 30 resolved post-cutoff theses graded by Archivist.
 
@@ -197,7 +199,8 @@ Regime rules ingestion protocol:
 
 ## 10. Bootstrap operations and continuous corpus growth
 
-- Initial operations are allowed in Alpaca paper before full validation corpus counts are reached, as long as all execution gates and reconciliation rules still pass.
+- Internal-paper operations may run before the validation corpus is mature, but
+  performance is experimental and no production-edge claim is allowed.
 - Initial operations do not change the edge-proof requirement: corpus thresholds in section 7 remain mandatory before treating results as robust edge evidence.
 - Use a dual-lane workflow:
 	- operations lane: real, specific thesis/execution data for live paper decisions.

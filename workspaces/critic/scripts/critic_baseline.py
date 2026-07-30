@@ -6,12 +6,14 @@ Deterministic baseline critic for scored hypotheses.
 Review rule (conservative):
   - hypothesis is in state = scored
   - quant_score >= MIN_REVIEW_SCORE
-  - promote only if it also clears the stronger promotion checks:
-    evidence count/freshness, regime, rationale quality, exposure, valuation
+  - challenge deterministic failures
+  - identify hypotheses eligible for a substantive critic review
+  - never self-resolve a synthetic "baseline_promotion" challenge
 
-For every reviewed hypothesis, the script records a fresh `critic_review`.
-Passing names move to `ready` with `all_challenges_addressed=1`.
-Failing names move to or remain in `challenged` with unresolved challenges.
+The script records a review only when it finds deterministic failures. Failing
+names move to or remain in ``challenged`` with unresolved challenges. Passing
+the screen leaves the hypothesis ``scored`` for the actual Critic agent; a
+baseline screen can never supply the substantive counterargument gate.
 
 Idempotent with respect to terminal hypothesis states: rows already in
 `ready`/`active`/`resolved` are skipped.
@@ -284,11 +286,21 @@ def main(argv: list[str] | None = None) -> int:
         if reviewed >= args.max:
             results.append({"id": r["id"], "skip": True, "reason": f"max_reviews_reached={args.max}"})
         elif ev.get("promote"):
-            if not args.dry_run:
-                results.append(promote(conn, ev, r))
-            else:
-                results.append({"id": r["id"], "ticker": ev["primary_ticker"], "would_promote": True})
-            promoted += 1
+            # A checklist is triage, not adversarial reasoning. Leave the row
+            # scored so the Critic agent must author concrete disconfirmation
+            # tests and responses before it can become ready.
+            results.append({
+                "id": r["id"],
+                "ticker": ev["primary_ticker"],
+                "requires_substantive_critic": True,
+                "screen": {
+                    "quant_score": ev["quant_score"],
+                    "evidence_count": ev["evidence_count"],
+                    "latest_evidence_age_h": ev["latest_evidence_age_h"],
+                    "regime": ev["regime"],
+                    "valuation_note": ev.get("valuation_note"),
+                },
+            })
             reviewed += 1
         elif ev.get("fail"):
             if not args.dry_run:

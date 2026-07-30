@@ -59,8 +59,13 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         self.assertEqual(row["realized_excess_pct"], 6.0)
         self.assertAlmostEqual(row["brier_component"], 0.04)
         self.assertEqual(row["resolved_at"], "2026-06-02T00:00:00Z")
-        obs = conn.execute("SELECT mechanism_id, outcome FROM mechanism_observations ORDER BY mechanism_id").fetchall()
-        self.assertEqual([(r["mechanism_id"], r["outcome"]) for r in obs], [("mech-1", "hit"), ("mech-2", "miss")])
+        obs = conn.execute(
+            "SELECT mechanism_id, outcome, weight FROM mechanism_observations ORDER BY mechanism_id"
+        ).fetchall()
+        self.assertEqual(
+            [(r["mechanism_id"], r["outcome"], r["weight"]) for r in obs],
+            [("mech-1", "hit", 0.5), ("mech-2", "miss", 0.5)],
+        )
         audit = conn.execute("SELECT action, after_state FROM audits WHERE entity_id='p1'").fetchone()
         self.assertEqual((audit["action"], audit["after_state"]), ("resolve_prediction", "correct"))
 
@@ -89,7 +94,7 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         self.assertIsNone(row["brier_component"])
         self.assertEqual(obs_count, 0)
 
-    def test_expires_when_price_window_missing_and_rerun_is_noop(self) -> None:
+    def test_missing_price_window_stays_open_and_visible(self) -> None:
         conn = _conn()
         conn.execute(
             "INSERT INTO hypotheses VALUES ('h3', '[\"ABC\"]', 'Long ABC but no prices')"
@@ -108,12 +113,13 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         second = resolver.resolve_prediction_backlog(conn, now=self.now, price_loader=prices)
         row = conn.execute("SELECT realized_outcome, resolved_at FROM predictions WHERE id='p3'").fetchone()
         audits = conn.execute("SELECT COUNT(*) FROM audits WHERE entity_id='p3'").fetchone()[0]
-        self.assertEqual(first["expired"], 1)
+        self.assertEqual(first["data_blocked"], 1)
         self.assertEqual(second["expired"], 0)
-        self.assertEqual(second["matured"], 0)
-        self.assertEqual(row["realized_outcome"], "inconclusive")
-        self.assertIsNotNone(row["resolved_at"])
-        self.assertEqual(audits, 1)
+        self.assertEqual(second["data_blocked"], 1)
+        self.assertEqual(second["matured"], 1)
+        self.assertIsNone(row["realized_outcome"])
+        self.assertIsNone(row["resolved_at"])
+        self.assertEqual(audits, 0)
 
 
 if __name__ == "__main__":

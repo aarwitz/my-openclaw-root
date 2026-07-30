@@ -5,15 +5,18 @@ Single deterministic health snapshot of the trading-intel pipeline.
 Emits JSON + writes an audit row. Categorises issues by severity.
 
 Checks:
-  - schema_version meets expected (>=4)
+  - schema_version meets the production baseline
   - actor_check is v2 (Phase A migration applied)
   - regime row exists and is fresh (<= 24h)
   - regime not degraded for >24h
   - at least one cron job enabled
-  - cron_runs/<job> recent (<= job.schedule * 2)
+  - latest critical host-script runs succeeded
   - raw hypotheses count not exploding (< 200)
   - active system_pauses == 0
-  - alpaca account reachable + status ACTIVE
+  - internal paper account reachable + status ACTIVE
+  - no protective exit is stranded before submission
+  - no pending new-risk intent bypassed prediction-before-intent
+  - feature store opens and serves a representative indexed query
   - DB free of duplicate broker_order_id (sanity)
 """
 
@@ -22,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,13 +33,24 @@ from pathlib import Path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
-from broker import ConnectorError, get_account  # noqa: E402  (adapter, D52)
+from broker import backend  # noqa: E402  (adapter, D52)
 
-EXPECTED_SCHEMA_VERSION = 4
+EXPECTED_SCHEMA_VERSION = 12
 REGIME_FRESH_HOURS = 24
+FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
+RUN_LOG = Path(os.path.expanduser("~/.openclaw/logs/script-runs.jsonl"))
+CRITICAL_RUNS = {
+    # Do not inspect the previous full trader pass from inside the current
+    # trader pass. A single failure otherwise becomes self-latching: the
+    # health stage fails because the preceding pass failed, which makes this
+    # pass fail, ad infinitum. The wrapper already aggregates every current
+    # stage and records its own authoritative exit code in RUN_LOG.
+    "learning-signals.sh": "yellow",
+    "nightly-learning.sh": "yellow",
+}
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -117,14 +132,122 @@ def run_checks(conn) -> list[dict]:
         issues.append({"severity": "red", "area": "integrity",
                        "detail": f"duplicate broker_order_ids: {len(dup)}"})
 
+    stranded = conn.execute(
+        "SELECT id, ticker, state FROM trade_intents "
+        "WHERE action IN ('exit','trim') "
+        "AND triggered_by IN ('stop_rule_enforcer_v1','stop_rule_soft_enforcer_v1',"
+        "'falsifier_enforcer_v1','horizon_enforcer_v1') "
+        "AND state IN ('proposed','critic_review','risk_review','approved')"
+    ).fetchall()
+    if stranded:
+        sample = ",".join(f"{r['ticker']}:{r['state']}" for r in stranded[:4])
+        issues.append({"severity": "red", "area": "protection",
+                       "detail": f"{len(stranded)} protective intents stranded ({sample})"})
+
+    bypass = conn.execute(
+        "SELECT COUNT(*) AS n FROM trade_intents ti "
+        "WHERE ti.action IN ('open','add') "
+        "AND ti.state IN ('proposed','critic_review','risk_review','approved') "
+        "AND NOT EXISTS (SELECT 1 FROM predictions p "
+        "WHERE p.hypothesis_id=ti.hypothesis_id AND p.predicted_at<=ti.created_at)"
+    ).fetchone()["n"]
+    if bypass:
+        issues.append({"severity": "red", "area": "prediction_lineage",
+                       "detail": f"{bypass} pending new-risk intents lack a pre-author prediction"})
+
+    baseline_ready = conn.execute(
+        "SELECT COUNT(*) AS n FROM hypotheses h WHERE h.state='ready' "
+        "AND (SELECT c.reviewed_by FROM critic_reviews c WHERE c.target_id=h.id "
+        "ORDER BY c.reviewed_at DESC LIMIT 1)='critic_baseline'"
+    ).fetchone()["n"]
+    if baseline_ready:
+        issues.append({"severity": "red", "area": "critic",
+                       "detail": f"{baseline_ready} ready hypotheses have only a "
+                                 "baseline checklist review"})
+
     try:
-        acct = get_account()
-        if str(acct.get("status", "")).upper() != "ACTIVE":
-            issues.append({"severity": "red", "area": "broker",
-                           "detail": f"alpaca status={acct.get('status')}"})
-    except ConnectorError as exc:
+        from resolve_prediction_backlog import resolve_prediction_backlog
+        maturity = resolve_prediction_backlog(conn, dry_run=True)
+        overdue = int(maturity.get("matured", 0) or 0)
+        blocked = int(maturity.get("data_blocked", 0) or 0)
+        if overdue:
+            sample = ",".join(
+                str(row.get("prediction_id"))
+                for row in maturity.get("details", [])[:3]
+            )
+            issues.append({
+                "severity": "red",
+                "area": "prediction_grading",
+                "detail": (
+                    f"{overdue} trading-window-matured predictions unresolved "
+                    f"({blocked} data-blocked; sample={sample})"
+                ),
+            })
+    except Exception as exc:
+        issues.append({
+            "severity": "red",
+            "area": "prediction_grading",
+            "detail": f"exact maturity check failed: {exc}",
+        })
+
+    if not FEATURE_DB.exists() or FEATURE_DB.stat().st_size == 0:
+        issues.append({"severity": "red", "area": "feature_store",
+                       "detail": f"missing/empty feature store: {FEATURE_DB}"})
+    else:
+        try:
+            fconn = sqlite3.connect(f"file:{FEATURE_DB}?mode=ro", uri=True, timeout=2.0)
+            fconn.execute("PRAGMA query_only=ON")
+            fconn.execute("SELECT COUNT(*) FROM calibrated_mechanisms").fetchone()
+            # Do not turn the health probe into a 48M-row workload. Critical
+            # feature jobs exercise indexed reads and report through RUN_LOG.
+            fconn.execute("SELECT 1 FROM features LIMIT 1").fetchone()
+            fconn.close()
+        except sqlite3.Error as exc:
+            issues.append({"severity": "red", "area": "feature_store",
+                           "detail": f"feature store read failed: {exc}"})
+
+    if RUN_LOG.exists():
+        latest: dict[str, dict] = {}
+        try:
+            for line in RUN_LOG.read_text().splitlines():
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                name = Path(str(row.get("script") or "")).name
+                if name in CRITICAL_RUNS:
+                    latest[name] = row
+            for name, severity in CRITICAL_RUNS.items():
+                row = latest.get(name)
+                if row and int(row.get("exit_code") or 0) != 0:
+                    issues.append({"severity": severity, "area": "critical_job",
+                                   "detail": f"latest {name} exit={row.get('exit_code')} at {row.get('ended_at')}"})
+        except OSError as exc:
+            issues.append({"severity": "yellow", "area": "critical_job",
+                           "detail": f"cannot read script run ledger: {exc}"})
+
+    if backend() != "sim":
         issues.append({"severity": "red", "area": "broker",
-                       "detail": f"alpaca unreachable: {exc}"})
+                       "detail": f"unexpected execution backend={backend()}"})
+    try:
+        acct = conn.execute(
+            "SELECT book, cash, starting_cash FROM sim_accounts WHERE book='desk'"
+        ).fetchone()
+        if not acct:
+            issues.append({"severity": "red", "area": "broker",
+                           "detail": "internal paper desk account missing"})
+        elif float(acct["cash"]) < -0.01:
+            issues.append({"severity": "red", "area": "broker",
+                           "detail": f"internal paper cash is negative: {acct['cash']}"})
+        mark = conn.execute(
+            "SELECT date, equity FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if not mark or float(mark["equity"] or 0) <= 0:
+            issues.append({"severity": "red", "area": "broker",
+                           "detail": "internal paper equity mark missing/nonpositive"})
+    except sqlite3.Error as exc:
+        issues.append({"severity": "red", "area": "broker",
+                       "detail": f"internal paper ledger unreadable: {exc}"})
 
     return issues
 

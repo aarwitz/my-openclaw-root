@@ -19,10 +19,12 @@ import json
 import math
 import os
 import sqlite3
+import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 
 DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
+FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 # TRADING days per horizon — mirrors worldmodel.HORIZON_DAYS (canonical clock
 # shared with predict/grade_outcomes/enforce_horizons).
 HORIZON_DAYS = {
@@ -87,14 +89,43 @@ def _calc_unresolved_waiting_value(conn: sqlite3.Connection) -> float:
     )
 
 
-def _expected_alpha_rate(conn: sqlite3.Connection) -> float:
-    # Use the latest all-horizon alpha as a conservative period edge estimate.
-    row = conn.execute(
-        "SELECT alpha_pct FROM benchmarks WHERE horizon='all' ORDER BY captured_at DESC LIMIT 1"
-    ).fetchone()
-    if not row or row[0] is None:
-        return 0.0
-    return max(0.0, float(row[0]) / 100.0)
+def _prospective_edge_rate(conn: sqlite3.Connection) -> tuple[float, str, int]:
+    """Forward edge must come from robust integrated mechanisms, never desk P&L.
+
+    The old implementation multiplied idle cash by all-period realized alpha,
+    converting a backward-looking score into a fictitious opportunity cost.
+    """
+    active_ids = [
+        row[0] for row in conn.execute(
+            "SELECT id FROM mechanisms WHERE status IN ('active','crowded')"
+        )
+    ]
+    if not active_ids:
+        return 0.0, "no_robust_active_mechanisms", 0
+    if not FEATURE_DB.exists():
+        return 0.0, "robust_artifact_unavailable", len(active_ids)
+    feat = sqlite3.connect(f"file:{FEATURE_DB}?mode=ro", uri=True)
+    placeholders = ",".join("?" for _ in active_ids)
+    rows = feat.execute(
+        f"SELECT net_alpha_pct FROM calibrated_mechanisms "
+        f"WHERE (id || '__' || horizon) IN ({placeholders}) "
+        f"AND bonf_sig=1 AND net_alpha_pct>0",
+        active_ids,
+    ).fetchall()
+    feat.close()
+    if not rows:
+        return 0.0, "active_mechanisms_lack_robust_forward_artifact", len(active_ids)
+    # Median is resistant to one spectacular backtest cell; cap is an
+    # additional telemetry-only guard, not a trading assumption.
+    rate = min(0.10, statistics.median(float(row[0]) for row in rows) / 100.0)
+    return max(0.0, rate), "robust_calibrated_mechanism_median", len(active_ids)
+
+
+def _classify_idle_cash(residual_cash: float, active_edge_count: int) -> tuple[float, float]:
+    """Return (idle_no_qualified_ideas, cash_no_validated_edge)."""
+    if active_edge_count <= 0:
+        return 0.0, max(0.0, residual_cash)
+    return max(0.0, residual_cash), 0.0
 
 
 def main() -> int:
@@ -114,14 +145,18 @@ def main() -> int:
     stale_value = _calc_stale_value(conn)
     unresolved_value = _calc_unresolved_waiting_value(conn)
 
-    # Residual idle cash after explicit bottlenecks.
-    idle_unqualified = max(0.0, cash - min(cash, blocked_notional) - min(cash, stale_value))
-
-    edge = _expected_alpha_rate(conn)
+    # Residual cash after explicit bottlenecks. With no robust forward edge it
+    # is a deliberate benchmark position, not an origination failure.
+    residual_cash = max(0.0, cash - min(cash, blocked_notional) - min(cash, stale_value))
+    edge, edge_source, active_edge_count = _prospective_edge_rate(conn)
+    idle_unqualified, cash_no_edge = _classify_idle_cash(
+        residual_cash, active_edge_count
+    )
     losses = {
         "risk_gate_blocked": blocked_notional * edge,
         "stale_thesis_trapped": stale_value * edge,
         "idle_no_qualified_ideas": idle_unqualified * edge,
+        "cash_no_validated_edge": 0.0,
         "unresolved_predictions_waiting": unresolved_value * edge,
     }
 
@@ -147,22 +182,27 @@ def main() -> int:
             "deployed": round(_pct(deployed, equity), 2),
             "blocked_by_risk_gates": round(_pct(blocked_notional, equity), 2),
             "idle_no_qualified_ideas": round(_pct(idle_unqualified, equity), 2),
+            "cash_no_validated_edge": round(_pct(cash_no_edge, equity), 2),
             "trapped_in_stale_theses": round(_pct(stale_value, equity), 2),
             "waiting_unresolved_predictions": round(_pct(unresolved_value, equity), 2),
         },
         "capital_usd": {
             "blocked_by_risk_gates": round(blocked_notional, 2),
             "idle_no_qualified_ideas": round(idle_unqualified, 2),
+            "cash_no_validated_edge": round(cash_no_edge, 2),
             "trapped_in_stale_theses": round(stale_value, 2),
             "waiting_unresolved_predictions": round(unresolved_value, 2),
         },
         "expected_return_loss": {
             "assumed_alpha_rate_period": round(edge, 6),
+            "source": edge_source,
+            "active_edge_count": active_edge_count,
             "by_bottleneck_usd": {k: round(v, 2) for k, v in losses.items()},
         },
         "ranked_bottlenecks": ranked,
         "notes": [
-            "Expected-dollar impact uses latest benchmarks.horizon=all alpha as period edge estimate.",
+            "Expected-dollar impact uses only robust integrated forward mechanisms; realized desk alpha is not a forecast.",
+            "Cash is classified as cash_no_validated_edge when no robust active mechanism exists.",
             "Percentages are independent bottlenecks and may overlap.",
         ],
     }
@@ -184,9 +224,10 @@ def main() -> int:
         "usd_blocked, usd_idle, usd_stale, usd_waiting, edge_rate, loss_json) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (as_of, out["equity"], out["cash"], out["deployed"],
-         p["deployed"], p["blocked_by_risk_gates"], p["idle_no_qualified_ideas"],
+         p["deployed"], p["blocked_by_risk_gates"],
+         round(_pct(residual_cash, equity), 2),
          p["trapped_in_stale_theses"], p["waiting_unresolved_predictions"],
-         c["blocked_by_risk_gates"], c["idle_no_qualified_ideas"],
+         c["blocked_by_risk_gates"], round(residual_cash, 2),
          c["trapped_in_stale_theses"], c["waiting_unresolved_predictions"],
          out["expected_return_loss"]["assumed_alpha_rate_period"],
          json.dumps(out["expected_return_loss"]["by_bottleneck_usd"])),

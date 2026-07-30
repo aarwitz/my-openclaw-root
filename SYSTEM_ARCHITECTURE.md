@@ -7,7 +7,7 @@
 > `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
 > to `archive/docs-retired-20260702/`.
 >
-> **Topology:** v4 · **DB schema:** v11 · **Last reconciled:** 2026-06-17
+> **Topology:** v5 · **DB schema/migrations:** through 0022 · **Last reconciled:** 2026-07-30
 
 ---
 
@@ -15,7 +15,7 @@
 
 AutoTrade is a **self-improving, agentic paper-trading desk**. A team of
 specialised LLM agents runs an institutional-style research → decision →
-execution → learning loop against an Alpaca **paper** account, with the explicit
+execution → learning loop against an owned SQLite **paper simulator**, with the explicit
 goals of (a) beating the S&P on a risk-adjusted basis and (b) making the agents'
 decision process **visible** in the AutoTrade web app and over Telegram.
 
@@ -83,7 +83,7 @@ decision) are separate and individually visible.
 | 3 | `critic` | ⚖️ | Adversarial red-team; falsifiers; crowding/consensus flags; the 10-gate critic stack. |
 | 4 | `risk` | 🛡️ | **Owns the intent→order veto.** Sizing limits, exposure/concentration caps, drawdown & regime halts. |
 | 5 | `trader` (PM) | 💰 | Decision authority: final basket; authors sized intents (fractional Kelly) within the risk budget. |
-| 6 | `executor` | ⚙️ | Alpaca paper order placement + fill reconciliation. |
+| 6 | `executor` | ⚙️ | Internal-paper order simulation + ledger/lineage verification. |
 | 7 | `archivist` | 📚 | **Learning officer.** Daily market debrief; resolves predictions (Brier); updates the world model; drafts gated rule proposals. |
 | 8 | `overseer` (CIO) | 🤖 | Cron pipeline orchestrator + app/Telegram chat front door + heartbeat. Orchestrates only — never writes execution state, never edits scripts. |
 | 9 | `developer` | 🔧 | Implements software improvements in git worktrees; opens PRs (human-gated). |
@@ -194,14 +194,15 @@ Two 2026-07-02 refinements (schema v13, D47/D48 in `DECISION_LOG.md`):
 
 ## 6. World Model & Calibration layer (the learning engine)
 
-This is how AutoTrade learns *why* prices move and improves its probabilistic
-beliefs from data. Shared math lives in
+This is how AutoTrade records predictive hypotheses and updates probabilistic
+beliefs from outcomes. It does not identify *why* prices moved from correlation
+alone. Shared math lives in
 `workspaces/trading-intel/scripts/worldmodel.py` (pure stdlib: regularised
 incomplete-beta, Beta PPF via bisection, half-life decay, log-odds combination,
 return bands, fractional Kelly).
 
-### 6.1 Mechanisms — the causal library (`mechanisms`)
-A mechanism is a falsifiable causal claim:
+### 6.1 Mechanisms — predictive hypotheses (`mechanisms`)
+A mechanism is a falsifiable transmission hypothesis:
 
 ```
 antecedent_class → [transmission_chain] → consequent_class
@@ -220,10 +221,11 @@ govt-contract award, reflexive political signal, launch-dependency shock,
 no-cashflow narrative decay, leveraged-ETF trend compounding, memory supercycle,
 priced-in insider distribution).
 
-> **As of 2026-06-18 these are *seeds*, not canon.** They are now validated (and supplemented by
-> machine-discovered mechanisms) against 20 years of point-in-time, survivorship-safe data with FDR
-> control — see **§11**. The live world model will be bootstrapped from the resulting
-> `calibrated_mechanisms` set, not from hand-authored beliefs.
+> **Current status (2026-07-30): none is production-validated.** The robust
+> replay clustered same-date names, used HAC inference, required date/name
+> breadth, controlled FDR, and found zero survivors. All 100 live records are
+> deprecated and open-risk authoring is quarantined. Historical rows remain for
+> audit and learning continuity.
 
 ### 6.7 Episode library (`episodes`) — named, dated ground truth (schema v9)
 The desk learns market structure from a curated library of **real, named,
@@ -277,7 +279,7 @@ value**, **margin of safety**, **zone** (cheap/fair/rich) and a data-driven
 ±60%** and confidence collapses on extreme/disagreeing values; everything downstream
 is confidence-scaled, never a hard price target. Fundamentals: SEC EDGAR companyfacts
 (`connectors/edgar.py`, picks the freshest XBRL concept to survive concept switches).
-Price/vol/beta: Alpaca bars (Yahoo blocks this host). Risk-free: FRED. Deterministic +
+Price/vol/beta: Massive bars. Risk-free: FRED. Deterministic +
 cached + never the browser; ETFs/unvaluable names are stored `applicable=0`.
 
 Two consumers wire valuation into decisions:
@@ -360,7 +362,7 @@ script exits non-zero — never auto-approved.
 
 The caps above were **correlation-blind** — eight names that are all the same
 AI-beta bet satisfied every one. `trading-intel/scripts/risk_model.py` adds the
-covariance/factor view (pure stdlib, returns-based on Alpaca bars, cached):
+covariance/factor view (pure stdlib, returns-based on Massive bars, cached):
 
 - **Correlation clusters** — connected components at corr ≥ 0.70 (the same-bet
   detector). The gate uses `correlated_cluster()` to cap a candidate's cluster
@@ -416,15 +418,12 @@ cron→SQLite migration in this build). The overseer drives the desk:
     (vite build + `wrangler pages deploy`), still run by each trader pass.
     The `data.json` baked into the deploy is the app's fallback when
     `/api/trader-data` is unavailable.
-- **Live market bridge (same-origin Pages Functions):**
-  - `/api/trader-live` returns Alpaca-backed live equity/positions/history for
-    intraday charting. The browser may poll this endpoint; it must never call
-    OpenClaw directly.
-  - Required Pages env vars: `ALPACA_API_KEY_ID` (or `ALPACA_KEY_ID`),
-    `ALPACA_API_SECRET_KEY` (or `ALPACA_SECRET_KEY`), optional
-    `ALPACA_BASE_URL`.
-  - Fail-closed behavior is required: when unset/misconfigured, endpoint returns
-    JSON `503` and UI falls back to snapshot data.
+- **Live paper-ledger bridge (same-origin Pages Function):**
+  - `/api/trader-live` returns internal-paper equity, positions, orders, and
+    ledger history from the session-gated `TRADER_DATA` snapshot.
+  - The browser never calls OpenClaw, a broker, or a market-data provider.
+  - Missing/malformed snapshot data returns a fail-closed error; there is no
+    external-broker fallback or broker credential in the Pages runtime.
 - **Telegram** narration goes out on the `druck` bot (cron handles routing to
   the group topic / DM). Narration is action-first, source-backed, no tables.
 - Any bot that should stay visibly responsive in Telegram needs the
@@ -484,10 +483,11 @@ One tall, point-in-time table `features(ticker, as_of, name, value, knowable_at,
   usable only within its real [IPO → delist] window. `members_asof()` reconstructs point-in-time S&P
   membership from FMP constituent-change history (for survivorship-safe index studies).
 
-**Data sources & connectors.** `connectors/fmp.py` (FMP **Premium**) is the historical backbone:
-deep (20–30yr) **split-adjusted** prices incl. delisted names, quarterly fundamentals + ratios,
-analyst estimates, earnings surprise, constituent history, delisted list. **Alpaca remains the LIVE
-broker/execution + real-time** feed; FMP supplies history (Alpaca's free IEX is capped ~6yr). FRED =
+**Data sources & connectors.** Massive is the primary split-adjusted daily and
+live snapshot feed; `connectors/fmp.py` supplies deeper delisted history,
+quarterly fundamentals/ratios, analyst estimates, earnings surprise,
+constituent history, and the delisted list. The owned internal simulator is
+the only broker surface. FRED =
 macro, EDGAR = filings/insider/13F (free). **MCP is intentionally not wired** for this layer — the
 feature store/backtest require deterministic, cached REST, not LLM-mediated MCP; an MCP *client* is a
 later agent-research add (FMP and Unusual Whales both publish MCP servers).
@@ -533,83 +533,48 @@ Three loops now close around it:
   `gen_multi` economically-aligned 2-feature) keeps proposing candidates under the same OOS+FDR+cost bar;
   survivors promote via `promote_mechanisms.py`. The free-form LLM proposer is the next layer.
 
-**Now wired into cron (2026-06-18):**
-- `overseer-daily-learning-1630-et` (weekday 16:30 ET) — Step 1 also runs `feature_store.py refresh-live`
-  (fresh point-in-time features) + `archivist/scripts/grade_outcomes.py` (grade matured trades → set
-  `resolved_state`); Step 4 `calibrate.py` folds the outcomes into posteriors. **The learning loop now runs daily.**
-- `world-model-signals-0900-et` (weekday 9:00 ET, NEW) — `signals_to_hypotheses.py` turns the calibrated
-  mechanisms' top deterministic signals (`signal_scan.scan()`) into RAW hypotheses; the day's passes +
-  the non-bypassable **Risk gate** trade them.
-- `mechanism-proposer-weekly` (Sun 10:00 ET, NEW) — the researcher proposes new mechanisms, each gated by
-  `validate_mechanism.py` (OOS net-alpha screen, p<0.01); survivors require a full FDR backtest + human
-  promotion (`integrate_calibrated.py`). Auto-promotion stays human-gated (invariant 4).
-
-**Still open:** turning `signals_to_hypotheses` confidence into native return-aware sizing in `author_intents`;
-broadening the daily refresh universe; and tuning proposer cadence. Plan: `~/.claude/plans/vast-wishing-pony.md`.
+**Current scheduling:** the weekday learning chain refreshes point-in-time
+features, resolves matured forecasts with `resolve_prediction_backlog.py`, and
+recomputes calibration. Signal and proposal jobs may continue collecting
+research evidence, but `author_intents.py` fails closed while the robust active
+mechanism count is zero. Promotion requires the full clustered/FDR evaluation
+and a gated proposal; a single-script p-value cannot promote a mechanism.
 
 ---
 
-## 11b. Current state (2026-06-18) — backbone, news, evidence tiers
+## 11b. Current state (2026-07-30) — evidence is quarantined until it earns trust
 
-**Data backbone (revised).** **Massive** (=formerly Polygon; upgraded, UNLIMITED calls, base
-`api.massive.com`, `apiKey=` param) is now the **price + news** workhorse: 10yr split-adjusted prices
-incl. delisted (`_prices` = Massive→FMP(20yr depth)→Alpaca), and historical ticker news back to ~2021
-(`_news` = Massive; AI `insights.sentiment` recent-only, so history uses a deterministic finance
-lexicon over title+description). **FMP** = fundamentals, insider, analyst ratings, constituents. FRED =
-macro; Event Registry = real-time catalysts; Alpaca = live broker. (Alpha Vantage / GDELT no longer
-needed.) Connectors: `connectors/{massive,fmp,fred,edgar,eventregistry,alphavantage,gdelt}.py`.
+**Data backbone.** Massive is the primary split-adjusted price, snapshot, and
+news source. FMP supplies deeper/delisted history and fundamentals; FRED
+supplies macro series; EDGAR supplies primary filings. The internal paper
+ledger is the only broker/account surface.
 
-**Calibrated set: 40 live mechanisms** (17 seed + 23 machine-generated, 30 Bonferroni). The system now
-sorts evidence into THREE tiers — this is the core design principle:
-1. **Validated mechanical edges** (backtested, cost-net, FDR; live + sized): mean-reversion
-   (oversold/deep-drawdown), the multi-feature **drawdown-within-uptrend (+5.8%/qtr, strongest)**, value
-   (cheap P/E), growth, momentum/trend, vol factor, earnings-beat, **rating-upgrades**, **news-sentiment
-   momentum** (`positive_sentiment`).
-2. **Rejected as blind rules → handled by LLM judgment**: the **overreaction-contrarian** (bearish-news +
-   cheap-for-growth — fails FDR because it also buys value traps like the saaspocalypse names), insider-
-   selling, sector-chasing. These run through the **bull/bear debate** (`catalyst-research` agent, the one
-   idea adopted from TauricResearch/TradingAgents) + forward learning, NOT as quant mechanisms.
-3. The **closed loop** (`grade_outcomes` → `calibrate`) grades all live trades forward into the posteriors.
+**Robust replay verdict: NO EDGE.** The 1,542-name replay collapses same-entry-
+date stocks into portfolios, applies HAC inference, requires at least 30 entry
+dates and 20 names, includes costs, and controls false discovery. Zero
+mechanisms survived. All 100 live mechanism records are deprecated; no new-risk
+intent may be authored from them.
 
-**Macro findings (mined 2026-06-18).** The jobs/CPI/Fed → rate-move → duration-repricing → tech-down
-chain (`rates_up_duration`) was tested via FRED rate/real-yield/curve/credit-spread/VIX features (the
-rate move is the transmission signal). Result: **NOT a robust mechanical edge over 2020–2026** — real in
-2022 but the regime flipped (2023–26 was AI-narrative-driven, tech rose regardless of rates) → it joins
-tier-2 (regime-dependent, judgment). What DID survive (now live, 47 mechanisms): **VIX-capitulation**
-(`vix_high + deep_drawdown → long`, +3%/qtr, robust all horizons) and `vix_high → long`.
+Evidence has three operational tiers:
 
-**Regime layer (LLM judgment for the regime-dependent chains).** `regime_brief.py` classifies the current
-macro regime from FRED (rates rising/falling/dominant, risk_off, curve, credit, VIX) and lists the active
-playbooks; it's Step 0 of the `catalyst-research` agent so the bull/bear **judge applies the rate→duration
-and risk-off chains ONLY when the regime warrants** (e.g. today = `neutral_narrative_driven` → it explicitly
-does NOT apply the rate→tech chain). Validated mechanical edges trade regardless; regime-dependent chains are
-gated on the regime. This is the operating principle: **mechanical where proven, LLM judgment where the edge is regime-dependent.**
+1. **Robust predictive associations:** promotion-eligible only after the locked
+   evaluation policy and forward shadow window pass. Current count: zero.
+2. **Research hypotheses:** backtests, correlations, episodes, evidence-graph
+   links, regime labels, and LLM judgment may generate tests but cannot authorize
+   or size new risk.
+3. **Closed-loop observations:** `resolve_prediction_backlog` grades each
+   forecast from its own timestamp and horizon; `calibrate` updates retained
+   posteriors. One forecast contributes at most one total unit of learning
+   credit across all linked hypotheses.
 
-## 11c. Conviction-quality improvements (2026-06-18) — 5 weaknesses the system surfaced about itself
+`config/evaluation_policy.json` labels the reused 2020 holdout as development
+only and locks a forward shadow evaluation beginning 2026-08-03 for at least 60
+sessions. No production edge claim is permitted before it completes.
 
-After using the desk to read the live tape, five weaknesses were fixed. `signal_scan` conviction now
-weights each fired mechanism by **redundancy_weight × regime_fit**, ranks names by **correlation-novelty**,
-and the learning loop blends backtest + live evidence:
-
-1. **Cross-name correlation (novelty).** `signal_scan._correlation_adjust`: a name's conviction is
-   discounted by its return-correlation to higher-ranked candidates (novelty = 1−max corr); reports
-   EFFECTIVE independent bets. Data correction: large-caps are only ~0.45 correlated even within a sector
-   (not "one bet") → graded discount, not binary clusters. `signals_to_hypotheses` skips novelty<0.5.
-2. **Within-name mechanism redundancy.** `mechanism_correlation.py` → `mechanism_clusters` table
-   (redundancy_weight = 1/cluster_size from Jaccard>0.5 of firing vectors). De-dups same-theme stacking.
-   Data correction: redundancy is only ~1.21× at 0.5 (the families fire on different cells), not 10×.
-3. **Regime-conditional weights.** `mechanism_regime.py` → `mechanism_regime` table (per-mechanism alpha
-   by VIX/rate regime). signal_scan `regime_fit` = alpha(current regime)/alpha(ALL). **Finding: the
-   growth-vs-value rotation is rate-regime-driven** — growth/momentum/high-vol mechanisms pay when rates
-   fall, value when rates rise. This is the operator's jobs→rates→duration chain, correctly placed as a
-   *conditioner* (it failed FDR as a standalone factor). The QUANT layer now weights by regime too.
-4. **Two learning rates.** `calibrate.py` PRIOR_DECAY_N: the backtest prior shrinks as the desk's own
-   live observations accrue (shrink = 30/(30+n_live)) → live P&L progressively overrides the backtest.
-5. **Short interest (last data gap closed).** Massive FINRA `/stocks/v1/short-interest` →
-   `feature_store._short_interest` (days_to_cover, short_int_chg_2m; stamped settlement+8 business days
-   to respect FINRA's dissemination lag). New crowded_short/squeeze mechanisms in the engine.
-
-New tables: `mechanism_clusters`, `mechanism_regime` (regenerate via their scripts).
+The graph layer is an **evidence graph** despite historical table/file names
+containing `causal`. Correlation and co-mention produce association/hypothesis
+edges only. Nightly rebuilds demote links when their source mechanisms are
+deprecated, and link-count growth is never treated as learning quality.
 
 ## 12. Invariants (must never be violated)
 
@@ -621,4 +586,8 @@ New tables: `mechanism_clusters`, `mechanism_regime` (regenerate via their scrip
    self-approve.
 5. Slippage-adjusted realised returns are ground truth for grading.
 6. Never `systemctl restart` the gateway; config hot-reloads. Paper account only.
+7. Execution/account state is internal-paper-only. No runtime backend switch,
+   external broker credential, connector, or fallback may exist.
+8. Association is not causation; zero robust survivors means no new risk and
+   intentional cash, not a throughput defect.
 ```

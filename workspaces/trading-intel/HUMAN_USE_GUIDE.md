@@ -9,7 +9,7 @@ This guide complements `OPERATOR_GUIDE.md`.
 Role split:
 - `overseer` is the internal OpenClaw agent behind the Druck Telegram surface. Aaron talks to Druck in Telegram; the live routed agent is `overseer`.
 - `trader` is the portfolio-manager lane that authors trade intents inside the desk pipeline; it is not the Telegram front door.
-- `executor` is the deterministic execution lane and the only Alpaca submit/cancel actor.
+- `executor` is the deterministic execution lane and the only internal-paper submit actor.
 
 ## 0. Fast start
 
@@ -162,10 +162,11 @@ required_outputs:
 
 What is already built in:
 - scheduled trading passes at `09:00`, `09:30`, `11:00`, `13:30`, and `15:30` ET
-- event-driven handling on Alpaca order and position events
+- immediate canonical read-back after simulator fills
 - weekly audit summary into the trader Telegram thread
 - material updates are posted when there is something worth reporting
-- execution timing now defaults to resting broker-native orders for approved price-sensitive setups, so the broker can act when price hits the band without waiting for manual observation
+- execution timing currently supports marketable limits only; non-marketable
+  orders fail closed and wait for a later freshly-gated intent
 
 Whole-pipeline behavior:
 - "Run the whole pipeline" means researcher -> quant -> critic -> trader -> executor in that order.
@@ -175,7 +176,7 @@ Whole-pipeline behavior:
 What is not currently built as a separate surface:
 - no dedicated subscribe/unsubscribe notification settings
 - no separate notification command contract documented beyond the trading thread itself
-- no standalone streaming price-alert daemon; the preferred substitute is staged orders plus event-driven broker updates
+- no standalone streaming price-alert daemon or resting-order simulator
 
 Practical implication:
 - the trading thread is the notification surface
@@ -345,11 +346,15 @@ Use these only for verification or recovery:
 
 ```bash
 python3 ~/.openclaw/workspaces/trader/scripts/summary_report.py
-python3 ~/.openclaw/workspaces/trader/scripts/reconcile_legacy_positions.py --report
-python3 ~/.openclaw/workspaces/trader/scripts/flatten_and_reset.py --dry-run
+python3 ~/.openclaw/workspaces/executor/scripts/sim_broker.py integrity --book desk
+python3 ~/.openclaw/workspaces/executor/scripts/reconcile.py
+python3 ~/.openclaw/workspaces/trading-intel/scripts/integrity_check.py
 openclaw health
 openclaw gateway status
 ```
+
+The legacy flatten/reset and reconciliation scripts were deleted. Never clear a
+finding by wiping the paper book or rebuilding positions without lineage.
 
 Do not use gateway restart as a normal operating step. Use hot reload for config changes and the safe restart script only if a restart is truly required.
 
@@ -410,8 +415,10 @@ Telegram-side checks:
 If `/summary` differs between DM and Ask Druck topic:
 - treat Ask Druck topic (`topic_id 641`) as canonical for trading state snapshots
 - run `python3 ~/.openclaw/workspaces/trader/scripts/summary_report.py` to inspect canonical DB state
-- run `python3 ~/.openclaw/workspaces/trader/scripts/reconcile_legacy_positions.py --report` to quantify broker-vs-DB drift before taking action
-- if broker shows live positions/orders while DB shows zeros, treat as reconciliation debt and do not assume autonomous logic has full position context
+- run `python3 ~/.openclaw/workspaces/executor/scripts/sim_broker.py integrity --book desk`
+  and the lineage tests before taking action
+- if internal account/order/position state disagrees, treat it as reconciliation
+  debt and block new risk
 
 Useful recovery checks from the existing OpenClaw docs:
 - if Telegram is not responding at all, confirm pairing completed

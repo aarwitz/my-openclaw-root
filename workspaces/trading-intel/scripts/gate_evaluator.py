@@ -5,17 +5,18 @@ Runs the 10 production gates on a trade_intent row and writes back the per-gate
 columns plus an updated state. This is the deterministic core of the critic
 review path; LLM critic commentary (challenges) is layered on separately.
 
-Gates (in order; fail-fast within a category):
+Gates:
   1. regime_gate                 — current regime must allow new exposure
   2. evidence_freshness          — all evidence rows < freshness_max_hours
   3. factor_overlap              — overlap_pct vs open positions < threshold
   4. provenance_completeness     — % of evidence with non-null source_url
-  5. counterargument_quality     — critic_reviews.challenges count + addressed
+  5. counterargument_quality     — substantive Critic review with >=2 developed challenges
   6. explainability              — rationale_concise present + non-trivial
   7. size_sanity                 — size <= max_fillable_size if set
   8. slippage_modeled            — modeled_slippage_bps present
   9. stop_rule_present           — stop_rule non-empty
  10. tranche_consistency         — open implies starter, add implies confirmation_add or higher
+ 11. prediction_before_intent    — new risk requires a positive prediction available before authoring
 
 Outputs JSON with per-gate result. Updates trade_intents:
   - evidence_freshness_status
@@ -51,6 +52,7 @@ FACTOR_OVERLAP_MAX_PCT = 60.0
 MIN_PROVENANCE_PCT = 50.0
 MIN_COUNTERARG_SCORE = 50.0
 MIN_RATIONALE_LEN = 40
+MIN_P_CORRECT = float(os.environ.get("TRADER_MIN_P_CORRECT", "0.52"))
 
 
 def _now() -> datetime:
@@ -181,7 +183,7 @@ def _load_open_position_tickers(conn) -> set[str]:
 
 def _load_latest_critic_review(conn, intent_id: str, hypothesis_id: str) -> dict | None:
     row = conn.execute(
-        "SELECT challenges_json, all_challenges_addressed "
+        "SELECT reviewed_by, challenges_json, all_challenges_addressed "
         "FROM critic_reviews WHERE target_id IN (?, ?) "
         "ORDER BY reviewed_at DESC LIMIT 1",
         (intent_id, hypothesis_id),
@@ -192,7 +194,11 @@ def _load_latest_critic_review(conn, intent_id: str, hypothesis_id: str) -> dict
         challenges = json.loads(row["challenges_json"] or "[]")
     except json.JSONDecodeError:
         challenges = []
-    return {"challenges": challenges, "all_addressed": bool(row["all_challenges_addressed"])}
+    return {
+        "reviewed_by": row["reviewed_by"],
+        "challenges": challenges,
+        "all_addressed": bool(row["all_challenges_addressed"]),
+    }
 
 
 def _compact_gate_detail(detail: str) -> str:
@@ -229,7 +235,8 @@ def evaluate(conn, intent_id: str) -> dict:
     intent = conn.execute(
         "SELECT id, hypothesis_id, action, tranche_type, ticker, vehicle, size, "
         "entry_price_target, stop_rule, time_horizon, edge_scorecard_json, "
-        "max_fillable_size, modeled_slippage_bps, state FROM trade_intents WHERE id=?",
+        "max_fillable_size, modeled_slippage_bps, state, created_at "
+        "FROM trade_intents WHERE id=?",
         (intent_id,),
     ).fetchone()
     if not intent:
@@ -303,9 +310,23 @@ def evaluate(conn, intent_id: str) -> dict:
     else:
         n = len(review["challenges"])
         addressed = review["all_addressed"]
-        ca_score = 100.0 if addressed and n >= 1 else (60.0 if addressed else 30.0 if n else 0.0)
+        developed = sum(
+            1 for challenge in review["challenges"]
+            if isinstance(challenge, dict)
+            and len(str(challenge.get("challenge") or "").strip()) >= 20
+            and len(str(challenge.get("response") or "").strip()) >= 40
+            and challenge.get("resolved") is True
+        )
+        substantive = review["reviewed_by"] == "critic"
+        ca_score = (
+            100.0 if substantive and addressed and n >= 2 and developed >= 2
+            else 30.0 if n else 0.0
+        )
         ca_ok = ca_score >= MIN_COUNTERARG_SCORE
-        ca_detail = f"challenges={n} addressed={addressed} score={ca_score}"
+        ca_detail = (
+            f"reviewed_by={review['reviewed_by']} challenges={n} "
+            f"developed={developed} addressed={addressed} score={ca_score}"
+        )
     ca_ok = risk_reducing or ca_ok
     gates.append({"name": "counterargument_quality", "pass": ca_ok, "detail": ca_detail})
 
@@ -346,6 +367,30 @@ def evaluate(conn, intent_id: str) -> dict:
         tc_ok = False
     gates.append({"name": "tranche_consistency", "pass": tc_ok,
                   "detail": f"action={act} tranche={tt}"})
+
+    # 11. prediction_before_intent — a later prediction cannot justify an
+    # already-made selection or size decision.
+    pred = conn.execute(
+        "SELECT id, predicted_at, p_correct, return_p50 FROM predictions "
+        "WHERE hypothesis_id=? AND predicted_at<=? "
+        "ORDER BY predicted_at DESC LIMIT 1",
+        (intent["hypothesis_id"], intent["created_at"]),
+    ).fetchone()
+    pred_ok = bool(
+        pred
+        and pred["p_correct"] is not None
+        and float(pred["p_correct"]) >= MIN_P_CORRECT
+        and pred["return_p50"] is not None
+        and float(pred["return_p50"]) > 0
+    )
+    pred_ok = risk_reducing or pred_ok
+    pred_detail = (
+        "exempt:risk-reducing" if risk_reducing else
+        "missing_before_intent" if not pred else
+        f"id={pred['id']} at={pred['predicted_at']} p={pred['p_correct']} p50={pred['return_p50']}"
+    )
+    gates.append({"name": "prediction_before_intent", "pass": pred_ok,
+                  "detail": pred_detail})
 
     all_pass = all(g["pass"] for g in gates)
     failed = [g["name"] for g in gates if not g["pass"]]

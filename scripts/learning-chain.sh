@@ -38,6 +38,17 @@ step() { local label="$1"; shift
   else local rc=$?; log "   FAIL($rc): $label"; FAILED="${FAILED:+$FAILED, }$label"; fi; }
 
 mkdir -p "$(dirname "$LOG")"
+
+# This chain writes both canonical SQLite stores for an extended period. It
+# shares the same lock as trader/guard/signal passes so post-close learning
+# cannot race a delayed money-path run.
+exec 9>"$OC/state/trading-money-path.lock"
+if ! flock -w 600 9; then
+  log "===== learning chain end (failed: money-path-lock-timeout) ====="
+  tg notify "⚠️ Learning chain FAILED: money-path lock unavailable after 10 minutes. Log: $LOG"
+  exit 1
+fi
+
 log "===== learning chain start (pid $$) ====="
 # --top-n 600 (not the 150 default): signal_scan scans the top-600 liquid names,
 # so the post-close refresh must cover the full scanned pool or 450 of them trade
@@ -49,6 +60,7 @@ step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
 step "money-path-tests"    bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/money-path-tests.py"
 step "exec-edgecases"      "$PY" "$TI/test_pipeline_edgecases.py"
 step "risk-opposition"     "$PY" "$TI/test_risk_opposition_sweep.py"
+step "sync-symbol-aliases" "$PY" "$TI/sync_symbol_aliases.py"
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 # LLM feature factory (P3): type today's news into point-in-time features
 # (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
@@ -63,11 +75,9 @@ step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
 # in features.sqlite::ml_scores. Nothing trades on this until the human-gated
 # promotion (see docs/06_ALPHA_ENGINE_ROADMAP.md P2).
 step "ml-score-live"       "$PY" "$TI/ml_ranker.py" --score-live --top-n 600
-# Internal paper engine (docs/07 P1, D51): mirror desk fills into the shadow
-# ledger, apply corporate actions (audited), mark EOD equity, parity vs Alpaca.
-# Non-zero exit = shadow diverged from the broker — exactly what shadow mode
-# exists to catch, so it flows into FAILED and pages via the chain alert.
-step "sim-parity"          "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
+# Internal paper engine: apply audited corporate actions, mark owned books,
+# rebalance the experimental model book, and verify ledger arithmetic.
+step "sim-integrity"       "$PY" "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" nightly
 # Market x-ray (D65): decompose what the tape did (breadth/dispersion/corr/
 # factor spreads/vol), flag |z|>=2 phenomena the desk never engaged = BLIND
 # SPOTS — reviewed weekly by the Sunday audit. Self-auditing beats waiting

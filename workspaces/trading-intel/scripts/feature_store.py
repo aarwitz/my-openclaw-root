@@ -8,7 +8,7 @@ build/test before any reset). One tall table:
 
 `as_of` = the date the value first becomes USABLE (= knowable_at). Point-in-time read =
 latest row with as_of <= D. This is what makes backtests honest:
-  * technical features (Alpaca split-adj bars): as_of = bar date (known at EOD)
+  * technical features (Massive/FMP split-adjusted bars): as_of = bar date (known at EOD)
   * fundamental features (FMP): as_of = filingDate  (NOT the fiscal-period date — that leaks)
   * earnings-surprise events (FMP): as_of = report date
 
@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import fmp, massive  # noqa: E402
+import symbol_lifecycle as symbols  # noqa: E402
 
 OUT = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 
@@ -247,7 +248,7 @@ def _short_interest(symbol):
 def _prices(symbol, days):
     """Split-adjusted daily prices. MASSIVE (unthrottled, ~10yr, incl. delisted) → FMP
     (deeper 20yr fallback); returns [] if both miss. Shape {t,c,h,v}, oldest first.
-    (Alpaca removed from the price backbone — D52 cutover completion, 2026-07-22.)"""
+    (The retired broker feed was removed from the price backbone — D52 completion, 2026-07-22.)"""
     try:
         from connectors import massive
         if massive.available():
@@ -266,7 +267,7 @@ def _prices(symbol, days):
                 return out
     except Exception as e:
         print(f"  {symbol}: FMP price fallback ({str(e)[:50]})", file=sys.stderr)
-    return []  # Massive -> FMP only; Alpaca removed from the price backbone (D52 cutover completion)
+    return []  # Massive -> FMP only; the retired broker feed is not a fallback.
 
 
 def _emit(rows, ticker, as_of, knowable_at, source, feats: dict):
@@ -288,16 +289,21 @@ def _drop_incomplete_today(bars):
     if not bars:
         return bars
     try:
-        from datetime import datetime, timezone
-        from connectors.marketdata import market_clock
-        now_et = datetime.now(timezone.utc).astimezone()
-        today = now_et.date().isoformat()
-        clock = market_clock()
-        session_closed_today = (not clock.get("is_open")) and now_et.hour >= 16
-        if str(bars[-1].get("t", ""))[:10] >= today[:10] and not session_closed_today:
+        from connectors.marketdata import daily_bar_complete
+        last_date = str(bars[-1].get("t", ""))[:10]
+        if last_date and not daily_bar_complete(last_date):
             return bars[:-1]
     except Exception:
-        pass  # clock unavailable -> keep bars (scheduled runs are post-close/pre-open anyway)
+        # Fail closed.  When calendar/clock semantics are unavailable, a bar
+        # stamped today may be partial; keeping it contaminates both the live
+        # feature snapshot and future backtests.
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        today = datetime.now(timezone.utc).astimezone(
+            ZoneInfo("America/New_York")
+        ).date().isoformat()
+        if str(bars[-1].get("t", ""))[:10] >= today:
+            return bars[:-1]
     return bars
 
 
@@ -516,7 +522,8 @@ def build_universe(market_cap_min, cap_active, cap_delisted, days):
             break
         delisted += [x for x in page if x.get("symbol") and x.get("exchange") in ("NASDAQ", "NYSE", "AMEX")]
     delisted = delisted[:cap_delisted]
-    urows = ([(x["symbol"], x.get("marketCap"), x.get("sector"), "active", None, None) for x in active]
+    urows = ([(symbols.canonical_symbol(x["symbol"]), x.get("marketCap"), x.get("sector"),
+               "active", None, None) for x in active]
              + [(x["symbol"], None, x.get("sector"), "delisted", x.get("ipoDate"), x.get("delistedDate")) for x in delisted])
     conn.executemany("INSERT OR REPLACE INTO universe VALUES(?,?,?,?,?,?)", urows)
     conn.commit()
@@ -549,17 +556,18 @@ def refresh_live(top_n, extra, days):
     syms = [r[0] for r in conn.execute(
         "SELECT symbol FROM universe WHERE status='active' AND market_cap IS NOT NULL "
         "ORDER BY market_cap DESC LIMIT ?", (top_n,))]
-    syms = list(dict.fromkeys(syms + [s.strip().upper() for s in extra if s.strip()]))
+    syms = list(dict.fromkeys(
+        symbols.canonical_symbol(s)
+        for s in syms + [s.strip().upper() for s in extra if s.strip()]
+    ))
     # bust the FMP price cache so prices are current — including the sector ETFs
     # + SPY that _etf_rel_series reads, or sector_rel_63d silently freezes at the
     # cache's last write (root cause of the 2026-07-02 "sector 7d stale" finding)
     import glob
     etf_syms = sorted({e for _, e in _SECTOR_ETF} | {"SPY"})
     for s in syms + etf_syms:
-        # cache keys preserve symbol case: fmp files are UPPER (symbol-SPY),
-        # alpaca files lower — a lowercase-only glob busts nothing (2026-07-02 fix)
-        for f in glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/fmp_historical-price-eod_full_*symbol-{s.upper()}*")) \
-                 + glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/alpaca_{s.lower()}_*")):
+        # Cache keys preserve symbol case: FMP files are UPPER (symbol-SPY).
+        for f in glob.glob(os.path.expanduser(f"~/.openclaw/state/market-data-cache/fmp_historical-price-eod_full_*symbol-{s.upper()}*")):
             try:
                 os.remove(f)
             except OSError:

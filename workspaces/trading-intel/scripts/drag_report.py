@@ -51,10 +51,10 @@ NO_SIZING_ROOT_CAUSES = (
 # The report was blind to P&L/deployment/SPY-alpha, so the improvement loop
 # could only file pipeline-hygiene issues. These make the objective a measured,
 # always-present part of the report (the `objective` block) plus ONE
-# code-actionable signal (idle-cash-drag). Per the 2026-07-22 decisions we
-# MEASURE the alpha/selection numbers (visible, not auto-filed) and only file
-# the idle-cash drag, whose dominant cause is idea-supply (an origination
-# throughput code gap), not a reason to loosen risk.
+# code-actionable signal (idle-cash-drag), but only after the system has a
+# robust active edge. Without a validated edge, cash is the correct benchmark
+# position; treating it as drag creates a dangerous incentive to manufacture
+# ideas and overfit origination.
 OBJECTIVE_HORIZONS = ("position_1_4w", "system_era", "all")  # trailing month, system era, inception
 # book_return_attribution only begins at the 2026-07-07 system epoch, so a 30d
 # inclusive window currently captures the entire history — reported whole, rather
@@ -810,6 +810,11 @@ def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
     gates), never loosening the risk budget — consistent with the protect-first
     posture. Fires only when idle cash is structurally material.
     """
+    active_edge_count = cur.execute(
+        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
+    ).fetchone()[0]
+    if active_edge_count == 0:
+        return None
     cap = _latest_capital_efficiency(cur)
     if cap is None:
         return None
@@ -869,10 +874,12 @@ def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
             "title": "Reduce idle-cash drag by raising qualified-idea origination throughput",
             "acceptance_criteria": (
                 "- Attribute idle cash to its cause (no qualified ideas vs gates vs waiting) with a script, not prose\n"
+                "- Prove at least one mechanism remains active under the current locked evaluation policy; "
+                "if there is no robust edge, classify cash as intentional and close this issue\n"
                 "- If idea-supply-limited: raise origination throughput (broaden the daily refresh universe / "
                 "signal->hypothesis conversion) so MORE ideas clear the EXISTING gates — do NOT loosen risk caps or the deployment governor\n"
                 "- Any sizing/deployment parameter change ships as a rule_proposal, never a direct edit (invariant #4)\n"
-                f"- Fresh drag_report.py shows idle_no_qualified_ideas and pct_idle materially reduced (idle < {IDLE_DRAG_PCT_FLOOR:.0f}%)"
+                "- Success is qualified-idea yield and forward excess, not a target cash percentage"
             ),
             "assignee": "Developer",
         },
@@ -1175,8 +1182,8 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     except sqlite3.Error as exc:
         print(f"WARN: stale-prediction signal skipped: {exc}", file=sys.stderr)
 
-    # --- Idle-cash drag: the desk's #1 measured dollar bottleneck, framed as an
-    # origination-throughput code gap (protect-first: never a deploy-more mandate).
+    # --- Idle-cash drag is actionable only when robust active edge exists.
+    # Otherwise cash is intentional and must not become a deploy-more mandate.
     try:
         idle = idle_cash_drag_signal(cur)
         if idle is not None:

@@ -109,7 +109,7 @@ so `risk` rarely has to intervene.
 Overseer will spawn you with a prompt like:
 
 > "Author a trade_intent for each ready hypothesis. One intent per
-> hypothesis. Use Alpaca paper account; respect cash + position limits.
+> hypothesis. Use the internal paper account; respect cash + position limits.
 > Return intent_ids and target tickers."
 
 Your final reply MUST be a single JSON line:

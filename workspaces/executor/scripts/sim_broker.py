@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
-"""Internal paper-trading engine (docs/07 P1) — deterministic fills + ledger.
+"""Internal paper-trading engine — deterministic fills and an owned ledger.
 
-Replaces Alpaca's paper BROKER (not its data): fills simulate against the live
-quote with an explicit spread + participation model, positions/cash live in our
-own SQLite ledger (positions/orders with book=..., sim_accounts, book_equity),
-and corporate actions are applied nightly with one audited row each — the
-split-desync bug class (CRWD 4:1, 2026-07-02) cannot happen silently here.
-
-Books: 'shadow' mirrors real desk fills for parity validation (P1), 'model'
-trades the GBM top decile (P2), ablation books later. 'desk' remains Alpaca.
+Fills simulate against a fresh market-data quote with an explicit spread and
+participation model. Positions/cash live in SQLite (``desk`` is the primary
+paper book; ``model`` is the experimental ranker book). Corporate actions are
+applied nightly with one audited row each.
 
 CLI:
-  python3 sim_broker.py init --book shadow --cash 100000
-  python3 sim_broker.py mirror                # replay new desk fills into shadow
-  python3 sim_broker.py mark  --book shadow   # EOD marks -> book_equity
-  python3 sim_broker.py corporate-actions --book shadow
-  python3 sim_broker.py parity                # shadow vs Alpaca live account
+  python3 sim_broker.py init --book desk --cash 100000
+  python3 sim_broker.py mark --book desk
+  python3 sim_broker.py corporate-actions --book desk
   python3 sim_broker.py rebalance-model [--force]   # P2: top-decile GBM model book
-  python3 sim_broker.py nightly               # mirror -> CAs -> mark -> parity
-                                              #   -> model CAs/rebalance(monthly)/mark
+  python3 sim_broker.py nightly               # desk/model CAs, marks, model rebalance
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import uuid
@@ -35,9 +29,8 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _db import audit, connect, now_iso  # noqa: E402
-from connectors import alpaca, fmp, massive  # noqa: E402
-# alpaca is retained ONLY for the legacy shadow/parity paths (run when backend=='alpaca').
-# All live-book pricing/marks now go through `massive` (D52 cutover completion, 2026-07-22).
+from connectors import fmp, massive  # noqa: E402
+from connectors.marketdata import market_clock  # noqa: E402
 
 # Fill model (P2 'model' book; the shadow book mirrors real fill prices instead):
 SPREAD_K = 8.0          # half-spread bps ≈ max(1, K/sqrt(ADV$ millions))
@@ -210,9 +203,15 @@ def get_cash(conn, book: str) -> float:
 def positions(conn, book: str) -> dict[str, dict]:
     out = {}
     for r in conn.execute(
-            "SELECT id, ticker, qty, cost_basis FROM sim_positions "
+            "SELECT id, ticker, qty, cost_basis, current_price, current_value FROM sim_positions "
             "WHERE book=? AND state='open'", (book,)):
-        out[r[1].upper()] = {"id": r[0], "qty": float(r[2]), "cost_basis": float(r[3] or 0)}
+        out[r[1].upper()] = {
+            "id": r[0],
+            "qty": float(r[2]),
+            "cost_basis": float(r[3] or 0),
+            "current_price": None if r[4] is None else float(r[4]),
+            "current_value": None if r[5] is None else float(r[5]),
+        }
     return out
 
 
@@ -256,57 +255,6 @@ def apply_fill(conn, book: str, symbol: str, side: str, qty: float, price: float
           action="sim_fill", rationale=f"{book}: {side} {qty:g} {symbol} @ {price:.4f} ({source})")
     conn.commit()
     return oid
-
-
-# ---------------------------------------------------------------- shadow mirror
-
-def bootstrap_shadow(conn) -> dict:
-    """Initialize the shadow book from the CURRENT Alpaca account: same cash,
-    same positions at Alpaca's avg entry. From this point mirror only NEW fills.
-    Idempotent: refuses to run twice."""
-    if conn.execute("SELECT 1 FROM sim_accounts WHERE book='shadow'").fetchone():
-        return {"bootstrapped": False, "reason": "shadow book already exists"}
-    acct = alpaca.get_account()
-    cash = float(acct.get("cash") or 0)
-    conn.execute("INSERT INTO sim_accounts (book, cash, starting_cash, created_at) VALUES (?,?,?,?)",
-                 ("shadow", cash, cash, now_iso()))
-    n = 0
-    for p in alpaca.list_positions():
-        pid = f"pos-shadow-{uuid.uuid4().hex[:12]}"
-        conn.execute(
-            "INSERT INTO sim_positions (id, book, ticker, qty, cost_basis, state, opened_at) "
-            "VALUES (?,?,?,?,?, 'open', ?)",
-            (pid, "shadow", p["symbol"].upper(), float(p["qty"]),
-             float(p.get("avg_entry_price") or 0), now_iso()))
-        audit(conn, actor="executor", entity_type="sim_position", entity_id=pid,
-              action="bootstrap", rationale=f"shadow bootstrap: {p['qty']} {p['symbol']} @ {p.get('avg_entry_price')}")
-        n += 1
-    conn.commit()
-    return {"bootstrapped": True, "cash": cash, "positions": n}
-
-
-def mirror_desk_fills(conn) -> int:
-    """Replay REAL desk fills (Alpaca) that happened AFTER the shadow bootstrap
-    into the shadow ledger at the same price/qty. Validates our ledger math
-    against Alpaca's account over time."""
-    row = conn.execute("SELECT created_at FROM sim_accounts WHERE book='shadow'").fetchone()
-    if not row:
-        raise RuntimeError("shadow book not bootstrapped — run: sim_broker.py bootstrap")
-    since = row[0]
-    mirrored = {r[0].replace("mirror-", "", 1) for r in conn.execute(
-        "SELECT order_id FROM sim_orders WHERE book='shadow' AND order_id LIKE 'mirror-%'")}
-    fills = conn.execute(
-        "SELECT broker_order_id, symbol, side, qty, avg_fill_price FROM orders "
-        "WHERE book='desk' AND status='filled' AND avg_fill_price IS NOT NULL "
-        "AND filled_at > ? ORDER BY filled_at", (since,)).fetchall()
-    n = 0
-    for oid, sym, side, qty, px in fills:
-        if oid in mirrored:
-            continue
-        apply_fill(conn, "shadow", sym, side, float(qty), float(px),
-                   order_id=f"mirror-{oid}", source="mirror-desk-fill")
-        n += 1
-    return n
 
 
 # ---------------------------------------------------------------- corporate actions
@@ -474,20 +422,17 @@ def rebalance_model_book(conn, *, force: bool = False) -> dict:
             "untradeable_skipped": untradeable}
 
 
-# ---------------------------------------------------------------- marks / parity
+# ---------------------------------------------------------------- marks / internal integrity
 
 def _mark_price(sym: str) -> float | None:
     # Live marks via Massive realtime snapshot, then Massive daily close as fallback.
-    # (Alpaca removed from the money path — D52 cutover completion.)
+    # The owned internal paper ledger is the only money path.
     t = massive.latest_trade(sym)
     if t and t.get("price"):
         return float(t["price"])
-    try:
-        bars = massive.daily_bars(sym)
-        if bars:
-            return float(bars[-1]["c"])
-    except Exception:
-        pass
+    cached = massive.cached_daily_close(sym)
+    if cached and cached.get("price"):
+        return float(cached["price"])
     return None
 
 
@@ -497,8 +442,38 @@ def mark_book(conn, book: str) -> dict:
     cy = _apply_cash_yield_once_per_day(conn, book)
     cash = get_cash(conn, book)
     equity = cash
-    for sym, pos in positions(conn, book).items():
-        px = _mark_price(sym)
+    held = positions(conn, book)
+    quotes = massive.latest_trades(list(held))
+    stored_fallbacks = []
+    cached_fallbacks = []
+    missing = []
+    marks: dict[str, float] = {}
+    for sym in held:
+        quote = quotes.get(sym)
+        if quote and quote.get("price"):
+            marks[sym] = float(quote["price"])
+            continue
+        # Preserve a newer last-known intraday mark before considering an
+        # older daily close. Provider outages must not move the book backward
+        # in time merely because the historical cache is available.
+        if held[sym].get("current_price"):
+            marks[sym] = float(held[sym]["current_price"])
+            stored_fallbacks.append(sym)
+            continue
+        cached = massive.cached_daily_close(sym)
+        if cached and cached.get("price"):
+            marks[sym] = float(cached["price"])
+            cached_fallbacks.append(sym)
+        else:
+            missing.append(sym)
+    if missing:
+        raise RuntimeError(
+            "no bounded live or cached mark for "
+            + ",".join(sorted(missing))
+            + " — refusing to write a wrong equity row"
+        )
+    for sym, pos in held.items():
+        px = marks[sym]
         if px is None:
             raise RuntimeError(f"no mark for {sym} — refusing to write a wrong equity row")
         equity += pos["qty"] * px
@@ -519,6 +494,13 @@ def mark_book(conn, book: str) -> dict:
         "date": _iso_today(),
         "equity": round(equity, 2),
         "cash": round(cash, 2),
+        "mark_quality": {
+            "live_bulk": len(held) - len(stored_fallbacks) - len(cached_fallbacks),
+            "stored_last_mark": len(stored_fallbacks),
+            "stored_symbols": sorted(stored_fallbacks),
+            "cached_daily_close": len(cached_fallbacks),
+            "cached_symbols": sorted(cached_fallbacks),
+        },
         "cash_yield": {
             "annual_yield": round(float(cy.get("annual_yield") or 0.0), 6),
             "credit": round(float(cy.get("credit") or 0.0), 4),
@@ -528,61 +510,74 @@ def mark_book(conn, book: str) -> dict:
     }
 
 
-def parity(conn) -> dict:
-    """Shadow ledger vs the real Alpaca account. Position qty must match exactly;
-    equity drift is reported in bps (cash flows like dividends make small drift
-    expected until dividend handling lands — flag, don't fail, in P1)."""
-    sim = positions(conn, "shadow")
-    real = {p["symbol"].upper(): float(p["qty"]) for p in alpaca.list_positions()}
-    mismatches = []
-    for sym in sorted(set(sim) | set(real)):
-        sq, rq = sim.get(sym, {}).get("qty", 0.0), real.get(sym, 0.0)
-        if abs(sq - rq) > 1e-6:
-            mismatches.append({"symbol": sym, "shadow_qty": sq, "alpaca_qty": rq})
-    acct = alpaca.get_account()
-    real_eq = float(acct.get("equity") or 0)
-    row = conn.execute("SELECT equity FROM book_equity WHERE book='shadow' ORDER BY date DESC LIMIT 1").fetchone()
-    sim_eq = float(row[0]) if row else None
-    drift_bps = round((sim_eq - real_eq) / real_eq * 1e4, 1) if (sim_eq and real_eq) else None
-    return {"qty_mismatches": mismatches, "shadow_equity": sim_eq,
-            "alpaca_equity": real_eq, "equity_drift_bps": drift_bps,
-            "ok": not mismatches and (drift_bps is None or abs(drift_bps) < 50)}
+def ledger_integrity(conn, book: str = "desk") -> dict:
+    """Verify the owned book is internally markable and arithmetically sound."""
+    acct = conn.execute(
+        "SELECT cash, starting_cash FROM sim_accounts WHERE book=?", (book,)
+    ).fetchone()
+    if not acct:
+        return {"ok": False, "book": book, "reason": "book_not_initialized"}
+    cash, starting_cash = float(acct[0]), float(acct[1])
+    failures = []
+    gross = 0.0
+    for sym, pos in positions(conn, book).items():
+        qty = float(pos["qty"])
+        basis = float(pos["cost_basis"])
+        if not all(map(math.isfinite, (qty, basis))) or basis < 0:
+            failures.append(f"{sym}:invalid_position")
+        current = conn.execute(
+            "SELECT current_price,current_value FROM sim_positions WHERE id=?",
+            (pos["id"],),
+        ).fetchone()
+        if current and current[0] is not None:
+            px, value = float(current[0]), float(current[1])
+            if not all(map(math.isfinite, (px, value))):
+                failures.append(f"{sym}:invalid_mark")
+            elif abs(value - qty * px) > max(0.01, abs(value) * 1e-8):
+                failures.append(f"{sym}:mark_value_mismatch")
+            gross += abs(value)
+    if not all(map(math.isfinite, (cash, starting_cash, gross))):
+        failures.append("account_non_finite")
+    return {
+        "ok": not failures,
+        "book": book,
+        "cash": round(cash, 2),
+        "starting_cash": round(starting_cash, 2),
+        "gross_marked": round(gross, 2),
+        "failures": failures,
+    }
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init"); p.add_argument("--book", required=True); p.add_argument("--cash", type=float, default=100_000.0)
-    sub.add_parser("bootstrap")
-    sub.add_parser("mirror")
     p = sub.add_parser("mark"); p.add_argument("--book", required=True)
     p = sub.add_parser("corporate-actions"); p.add_argument("--book", required=True)
-    sub.add_parser("parity")
+    p = sub.add_parser("integrity"); p.add_argument("--book", default="desk")
     p = sub.add_parser("rebalance-model"); p.add_argument("--force", action="store_true")
     sub.add_parser("nightly")
     a = ap.parse_args(argv)
     conn = connect()
-    if a.cmd == "bootstrap":
-        print(json.dumps(bootstrap_shadow(conn)))
-    elif a.cmd == "init":
+    if a.cmd == "init":
         ensure_book(conn, a.book, a.cash)
         print(json.dumps({"book": a.book, "cash": get_cash(conn, a.book)}))
-    elif a.cmd == "mirror":
-        print(json.dumps({"mirrored_fills": mirror_desk_fills(conn)}))
     elif a.cmd == "mark":
-        print(json.dumps(mark_book(conn, a.book)))
+        result = mark_book(conn, a.book)
+        print(json.dumps(result))
+        quality = result.get("mark_quality") or {}
+        if market_clock().get("is_open") and int(quality.get("live_bulk") or 0) == 0:
+            return 1
     elif a.cmd == "corporate-actions":
         print(json.dumps({"applied": apply_corporate_actions(conn, a.book)}))
-    elif a.cmd == "parity":
-        print(json.dumps(parity(conn), indent=2))
+    elif a.cmd == "integrity":
+        result = ledger_integrity(conn, a.book)
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
     elif a.cmd == "rebalance-model":
         print(json.dumps(rebalance_model_book(conn, force=a.force), indent=2))
     elif a.cmd == "nightly":
-        # D52 cutover: the desk book IS the broker. Nightly = corporate
-        # actions + EOD marks per live book + model rebalance. Alpaca
-        # mirror/parity only while the legacy backend is active.
-        import broker as _broker
-        out = {"backend": _broker.backend()}
+        out = {"backend": "internal-paper"}
         books_ok = True
         try:
             out["desk_corporate_actions"] = apply_corporate_actions(conn, "desk")
@@ -598,16 +593,9 @@ def main(argv=None) -> int:
         except Exception as exc:
             model_ok = False
             out["model_error"] = str(exc)[:300]
-        if _broker.backend() == "alpaca":
-            out["mirrored"] = mirror_desk_fills(conn)
-            out["shadow_corporate_actions"] = apply_corporate_actions(conn, "shadow")
-            out["shadow_mark"] = mark_book(conn, "shadow")
-            out["parity"] = parity(conn)
-        else:
-            eq = (out.get("desk_mark") or {}).get("equity")
-            out["parity"] = {"ok": bool(eq and eq > 0) and books_ok, "mode": "internal-ledger"}
+        out["integrity"] = ledger_integrity(conn, "desk")
         print(json.dumps(out, indent=2))
-        return 0 if (out["parity"]["ok"] and model_ok) else 1
+        return 0 if (out["integrity"]["ok"] and books_ok and model_ok) else 1
     return 0
 
 

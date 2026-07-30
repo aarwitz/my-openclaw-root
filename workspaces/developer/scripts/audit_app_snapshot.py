@@ -6,7 +6,7 @@ Verify the deployed `data.json` consumed by the lidisolutions.ai dashboard:
   - top-level keys include retail_insights + system_health
   - agents includes executor + developer + overseer
   - regime block matches latest DB regime row
-  - hypotheses count matches DB within tolerance
+  - canonical counts, calibration, mechanisms and simulated risk reconcile
 
 Emits JSON + audit row.
 """
@@ -21,12 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _db import audit, connect, emit, now_iso  # noqa: E402
+from developer_db import audit, connect, emit, now_iso  # noqa: E402
 
 DEFAULT_DATA_JSON = Path(
     "/home/aaron/repos/lidi-solutions/public/solutions/trader_intel/app/data.json"
 )
 FRESH_HOURS = 24
+RISK_TOLERANCE_PCT = 0.2
 
 
 def _parse_iso(s: str | None):
@@ -85,6 +86,46 @@ def check(conn, path: Path) -> dict:
     if abs(db_hypo - snap_hypo) > 0:
         issues.append({"severity": "yellow", "area": "counts_drift",
                        "detail": f"hypotheses snap={snap_hypo} db={db_hypo}"})
+
+    topology = d.get("topology") or {}
+    if topology.get("broker") != "Internal paper":
+        issues.append({"severity": "red", "area": "broker_label",
+                       "detail": f"snapshot broker label={topology.get('broker')!r}"})
+    broker = d.get("broker") or {}
+    if broker.get("source") != "sim":
+        issues.append({"severity": "red", "area": "broker_source",
+                       "detail": f"snapshot broker source={broker.get('source')!r}"})
+
+    broker_positions = d.get("brokerPositions") or []
+    equity = float(broker.get("equity") or 0.0)
+    gross = sum(abs(float(p.get("market_value") or 0.0)) for p in broker_positions)
+    expected_gross_pct = round(100.0 * gross / equity, 1) if equity > 0 else None
+    current = (d.get("risk_gate") or {}).get("current") or {}
+    snap_gross_pct = current.get("gross_exposure_pct")
+    if expected_gross_pct is not None and (
+        snap_gross_pct is None
+        or abs(float(snap_gross_pct) - expected_gross_pct) > RISK_TOLERANCE_PCT
+    ):
+        issues.append({"severity": "red", "area": "risk_drift",
+                       "detail": f"gross snap={snap_gross_pct} expected={expected_gross_pct}"})
+    snap_names = int(current.get("concurrent_names") or 0)
+    if snap_names != len(broker_positions):
+        issues.append({"severity": "red", "area": "risk_drift",
+                       "detail": f"concurrent_names snap={snap_names} expected={len(broker_positions)}"})
+
+    db_resolved = conn.execute(
+        "SELECT COUNT(*) AS n FROM predictions WHERE brier_component IS NOT NULL"
+    ).fetchone()["n"]
+    snap_resolved = int((d.get("calibration") or {}).get("n_resolved") or 0)
+    if snap_resolved != db_resolved:
+        issues.append({"severity": "yellow", "area": "calibration_window",
+                       "detail": f"resolved predictions snap={snap_resolved} db={db_resolved}"})
+
+    db_mechanisms = conn.execute("SELECT COUNT(*) AS n FROM mechanisms").fetchone()["n"]
+    snap_mechanisms = int(((d.get("world_model") or {}).get("summary") or {}).get("total") or 0)
+    if snap_mechanisms != db_mechanisms:
+        issues.append({"severity": "yellow", "area": "mechanism_window",
+                       "detail": f"mechanisms snap={snap_mechanisms} db={db_mechanisms}"})
 
     color = ("red" if any(i["severity"] == "red" for i in issues)
              else ("yellow" if issues else "green"))
