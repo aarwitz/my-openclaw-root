@@ -29,8 +29,10 @@ Exit: 0 all pass (unverifiable tolerated with --allow-unverifiable, default);
 
 import argparse
 import json
+import pathlib
 import subprocess
 import socket
+import urllib.error
 import urllib.request
 
 REGISTRY = {
@@ -50,6 +52,8 @@ REGISTRY = {
          "url": "https://tm.lidisolutions.ai/api/version", "sha_key": "sha"},
     ],
 }
+
+CLOUDFLARE_CREDENTIALS = pathlib.Path("/home/aaron/.openclaw/credentials/cloudflare")
 
 
 def sh(cmd, cwd=None):
@@ -125,6 +129,67 @@ def check_deployed(spec, out):
                            f"live sha {sha[:12]} exists locally but is NOT on origin/main — deployed from a side branch")})
 
 
+def check_pages_architecture(out):
+    token_path = CLOUDFLARE_CREDENTIALS / "account-token"
+    meta_path = CLOUDFLARE_CREDENTIALS / "account-meta.json"
+    try:
+        token = token_path.read_text().strip()
+        account_id = json.loads(meta_path.read_text())["account_id"]
+        req = urllib.request.Request(
+            f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/lidi-solutions",
+            headers={"Authorization": f"Bearer {token}", "User-Agent": "provenance-check/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            project = json.loads(resp.read().decode())["result"]
+        source = project.get("source") or {}
+        config = source.get("config") or {}
+    except Exception as exc:
+        out.append({
+            "check": "pages_architecture",
+            "status": "UNVERIFIABLE",
+            "detail": f"could not read Pages branch controls ({type(exc).__name__})",
+        })
+        return
+
+    expected_domains = {"lidi-solutions.pages.dev", "lidisolutions.ai", "www.lidisolutions.ai"}
+    problems = []
+    if source.get("type") != "github" or config.get("repo_name") != "lidi-solutions":
+        problems.append("unexpected Git source")
+    if config.get("production_branch") != "main":
+        problems.append(f"production branch={config.get('production_branch')!r}")
+    if config.get("production_deployments_enabled") is not False:
+        problems.append("automatic production deployments enabled")
+    if config.get("preview_deployment_setting") != "none":
+        problems.append(f"preview deployment setting={config.get('preview_deployment_setting')!r}")
+    if not expected_domains.issubset(set(project.get("domains") or [])):
+        problems.append("expected Pages domains missing")
+    out.append({
+        "check": "pages_architecture",
+        "status": "FAIL" if problems else "PASS",
+        "detail": "; ".join(problems) or "Git source retained; automatic production/preview deploys disabled",
+    })
+
+    obsolete_url = "https://lidi-solutions.aaronhorowits97.workers.dev"
+    try:
+        req = urllib.request.Request(obsolete_url, headers={"User-Agent": "provenance-check/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except Exception as exc:
+        out.append({
+            "check": "obsolete_worker_absent",
+            "status": "UNVERIFIABLE",
+            "detail": f"could not probe obsolete Worker URL ({type(exc).__name__})",
+        })
+        return
+    out.append({
+        "check": "obsolete_worker_absent",
+        "status": "PASS" if status == 404 else "FAIL",
+        "detail": f"obsolete Worker URL returns HTTP {status} (expected 404)",
+    })
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--json", action="store_true")
@@ -138,6 +203,7 @@ def main() -> int:
         check_repo(spec, out)
     for spec in REGISTRY["deployed"]:
         check_deployed(spec, out)
+    check_pages_architecture(out)
 
     fails = [c for c in out if c["status"] == "FAIL"]
     unver = [c for c in out if c["status"] == "UNVERIFIABLE"]
