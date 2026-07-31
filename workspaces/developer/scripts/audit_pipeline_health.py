@@ -188,6 +188,25 @@ def run_checks(conn) -> list[dict]:
                        "detail": f"{baseline_ready} ready hypotheses have only a "
                                  "baseline checklist review"})
 
+    critic_backlog = conn.execute(
+        "SELECT COUNT(*) AS n,MIN(COALESCE(h.scored_at,h.created_at)) AS oldest "
+        "FROM hypotheses h WHERE h.state='scored' AND h.quant_score>=60 "
+        "AND NOT EXISTS (SELECT 1 FROM critic_reviews c "
+        "WHERE c.target_type='hypothesis' AND c.target_id=h.id "
+        "AND c.reviewed_by='critic' "
+        "AND c.reviewed_at>=COALESCE(h.scored_at,h.created_at))"
+    ).fetchone()
+    if critic_backlog["n"]:
+        age = _hours_since(critic_backlog["oldest"])
+        issues.append({
+            "severity": "red" if age is None or age > 36 else "yellow",
+            "area": "critic_throughput",
+            "detail": (
+                f"{critic_backlog['n']} scored hypotheses await substantive Critic review; "
+                f"oldest_age_h={None if age is None else round(age, 1)}"
+            ),
+        })
+
     try:
         from resolve_prediction_backlog import resolve_prediction_backlog
         maturity = resolve_prediction_backlog(conn, dry_run=True)
@@ -228,6 +247,72 @@ def run_checks(conn) -> list[dict]:
         except sqlite3.Error as exc:
             issues.append({"severity": "red", "area": "feature_store",
                            "detail": f"feature store read failed: {exc}"})
+
+    try:
+        selection = conn.execute(
+            "SELECT MAX(computed_at) AS latest,"
+            "SUM(CASE WHEN outcome_status='data_blocked' THEN 1 ELSE 0 END) AS blocked,"
+            "COUNT(*) AS n FROM selection_funnel_outcomes"
+        ).fetchone()
+        if not selection or not selection["n"]:
+            issues.append({
+                "severity": "red", "area": "selection_attribution",
+                "detail": "selection-funnel attribution is empty",
+            })
+        else:
+            age = _hours_since(selection["latest"])
+            if age is None or age > 36:
+                issues.append({
+                    "severity": "yellow", "area": "selection_attribution",
+                    "detail": f"selection-funnel attribution stale: age_h={age}",
+                })
+            if int(selection["blocked"] or 0):
+                samples = conn.execute(
+                    "SELECT ticker,evaluation_horizon,data_reason "
+                    "FROM selection_funnel_outcomes WHERE outcome_status='data_blocked' "
+                    "ORDER BY ticker,evaluation_horizon LIMIT 4"
+                ).fetchall()
+                detail = ",".join(
+                    f"{row['ticker']}:{row['evaluation_horizon']}:{row['data_reason']}"
+                    for row in samples
+                )
+                issues.append({
+                    "severity": "yellow", "area": "selection_attribution",
+                    "detail": f"{selection['blocked']} counterfactual outcomes data-blocked ({detail})",
+                })
+    except sqlite3.Error as exc:
+        issues.append({
+            "severity": "red", "area": "selection_attribution",
+            "detail": f"selection-funnel attribution unavailable: {exc}",
+        })
+
+    try:
+        experiment = conn.execute(
+            "SELECT started_at FROM experiments WHERE id='predcal-forward-20260803-v1'"
+        ).fetchone()
+        if not experiment:
+            issues.append({
+                "severity": "red", "area": "prediction_challenger",
+                "detail": "preregistered prediction calibration experiment is missing",
+            })
+        elif datetime.now(timezone.utc) >= (_parse_iso(experiment["started_at"]) or datetime.max.replace(tzinfo=timezone.utc)):
+            missing = conn.execute(
+                "SELECT COUNT(*) AS n FROM predictions p WHERE p.predicted_at>=? "
+                "AND (SELECT COUNT(*) FROM prediction_challengers pc "
+                "WHERE pc.experiment_id='predcal-forward-20260803-v1' "
+                "AND pc.prediction_id=p.id)!=3",
+                (experiment["started_at"],),
+            ).fetchone()["n"]
+            if missing:
+                issues.append({
+                    "severity": "red", "area": "prediction_challenger",
+                    "detail": f"{missing} forward predictions lack all three paired shadow variants",
+                })
+    except sqlite3.Error as exc:
+        issues.append({
+            "severity": "red", "area": "prediction_challenger",
+            "detail": f"prediction challenger unavailable: {exc}",
+        })
 
     if RUN_LOG.exists():
         latest: dict[str, dict] = {}

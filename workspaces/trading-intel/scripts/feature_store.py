@@ -23,6 +23,7 @@ constituents), so a backtest universe can include names that were later delisted
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -36,6 +37,7 @@ from connectors import fmp, massive  # noqa: E402
 import symbol_lifecycle as symbols  # noqa: E402
 
 OUT = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
+TRADING_DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
 
 def _conn():
@@ -245,14 +247,16 @@ def _short_interest(symbol):
     return out
 
 
-def _prices(symbol, days):
+def _prices(symbol, days, *, fresh_prices=False):
     """Split-adjusted daily prices. MASSIVE (unthrottled, ~10yr, incl. delisted) → FMP
     (deeper 20yr fallback); returns [] if both miss. Shape {t,c,h,v}, oldest first.
     (The retired broker feed was removed from the price backbone — D52 completion, 2026-07-22.)"""
     try:
         from connectors import massive
         if massive.available():
-            b = massive.daily_bars(symbol)
+            # A scheduled refresh promises current bars. The normal 12-hour
+            # cache can hold a pre-close response under the same date key.
+            b = massive.daily_bars(symbol, cache_h=0.0 if fresh_prices else 12.0)
             if b:
                 return b
     except Exception:
@@ -407,11 +411,11 @@ def members_asof(target_date: str) -> set[str]:
     return cur
 
 
-def _build_one(conn, sym, days):
+def _build_one(conn, sym, days, *, fresh_prices=False):
     """Compute + store all features for one ticker. Prices/technicals always; fundamentals best-effort
     (delisted names often lack them but prices are still useful). Returns rows written."""
     rows = []
-    bars = _prices(sym, days)
+    bars = _prices(sym, days, fresh_prices=fresh_prices)
     for d, f in _technical(bars):
         _emit(rows, sym, d, d, "price", f)
     try:
@@ -549,16 +553,58 @@ def build_universe(market_cap_min, cap_active, cap_delisted, days):
     conn.close()
 
 
+def _ledger_subject_symbols() -> list[str]:
+    """Names whose outcomes or capital are currently governed by this ledger.
+
+    Market-cap rank is a discovery-universe concern, not a data-retention rule.
+    Open positions and recent hypotheses must continue receiving prices even if
+    they fall outside the configured top-N universe.
+    """
+    if not TRADING_DB.exists():
+        return []
+    try:
+        ledger = sqlite3.connect(f"file:{TRADING_DB}?mode=ro", uri=True, timeout=30)
+        rows = ledger.execute(
+            "SELECT ticker FROM positions WHERE state IN "
+            "('opening','open','scaling','trimming','closing') "
+            "UNION ALL "
+            "SELECT tickers FROM hypotheses WHERE created_at>=datetime('now','-150 days') "
+            "OR state IN ('raw','scored','challenged','ready','active')"
+        ).fetchall()
+        ledger.close()
+    except sqlite3.Error as exc:
+        print(f"  ledger subject discovery WARN {type(exc).__name__}: {str(exc)[:80]}", file=sys.stderr)
+        return []
+    out: list[str] = []
+    for (raw,) in rows:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text.startswith("["):
+            try:
+                values = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                values = []
+        else:
+            values = [text]
+        out.extend(str(value).upper() for value in values if str(value).strip())
+    return list(dict.fromkeys(out))
+
+
 def refresh_live(top_n, extra, days):
-    """Daily refresh: rebuild features for a bounded LIVE universe (most-liquid active names +
-    any extras) with FRESH prices (clears their FMP price cache first). Fast enough for a cron step."""
+    """Refresh top-N discovery names plus every live/recent ledger subject.
+
+    Price calls bypass the normal intraday cache. A partial or pre-close cache
+    may never masquerade as a fresh post-close feature refresh.
+    """
     conn = _conn()
     syms = [r[0] for r in conn.execute(
         "SELECT symbol FROM universe WHERE status='active' AND market_cap IS NOT NULL "
         "ORDER BY market_cap DESC LIMIT ?", (top_n,))]
+    ledger_subjects = _ledger_subject_symbols()
     syms = list(dict.fromkeys(
         symbols.canonical_symbol(s)
-        for s in syms + [s.strip().upper() for s in extra if s.strip()]
+        for s in syms + ledger_subjects + [s.strip().upper() for s in extra if s.strip()]
     ))
     # bust the FMP price cache so prices are current — including the sector ETFs
     # + SPY that _etf_rel_series reads, or sector_rel_63d silently freezes at the
@@ -575,12 +621,15 @@ def refresh_live(top_n, extra, days):
     ok = 0
     for s in syms:
         try:
-            _build_one(conn, s, days)
+            _build_one(conn, s, days, fresh_prices=True)
             ok += 1
         except Exception as e:
             print(f"  {s} refresh FAIL {str(e)[:50]}", file=sys.stderr)
         time.sleep(0.1)
-    print(f"refresh-live: refreshed {ok}/{len(syms)} live names with fresh prices -> {OUT}")
+    print(
+        f"refresh-live: refreshed {ok}/{len(syms)} names with fresh prices "
+        f"(ledger subjects={len(ledger_subjects)}) -> {OUT}"
+    )
     conn.close()
 
 

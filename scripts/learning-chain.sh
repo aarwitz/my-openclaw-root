@@ -10,9 +10,11 @@ set -uo pipefail
 # Stages (dependency order):
 #   1. feature_store refresh-live  — fresh EOD prices into the point-in-time store
 #   2. grade_outcomes              — resolve matured predictions -> mechanism_observations
-#   3. calibrate                   — fold outcomes into Beta posteriors + draft rule_proposals
-#   4. compute_attribution         — closed-position P&L attribution vs SPY -> benchmarks
-#   5. extract_patterns            — recurring mechanism themes from postmortems
+#   3. prediction-challenger       — grade shadow calibration variants (no trading authority)
+#   4. calibrate                   — fold outcomes into Beta posteriors + draft rule_proposals
+#   5. compute_attribution         — closed-position P&L attribution vs SPY -> benchmarks
+#   6. selection-funnel            — counterfactual returns for every research candidate
+#   7. extract_patterns            — recurring mechanism themes from postmortems
 # Paired host crontab entry: `12 16 * * 1-5` (weekdays 16:12 ET, post-close, before daily-learning).
 
 OC="$HOME/.openclaw"
@@ -88,6 +90,7 @@ step "market-xray"         "$PY" "$HOME/.openclaw/workspaces/trading-intel/scrip
 step "fund-grade"          "$PY" "$TI/fundamental_forecast.py" grade
 step "fund-forecast"       "$PY" "$TI/fundamental_forecast.py" forecast --book
 step "grade_outcomes"      "$PY" "$AR/grade_outcomes.py"
+step "prediction-challenger" "$PY" "$DEV/prediction_challenger.py" grade
 step "calibrate"           "$PY" "$AR/calibrate.py"
 # Close the challenged->resolve loop: deep second-order LLM resolution of stale challenged
 # theses (HOLD/CLOSE/FLIP). Bounded per run; flips flow through quant->critic->risk gated.
@@ -104,6 +107,7 @@ step "decompose_events"    "$PY" "$TI/decompose_events.py" --max "${DECOMP_MAX:-
 step "exam-report"         "$PY" "$TI/exam_report.py" --since "$(date -u -d '-1 day' +%Y-%m-%d)"
 step "mark_positions"      "$PY" "$DEV/mark_positions.py"
 step "compute_attribution" "$PY" "$DEV/compute_attribution.py"
+step "selection-funnel"    "$PY" "$DEV/selection_funnel_attribution.py" backfill
 step "extract_patterns"    "$PY" "$AR/extract_patterns.py"
 log "===== learning chain end (failed: ${FAILED:-none}) ====="
 

@@ -411,6 +411,17 @@ class SignalSafetyTests(unittest.TestCase):
         with mock.patch.object(marketdata, "daily_bar_complete", return_value=True):
             self.assertEqual(feature_store._drop_incomplete_today(bars), bars)
 
+    def test_live_feature_refresh_bypasses_stale_price_cache(self) -> None:
+        bars = [{"t": "2026-07-30", "c": 101, "h": 102, "v": 10}]
+        with mock.patch.object(massive, "available", return_value=True), mock.patch.object(
+            massive, "daily_bars", return_value=bars
+        ) as daily:
+            self.assertEqual(feature_store._prices("ABC", 4000, fresh_prices=True), bars)
+        daily.assert_called_once_with("ABC", cache_h=0.0)
+        source = (ROOT / "workspaces/trading-intel/scripts/feature_store.py").read_text()
+        self.assertIn("_ledger_subject_symbols()", source)
+        self.assertIn("ledger_subjects +", source)
+
     def test_partial_bar_integrity_check_only_counts_price_features(self) -> None:
         source = (
             ROOT / "workspaces/trading-intel/scripts/integrity_check.py"
@@ -687,6 +698,9 @@ class SignalSafetyTests(unittest.TestCase):
                 self.assertIn("the only routine research spawn", message)
                 self.assertIn("UPDATE that thesis", message)
                 self.assertIn("at most 5 net-new", message)
+                self.assertIn("critic_review_queue.py list --max 10", message)
+                self.assertIn("spawn `critic` exactly once", message)
+                self.assertIn("critic_review_queue.py finalize --apply", message)
             else:
                 self.assertIn("Do not spawn researcher", message)
 
@@ -898,6 +912,9 @@ class ShellContinuityTests(unittest.TestCase):
         self.assertIn("gate_risk_intents.py", guard)
         self.assertLess(guard.index("gate_evaluator.py"), guard.index("execute_intent.py"))
         self.assertLess(guard.index("gate_risk_intents.py"), guard.index("execute_intent.py"))
+        self.assertIn("predict.py --states ready", pipeline)
+        predictor = (ROOT / "workspaces/quant/scripts/predict.py").read_text()
+        self.assertIn('add_argument("--states", default="ready"', predictor)
 
     def test_runtime_snapshots_never_mutate_the_website_checkout(self) -> None:
         pipeline = (ROOT / "scripts/trader-pass-deterministic.sh").read_text()

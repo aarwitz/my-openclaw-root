@@ -835,6 +835,40 @@ def _load_rotation(conn: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
+def _load_selection_funnel(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Counterfactual stage attribution for the operator/research GUI."""
+    try:
+        from selection_funnel_attribution import funnel_report
+
+        coverage = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT outcome_status,COUNT(*) FROM selection_funnel_outcomes "
+                "GROUP BY outcome_status"
+            )
+        }
+        return {
+            "available": True,
+            "coverage": coverage,
+            "reports": {
+                horizon: funnel_report(conn, horizon)
+                for horizon in ("5d", "21d", "63d")
+            },
+        }
+    except (sqlite3.Error, ImportError, ValueError) as exc:
+        return {"available": False, "note": f"selection_funnel_unavailable:{type(exc).__name__}"}
+
+
+def _load_prediction_challenger(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Forward probability experiment; explicitly shadow/no trading authority."""
+    try:
+        from prediction_challenger import protocol, report
+
+        return {"available": True, **report(conn, protocol())}
+    except (sqlite3.Error, ImportError, ValueError, OSError) as exc:
+        return {"available": False, "note": f"prediction_challenger_unavailable:{type(exc).__name__}"}
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -877,6 +911,8 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "counts": counts,
         "simBooks": _load_sim_books(conn),
         "rotation": _load_rotation(conn),
+        "selectionFunnel": _load_selection_funnel(conn),
+        "predictionChallenger": _load_prediction_challenger(conn),
         "capital_attribution": _load_capital_attribution(conn, spy_comparison),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison

@@ -1,0 +1,21 @@
+{
+  "experiment_id": "predcal-forward-20260803-v1",
+  "protocol_version": "prediction_challenger_v1",
+  "start_at": "2026-08-03T00:00:00Z",
+  "minimum_resolved_predictions": 100,
+  "minimum_trading_sessions": 60,
+  "variants": {
+    "champion_v1": "The production predictor probability, mirrored without trading impact.",
+    "base_rate": "Direction-conditional empirical base rate only: long=0.466, short=0.534.",
+    "shrink75_to_base": "Base rate plus 25% of the champion deviation; a 75% shrink toward base."
+  },
+  "primary_metric": "paired mean Brier score on conclusive outcomes",
+  "secondary_metrics": [
+    "paired mean log loss",
+    "calibration by probability bucket",
+    "correlation between p_correct and realized directional excess"
+  ],
+  "promotion_rule": "No promotion before both minimums. A challenger must improve paired mean Brier by at least 0.01 and the entry-date block-bootstrap 95% confidence interval for challenger-minus-champion must be below 0. Secondary metrics must not materially regress.",
+  "trading_authority": "none",
+  "notes": "Preregistered after the 2026-07-31 selection-funnel backfill found negative p_correct/excess correlation. Outcomes before start_at are development evidence only."
+}

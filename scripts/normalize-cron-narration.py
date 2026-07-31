@@ -27,7 +27,7 @@ CONTRACT = (
     "a second completion receipt such as 'pass completed', 'note sent', or "
     "'Telegram narration was sent'. Cron delivery must remain mode=none."
 )
-DRIVE_MARKER = "[OVERSEER-DRIVE-V2]"
+DRIVE_MARKERS = ("[OVERSEER-DRIVE-V2]", "[OVERSEER-DRIVE-V3]")
 STAGE_START = "Step 3 (MANDATORY work, in strict order — execute each that applies, do NOT skip any):"
 STAGE_END = "\n\nStep 4:"
 VALUE_START = "Step 5b (valuation-first duty, D59):"
@@ -48,7 +48,7 @@ def _replace_section(message: str, start_token: str, end_token: str, replacement
 
 
 def _normalize_drive_prompt(name: str, message: str) -> str:
-    if DRIVE_MARKER not in message:
+    if not any(marker in message for marker in DRIVE_MARKERS):
         return message
     message = message.replace(
         "[OVERSEER-DRIVE-V2] You are AutoTrade (agent id `overseer`). Your job this pass is to MOVE THE PIPELINE FORWARD by at least one tangible step. You are NOT allowed to conclude 'no work needed' unless every check in step 4 has fired and produced concrete output.",
@@ -56,15 +56,25 @@ def _normalize_drive_prompt(name: str, message: str) -> str:
     )
     if name == CATALYST_JOB:
         stage = """Step 3 (deduplicated daily research, the only routine research spawn):
-  Spawn `researcher` exactly once. Before proposing a name, query every existing hypothesis for that ticker. States raw/scored/challenged/ready/active are the one canonical LIVE thesis. If one exists, UPDATE that thesis and append genuinely new primary-source evidence; do not INSERT another hypothesis. Dormant/resolved/retired rows are history and may inform the work. Author at most 5 net-new, previously unrepresented tickers, and fewer (including zero) is correct when evidence does not clear the bar. Read the macro calendar, rotation snapshot, valuation gaps, and relevant past episodes. Every new row needs primary-source provenance, a falsifier, and a clear horizon. The database rejects same-ticker live duplicates; never work around that guard. Wait for completion."""
+  (a) Spawn `researcher` exactly once. Before proposing a name, query every existing hypothesis for that ticker. States raw/scored/challenged/ready/active are the one canonical LIVE thesis. If one exists, UPDATE that thesis and append genuinely new primary-source evidence; do not INSERT another hypothesis. Dormant/resolved/retired rows are history and may inform the work. Author at most 5 net-new, previously unrepresented tickers, and fewer (including zero) is correct when evidence does not clear the bar. Read the macro calendar, rotation snapshot, valuation gaps, and relevant past episodes. Every new row needs primary-source provenance, a falsifier, and a clear horizon. The database rejects same-ticker live duplicates; never work around that guard. Wait for completion.
+  (b) Run `python3 ~/.openclaw/workspaces/quant/scripts/score_hypotheses.py`, then `python3 ~/.openclaw/workspaces/critic/scripts/critic_baseline.py`. These are deterministic triage only.
+  (c) Run `python3 ~/.openclaw/workspaces/critic/scripts/critic_review_queue.py list --max 10`. If count is nonzero, spawn `critic` exactly once and give it ONLY those candidate IDs and the returned evidence. For every ID, write one `critic_reviews` row with reviewed_by=`critic`, at least two concrete independent counterarguments, a developed response for every resolved challenge, and truthful resolved booleans. Do not review any ID outside the queue and do not update hypothesis state. Wait for completion.
+  (d) Run `python3 ~/.openclaw/workspaces/critic/scripts/critic_review_queue.py finalize --apply`. Any invalid review is a hard failure to surface; never promote it manually. The finalizer alone moves a reviewed hypothesis to ready or challenged. Forecasting happens only after ready state."""
         value = """Step 5b (valuation research):
   This dedicated research pass may investigate one valuation gap, but cheapness is a question, not evidence. Reconcile share count, per-share units, and primary filings before updating or authoring; do nothing when the valuation inputs are suspect."""
     else:
         stage = """Step 3 (routine-pass boundary):
-  Do not spawn researcher, quant, critic, trader, executor, or archivist from this routine pass. The deterministic core owns the normal score→review→predict→risk→execute→reconcile chain. Dedicated research and post-close learning jobs own their lanes. A quiet result is complete."""
+  Do not spawn researcher, quant, critic, trader, executor, or archivist from this routine pass. The deterministic core owns scoring, checklist triage, prediction of already Critic-cleared ideas, risk, execution, and reconciliation. The dedicated daily research job owns the single bounded substantive Critic pass. A quiet result is complete."""
         value = """Step 5b (valuation boundary):
   Do not originate valuation theses from a routine pass. The deterministic value scan and the dedicated daily research job own that work."""
-    message = _replace_section(message, STAGE_START, STAGE_END, stage)
+    for stage_start in (
+        STAGE_START,
+        "Step 3 (deduplicated daily research, the only routine research spawn):",
+        "Step 3 (routine-pass boundary):",
+    ):
+        if stage_start in message:
+            message = _replace_section(message, stage_start, STAGE_END, stage)
+            break
     message = _replace_section(message, VALUE_START, VALUE_END, value)
     return message
 

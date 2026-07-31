@@ -7,8 +7,8 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 #   1b. value_universe (DCF/comps fair value + margin of safety + realized vol -> valuations)
 #   1c. signals_to_hypotheses (stored world-model fires -> raw hypotheses)
 #   2. score_hypotheses (writes quant_score on raw hypotheses)
-#   3. critic_baseline (deterministic critic challenges; raises bar on rich names)
-#   4. predict (world-model probabilistic call: p_correct + name-aware return band)
+#   3. critic_baseline (deterministic triage only; never promotes)
+#   4. predict ready hypotheses after substantive Critic review
 #   4b. ml_evidence_track (advisory ranker trust ledger; no trading control)
 #   5. enforce_horizons (exit theses past wm horizon + grace — D55)
 #   5b. enforce_stops (D53 stop-rule enforcement)
@@ -130,7 +130,8 @@ run_step "signals_to_hypotheses" 180 python3 workspaces/trading-intel/scripts/si
 run_step "value_scan" 120 python3 workspaces/trading-intel/scripts/value_scan.py
 run_step "score_hypotheses" 60 python3 workspaces/quant/scripts/score_hypotheses.py
 run_step "critic_baseline" 30 python3 workspaces/critic/scripts/critic_baseline.py
-run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states scored,challenged,ready
+run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states ready
+run_step "prediction_challenger_record" 30 python3 workspaces/developer/scripts/prediction_challenger.py record
 run_step "ml_evidence_track" 30 python3 workspaces/trading-intel/scripts/track_ml_evidence.py
 if [[ "$TRADING_DAY" == "1" ]]; then
   # D53: enforce declared stop rules BEFORE authoring new ideas — cut rule-

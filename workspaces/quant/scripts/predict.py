@@ -394,7 +394,7 @@ def parse_links(link_args: list[str], link_file: str | None) -> dict[str, list[s
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(DB_PATH))
-    ap.add_argument("--states", default="scored,challenged,ready",
+    ap.add_argument("--states", default="ready",
                     help="hypothesis states eligible for a prediction")
     ap.add_argument("--link", action="append", default=[],
                     help="hyp_id=mech_id,mech_id (repeatable)")

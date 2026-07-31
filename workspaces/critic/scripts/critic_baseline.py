@@ -185,7 +185,7 @@ def evaluate(conn, hyp_row) -> dict:
 
     return {
         "id": hid,
-        "promote": True,
+        "eligible": True,
         "primary_ticker": primary,
         "quant_score": float(score),
         "evidence_count": len(evid),
@@ -194,44 +194,6 @@ def evaluate(conn, hyp_row) -> dict:
         "valuation_note": val_note,
         "reasons": reasons,
     }
-
-
-def promote(conn, ev: dict, hyp_row) -> dict:
-    hid = ev["id"]
-    rid = "critrev-baseline-" + uuid.uuid4().hex[:24]
-    challenges = [
-        {
-            "challenge": "baseline_promotion",
-            "response": (
-                f"deterministic baseline critic promoted on quant_score={ev['quant_score']}, "
-                f"evidence_count={ev['evidence_count']}, "
-                f"latest_evidence_age_h={ev['latest_evidence_age_h']}, "
-                f"regime={ev['regime']}"
-            ),
-            "resolved": True,
-        }
-    ]
-    if ev.get("valuation_note"):
-        challenges.append({"challenge": "valuation_discipline",
-                           "response": ev["valuation_note"], "resolved": True})
-    addressed_json = json.dumps(challenges)
-    conn.execute(
-        "INSERT INTO critic_reviews (id, target_type, target_id, reviewed_at, "
-        "reviewed_by, challenges_json, all_challenges_addressed) "
-        "VALUES (?, 'hypothesis', ?, ?, 'critic_baseline', ?, 1)",
-        (rid, hid, _now_iso(), addressed_json),
-    )
-    before = hyp_row["state"]
-    conn.execute(
-        "UPDATE hypotheses SET state='ready', last_critic_review_at=? WHERE id=?",
-        (_now_iso(), hid),
-    )
-    _audit(conn, actor="critic", entity_id=hid, action="promote_to_ready",
-           before_state=before, after_state="ready",
-           rationale=(f"baseline_promote {ev['primary_ticker']} "
-                      f"score={ev['quant_score']} evid={ev['evidence_count']}"))
-    return {"id": hid, "ticker": ev["primary_ticker"], "promoted": True,
-            "review_id": rid, "from": before, "to": "ready"}
 
 
 def challenge(conn, ev: dict, hyp_row) -> dict:
@@ -249,7 +211,7 @@ def challenge(conn, ev: dict, hyp_row) -> dict:
     conn.execute(
         "INSERT INTO critic_reviews (id, target_type, target_id, reviewed_at, "
         "reviewed_by, challenges_json, all_challenges_addressed) "
-        "VALUES (?, 'hypothesis', ?, ?, 'critic', ?, 0)",
+        "VALUES (?, 'hypothesis', ?, ?, 'critic_baseline', ?, 0)",
         (rid, hid, _now_iso(), json.dumps(challenges)),
     )
     before = hyp_row["state"]
@@ -279,13 +241,12 @@ def main(argv: list[str] | None = None) -> int:
 
     results = []
     reviewed = 0
-    promoted = 0
     challenged = 0
     for r in rows:
         ev = evaluate(conn, r)
         if reviewed >= args.max:
             results.append({"id": r["id"], "skip": True, "reason": f"max_reviews_reached={args.max}"})
-        elif ev.get("promote"):
+        elif ev.get("eligible"):
             # A checklist is triage, not adversarial reasoning. Leave the row
             # scored so the Critic agent must author concrete disconfirmation
             # tests and responses before it can become ready.
@@ -318,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps({
         "processed": len(rows),
         "reviewed": reviewed,
-        "promoted": promoted,
+        "substantive_review_required": sum(
+            1 for result in results if result.get("requires_substantive_critic")
+        ),
         "challenged": challenged,
         "dry_run": bool(args.dry_run),
         "results": results,

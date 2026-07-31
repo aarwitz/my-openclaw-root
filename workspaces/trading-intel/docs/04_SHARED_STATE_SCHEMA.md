@@ -143,7 +143,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 | `target_type` | TEXT | `hypothesis` or `trade_intent` |
 | `target_id` | TEXT | |
 | `reviewed_at` | TEXT | |
-| `reviewed_by` | TEXT | always `critic` |
+| `reviewed_by` | TEXT | `critic` for substantive review; `critic_baseline` for deterministic triage only |
 | `challenges_json` | TEXT | list of {challenge, response, resolved} |
 | `all_challenges_addressed` | INTEGER | 0/1 |
 
@@ -234,6 +234,28 @@ Deterministic mapping from input signals to regime enum.
 
 Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `experiment_id`.
 
+### 3.16 `selection_funnel_outcomes`
+
+Point-in-time, fixed-horizon counterfactual outcomes for every genuine research
+candidate—including names that never reached an intent or fill. One immutable
+row exists per `(hypothesis_id, ticker, evaluation_horizon)` for 5, 21, and 63
+trading sessions. Entry is the first tradable close after the original decision;
+stage flags freeze at that close, so later reviews/fills cannot leak backward.
+
+Core fields: decision/entry/exit dates, raw and SPY returns, directional excess,
+outcome status (`pending`, `matured`, `data_blocked`), stage flags for quant,
+substantive Critic, prediction, intent, risk, and fill, plus the complete frozen
+`stage_snapshot_json`. Matured price outcomes are never silently revised.
+
+### 3.17 `prediction_challengers`
+
+Paired forward-only shadow probabilities for calibration experiments. Each row
+links one canonical prediction to one preregistered variant and stores its
+frozen probability, counterfactual entry date, and eventual Brier/log-loss
+grade. These rows never feed intent authoring, sizing, or mechanism calibration.
+The `experiments` row and source-controlled protocol define the minimum sample,
+time window, and promotion rule before collection begins.
+
 ## 4. Required indexes
 
 - `hypotheses(state)`, `hypotheses(resolved_at)`
@@ -246,6 +268,9 @@ Fields: `id`, `rule_version`, `effective_at`, `thresholds_json`, `notes`, `exper
 - `audits(entity_type, entity_id, timestamp)`
 - `trade_intents(experiment_id, state)`
 - `validation_cases(case_class, passed)`
+- `selection_funnel_outcomes(evaluation_horizon, outcome_status, entry_date)`
+- `selection_funnel_outcomes(hypothesis_id)`
+- `prediction_challengers(experiment_id, variant, resolved_at)`
 
 ## 5. Mapping notes (retired prototypes)
 

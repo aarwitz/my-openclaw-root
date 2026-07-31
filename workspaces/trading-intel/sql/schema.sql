@@ -440,6 +440,68 @@ CREATE INDEX IF NOT EXISTS idx_attribution_horizon_closed ON attribution(horizon
 CREATE INDEX IF NOT EXISTS idx_attribution_hypothesis     ON attribution(hypothesis_id);
 
 -- ----------------------------------------------------------------------------
+-- Selection-funnel counterfactual attribution (0024)
+-- Fixed-horizon outcomes for every genuine research candidate, including
+-- ideas rejected before prediction/intent/fill. Stage state freezes at the
+-- first tradable close after the original decision timestamp.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS selection_funnel_outcomes (
+  id                          TEXT PRIMARY KEY,
+  hypothesis_id               TEXT NOT NULL REFERENCES hypotheses(id),
+  ticker                      TEXT NOT NULL,
+  direction                   TEXT NOT NULL CHECK (direction IN ('long','short')),
+  evaluation_horizon          TEXT NOT NULL CHECK (evaluation_horizon IN ('5d','21d','63d')),
+  sessions                    INTEGER NOT NULL CHECK (sessions > 0),
+  decision_at                 TEXT NOT NULL,
+  entry_date                  TEXT,
+  exit_date                   TEXT,
+  outcome_status              TEXT NOT NULL CHECK (outcome_status IN ('pending','matured','data_blocked')),
+  data_reason                 TEXT,
+  raw_return_pct              REAL,
+  spy_return_pct              REAL,
+  directional_excess_pct      REAL,
+  quant_scored                INTEGER NOT NULL CHECK (quant_scored IN (0,1)),
+  critic_passed               INTEGER NOT NULL CHECK (critic_passed IN (0,1)),
+  critic_substantive_passed   INTEGER NOT NULL CHECK (critic_substantive_passed IN (0,1)),
+  predicted                   INTEGER NOT NULL CHECK (predicted IN (0,1)),
+  intent_authored             INTEGER NOT NULL CHECK (intent_authored IN (0,1)),
+  risk_approved               INTEGER NOT NULL CHECK (risk_approved IN (0,1)),
+  filled                      INTEGER NOT NULL CHECK (filled IN (0,1)),
+  stage_snapshot_json         TEXT NOT NULL,
+  computed_at                 TEXT NOT NULL,
+  UNIQUE(hypothesis_id, ticker, evaluation_horizon)
+);
+CREATE INDEX IF NOT EXISTS idx_selection_funnel_horizon_status
+  ON selection_funnel_outcomes(evaluation_horizon, outcome_status, entry_date);
+CREATE INDEX IF NOT EXISTS idx_selection_funnel_hypothesis
+  ON selection_funnel_outcomes(hypothesis_id);
+
+-- ----------------------------------------------------------------------------
+-- Shadow probability challengers (0025)
+-- No trading authority: paired forward calibration variants mirrored from each
+-- champion prediction and graded only after the champion outcome resolves.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS prediction_challengers (
+  id                    TEXT PRIMARY KEY,
+  experiment_id         TEXT NOT NULL REFERENCES experiments(id),
+  protocol_version      TEXT NOT NULL,
+  prediction_id         TEXT NOT NULL REFERENCES predictions(id),
+  hypothesis_id         TEXT NOT NULL REFERENCES hypotheses(id),
+  variant               TEXT NOT NULL,
+  p_correct             REAL NOT NULL CHECK (p_correct >= 0 AND p_correct <= 1),
+  predicted_at          TEXT NOT NULL,
+  entry_date            TEXT,
+  realized_outcome      TEXT CHECK (realized_outcome IN ('correct','incorrect') OR realized_outcome IS NULL),
+  realized_excess_pct   REAL,
+  brier_score           REAL,
+  log_loss              REAL,
+  resolved_at           TEXT,
+  UNIQUE(experiment_id, prediction_id, variant)
+);
+CREATE INDEX IF NOT EXISTS idx_prediction_challengers_experiment_variant
+  ON prediction_challengers(experiment_id, variant, resolved_at);
+
+-- ----------------------------------------------------------------------------
 -- Benchmarks (rolling portfolio vs SPY per horizon bucket)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS benchmarks (

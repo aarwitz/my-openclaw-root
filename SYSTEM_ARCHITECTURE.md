@@ -300,6 +300,15 @@ linked mechanism is stored with its alignment so calibration can attribute
 outcomes correctly. The band is now **name-aware** (§6.9): its P10/P90 width comes
 from the name's realized volatility (not a per-horizon constant) and its P50 is
 nudged toward fair value by the bounded, confidence-scaled margin of safety.
+Predictions are emitted only for `ready` hypotheses after a substantive Critic
+review. The deterministic baseline is triage and can challenge, but cannot
+promote or stand in for adversarial review.
+
+Probability changes use a forward shadow champion/challenger lane
+(`prediction_challenger.py`, migration 0025). Paired variants are recorded
+without entering `predictions`, so they cannot drive trades or double-count
+world-model observations. Promotion criteria, sample size, elapsed sessions,
+and clustered inference are source-controlled before the cohort starts.
 
 ### 6.3 Sizing — fractional Kelly, capped by Risk
 `trader/scripts/author_intents.py` reads the latest unresolved prediction and
@@ -389,14 +398,18 @@ cron→SQLite migration in this build). The overseer drives the desk:
   open 09:30, confirmation 11:00, rotation 13:30, close-risk 15:30 ET. Each runs
   the deterministic core and narrates the material portfolio change (or a
   truthful quiet pass) to Telegram via `druck`. Routine checkpoints do not
-  spawn stage agents: the deterministic core owns
-  `score → review → predict → risk → execute → reconcile`. This prevents the
+  spawn stage agents: the deterministic core owns scoring, baseline triage,
+  prediction of already-cleared hypotheses, risk, execution, and reconciliation.
+  This prevents the
   former every-pass five-idea quota from manufacturing duplicate theses.
 - **One dedicated daily catalyst-research pass** may spawn Researcher once.
   It updates an existing live ticker thesis when one exists, may add at most
   five previously unrepresented tickers, and may correctly add zero. SQLite
   enforces one live thesis per ticker; dormant/resolved/retired rows are
-  retained history.
+  retained history. It then owns the single bounded substantive Critic pass:
+  `critic_review_queue.py` supplies at most ten explicit IDs, the Critic writes
+  reviews only, and a deterministic validator moves valid outcomes to
+  `ready|challenged`. Forecasting follows ready state.
 - **Daily post-close learning pass** (`overseer-daily-learning-1630-et`): runs
   **every weekday, trade or no-trade** — Researcher gathers what moved + why from
   primary sources, Quant quantifies, Archivist runs `market_debrief.py` +
@@ -534,6 +547,12 @@ Three loops now close around it:
   realized market-relative returns → sets `hypotheses.resolved_state` → `calibrate.py` folds per-mechanism
   observations into the posteriors. Run via the governed `scripts/trader-learn-deterministic.sh`
   (grade_outcomes → calibrate → extract_patterns); the live trading pass is untouched.
+- **Selection-funnel loop:** `developer/scripts/selection_funnel_attribution.py`
+  grades every genuine candidate at fixed 5/21/63-session horizons versus SPY,
+  including ideas rejected before intent/fill. It freezes each stage at the
+  counterfactual entry close, reports entry-date-clustered inference, and labels
+  zero stage flags as selection-or-latency—not causal rejection—until explicit
+  decision reasons are available. Matured outcomes are immutable.
 - **Deterministic activation:** `signal_scan.py` fires the calibrated mechanisms from each ticker's
   *current* features → ranked conviction (advisory; wiring into live intents is the next gated step).
 - **Mechanism discovery (ongoing):** `mechanism_backtest.py` (`gen_candidates` single-feature +
@@ -554,7 +573,9 @@ and a gated proposal; a single-script p-value cannot promote a mechanism.
 **Data backbone.** Massive is the primary split-adjusted price, snapshot, and
 news source. FMP supplies deeper/delisted history and fundamentals; FRED
 supplies macro series; EDGAR supplies primary filings. The internal paper
-ledger is the only broker/account surface.
+ledger is the only broker/account surface. Scheduled feature refreshes bypass
+the normal intraday daily-bar cache and always include open positions plus
+recent/live hypothesis tickers in addition to the ranked discovery universe.
 
 **Robust replay verdict: NO EDGE.** The 1,542-name replay collapses same-entry-
 date stocks into portfolios, applies HAC inference, requires at least 30 entry
@@ -597,4 +618,7 @@ deprecated, and link-count growth is never treated as learning quality.
    external broker credential, connector, or fallback may exist.
 8. Association is not causation; zero robust survivors means no new risk and
    intentional cash, not a throughput defect.
+9. Baseline Critic triage cannot promote. A substantive `reviewed_by=critic`
+   review with two developed counterarguments must precede ready state and any
+   new prediction.
 ```
