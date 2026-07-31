@@ -94,6 +94,20 @@ verify_production() {
     [[ "$status" == "200" ]] || fatal "$route returned HTTP $status"
   done
 
+  for route in \
+    /solutions/news_content_extractor/app/ \
+    /solutions/news_content_extractor/app/app.js; do
+    status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      --max-time 15 "$PRODUCTION_ORIGIN$route")"
+    [[ "$status" == "410" ]] || fatal "retired route $route returned HTTP $status (expected 410)"
+  done
+
+  status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --max-time 15 -X POST -H 'content-type: application/json' --data '{}' \
+    "$PRODUCTION_ORIGIN/api/intel-pack")"
+  [[ "$status" == "410" ]] ||
+    fatal "retired API /api/intel-pack returned HTTP $status (expected 410)"
+
   local trader_redirect=""
   trader_redirect="$(curl --silent --show-error --output /dev/null \
     --write-out '%{http_code} %{redirect_url}' --max-time 15 \

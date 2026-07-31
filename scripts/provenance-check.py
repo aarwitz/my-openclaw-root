@@ -221,6 +221,40 @@ def check_pages_architecture(out):
         "detail": f"obsolete Worker URL returns HTTP {status} (expected 404)",
     })
 
+    retired_routes = [
+        ("https://lidisolutions.ai/solutions/news_content_extractor/app/", None),
+        ("https://lidisolutions.ai/solutions/news_content_extractor/app/app.js", None),
+        ("https://lidisolutions.ai/api/intel-pack", b"{}"),
+    ]
+    retired_statuses = []
+    for url, body in retired_routes:
+        headers = {"User-Agent": "provenance-check/1.0"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                route_status = resp.status
+        except urllib.error.HTTPError as exc:
+            route_status = exc.code
+        except Exception as exc:
+            out.append({
+                "check": "retired_site_surface",
+                "status": "UNVERIFIABLE",
+                "detail": f"could not probe {url} ({type(exc).__name__})",
+            })
+            break
+        retired_statuses.append((url, route_status))
+    else:
+        problems = [f"{url}={route_status}" for url, route_status in retired_statuses
+                    if route_status != 410]
+        out.append({
+            "check": "retired_site_surface",
+            "status": "FAIL" if problems else "PASS",
+            "detail": "; ".join(problems) or
+                      "private experiment page, asset, and API all return HTTP 410",
+        })
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
