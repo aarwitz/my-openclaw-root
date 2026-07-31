@@ -119,8 +119,11 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
   The marketing site must never simulate an AI chat. Public booking currently
   opens Aaron Horowitz's Cal.com account; do not claim Taylor receives those
   bookings unless the calendar ownership/team configuration is changed and
-  verified. Alpaca, News API, Resend/contact, and D1 booking bindings are
-  forbidden on the Pages project.
+  verified. The retired unconditional 48-hour software / two-week hardware
+  promises are not standing SLAs; delivery timing follows reviewed scope and
+  agreed milestones. Marketing fonts are self-hosted; do not restore a runtime
+  Google Fonts dependency. Alpaca, News API, Resend/contact, and D1 booking
+  bindings are forbidden on the Pages project.
 
 - **One containerized gateway** (`openclaw-gateway`, host `127.0.0.1:18789`, compose:
   `docker-compose.openclaw.yml`). **All** fleet agents run *inside this single container* — there is
