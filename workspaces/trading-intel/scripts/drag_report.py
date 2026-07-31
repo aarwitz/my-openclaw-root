@@ -886,6 +886,47 @@ def idle_cash_drag_signal(cur: sqlite3.Cursor) -> dict | None:
     }
 
 
+def _calibration_brier_signal(
+    *,
+    count: int,
+    brier: float,
+    evidence: list[str],
+    report: dict | None,
+) -> dict:
+    """Build the calibration signal with explicit stored-vs-replay attribution."""
+    summary_brier = brier
+    summary_prefix = "Mean Brier"
+    suggested_threshold = BRIER_COINFLIP
+    next_blocker = (report or {}).get("next_blocker") or {}
+    replay = (report or {}).get("replay") or {}
+    current_replay = replay.get("current_linker_replay") or {}
+    replay_mean = current_replay.get("mean_brier")
+    if next_blocker.get("kind") == "resolved_history_relinking" and replay_mean is not None:
+        summary_brier = float(replay_mean)
+        summary_prefix = "Replay-adjusted mean Brier"
+        suggested_threshold = float(report.get("actual_mean_brier") or brier)
+
+    return {
+        "id": "calibration-brier-at-coinflip",
+        "severity": min(90, int(55 + (summary_brier - BRIER_COINFLIP) * 400)),
+        "summary": (
+            f"{summary_prefix} {summary_brier:.4f} over {count} resolved predictions "
+            f"({BRIER_LOOKBACK_DAYS}d) — at/near coin-flip (0.25)"
+        ),
+        "evidence": evidence,
+        "suggested_issue": {
+            "title": "Calibration: identify and fix the largest Brier contributor",
+            "acceptance_criteria": (
+                "- Deterministic breakdown of Brier by mechanism/regime/horizon (script, not prose)\n"
+                "- One concrete fix targeting the worst contributor (feature, data source, or scoring change)\n"
+                "- Change flows as rule_proposal if it alters trading parameters\n"
+                f"- Fresh drag_report.py shows mean Brier below {suggested_threshold:.6f}"
+            ),
+            "assignee": "Quant",
+        },
+    }
+
+
 def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
     signals: list[dict] = []
 
@@ -1072,6 +1113,7 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
         count, brier = int(row[0] or 0), row[1]
         if count >= 20 and brier is not None and brier >= BRIER_COINFLIP - 0.01:
             evidence = [f"predictions resolved {BRIER_LOOKBACK_DAYS}d: n={count}, mean brier_component={brier:.4f}"]
+            report = None
             try:
                 report = brier_contributors.build_report(cur.connection, BRIER_LOOKBACK_DAYS)
                 selected = report.get("selected_contributor") or {}
@@ -1129,6 +1171,9 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                         f"current_linker_replay={next_blocker.get('current_linker_replay_mean_brier')} "
                         f"changed_links={next_blocker.get('changed_links')})"
                     )
+                    rationale = next_blocker.get("rationale")
+                    if rationale:
+                        evidence.append(f"TM-267 blocker rationale: {rationale}")
                 reason = report.get("selection_reason")
                 if reason:
                     evidence.append(f"selection_reason: {reason}")
@@ -1137,22 +1182,12 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                 )
             except Exception as exc:
                 evidence.append(f"brier_contributor_breakdown_unavailable: {exc}")
-            signals.append({
-                "id": "calibration-brier-at-coinflip",
-                "severity": min(90, int(55 + (brier - BRIER_COINFLIP) * 400)),
-                "summary": f"Mean Brier {brier:.4f} over {count} resolved predictions ({BRIER_LOOKBACK_DAYS}d) — at/near coin-flip (0.25)",
-                "evidence": evidence,
-                "suggested_issue": {
-                    "title": "Calibration: identify and fix the largest Brier contributor",
-                    "acceptance_criteria": (
-                        "- Deterministic breakdown of Brier by mechanism/regime/horizon (script, not prose)\n"
-                        "- One concrete fix targeting the worst contributor (feature, data source, or scoring change)\n"
-                        "- Change flows as rule_proposal if it alters trading parameters\n"
-                        f"- Fresh drag_report.py shows mean Brier below {BRIER_COINFLIP}"
-                    ),
-                    "assignee": "Quant",
-                },
-            })
+            signals.append(_calibration_brier_signal(
+                count=count,
+                brier=float(brier),
+                evidence=evidence,
+                report=report,
+            ))
     except sqlite3.Error as exc:
         print(f"WARN: calibration signal skipped: {exc}", file=sys.stderr)
 

@@ -378,6 +378,55 @@ class GateAttributionTests(unittest.TestCase):
 
         self.assertFalse(any(signal["id"] == "predictions-unresolved-backlog" for signal in signals))
 
+    def test_calibration_signal_headlines_replay_adjusted_brier_for_resolved_history_gap(self):
+        evidence = ["predictions resolved 30d: n=181, mean brier_component=0.2531"]
+        signal = drag_report._calibration_brier_signal(
+            count=181,
+            brier=0.253056,
+            evidence=evidence,
+            report={
+                "actual_mean_brier": 0.253056,
+                "replay": {
+                    "current_linker_replay": {
+                        "mean_brier": 0.246836,
+                        "changed_links": 110,
+                    },
+                },
+                "next_blocker": {
+                    "kind": "resolved_history_relinking",
+                    "actual_mean_brier": 0.253056,
+                    "current_linker_replay_mean_brier": 0.246836,
+                    "changed_links": 110,
+                    "rationale": "stored resolved rows carry historical links",
+                },
+            },
+        )
+
+        self.assertIn("Replay-adjusted mean Brier 0.2468 over 181", signal["summary"])
+        self.assertIn("mean brier_component=0.2531", signal["evidence"][0])
+        self.assertIn("below 0.253056", signal["suggested_issue"]["acceptance_criteria"])
+
+    def test_calibration_signal_keeps_stored_brier_when_current_linker_is_blocker(self):
+        signal = drag_report._calibration_brier_signal(
+            count=181,
+            brier=0.253056,
+            evidence=["single-regime caveat: all resolved calibration rows in this report are neutral / position_1_4w"],
+            report={
+                "actual_mean_brier": 0.253056,
+                "replay": {
+                    "current_linker_replay": {
+                        "mean_brier": 0.254,
+                        "changed_links": 12,
+                    },
+                },
+                "next_blocker": {"kind": "current_linker_behavior"},
+            },
+        )
+
+        self.assertIn("Mean Brier 0.2531 over 181", signal["summary"])
+        self.assertNotIn("Replay-adjusted", signal["summary"])
+        self.assertTrue(any("single-regime caveat" in item for item in signal["evidence"]))
+
     def test_idle_cash_signal_exposes_structured_attribution(self):
         conn = _make_conn()
         cur = conn.cursor()
