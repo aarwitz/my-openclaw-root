@@ -105,7 +105,21 @@ delete scripts on age alone — follow the four-point deletion rule in `scripts/
   (`~/repos/lidi-solutions`, deploy via `scripts/deploy-lidi-solutions.sh`). Provenance is
   asserted, not remembered: `scripts/provenance-check.py` (in the health sweep) verifies
   host identity, every live checkout's branch/cleanliness/sync, and that live deployments
-  report a git sha known to their repo (`/api/version`, `/version.json`).
+  report a git sha known to their repo (`/api/version`, `/version.json`). For
+  `lidisolutions.ai` it also enforces disabled automatic builds, one canonical
+  Pages deployment, the absence of the obsolete Worker, and a minimal production
+  binding set.
+
+- **`lidisolutions.ai` has one guarded release path and no private experiments.**
+  Its source is `~/repos/lidi-solutions`; deploy only with
+  `scripts/deploy-lidi-solutions.sh`. Cloudflare Git production/preview builds
+  remain disabled. The News Content Extractor is Aaron's private experiment and
+  must never be restored as a product, public asset, API, or production secret.
+  The marketing site must never simulate an AI chat. Public booking currently
+  opens Aaron Horowitz's Cal.com account; do not claim Taylor receives those
+  bookings unless the calendar ownership/team configuration is changed and
+  verified. Alpaca, News API, Resend/contact, and D1 booking bindings are
+  forbidden on the Pages project.
 
 - **One containerized gateway** (`openclaw-gateway`, host `127.0.0.1:18789`, compose:
   `docker-compose.openclaw.yml`). **All** fleet agents run *inside this single container* — there is

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
 """Fail closed if the retired external broker can re-enter AutoTrade.
 
 Historical decision records and schema migrations retain provider names so old
 ledgers remain explainable and migratable. Runtime code, configuration,
 credentials, prompts, and GUI source must not contain them.
 """
-
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -48,6 +51,8 @@ GUI_ALLOWLIST = {
     # Security-only signatures must continue redacting retired credentials from
     # archived text and accidental payloads.
     GUI_ROOT / "scripts" / "lib" / "redact.mjs",
+    # Regression contract that rejects retired production bindings by name.
+    GUI_ROOT / "scripts" / "test-public-surface.mjs",
 }
 
 

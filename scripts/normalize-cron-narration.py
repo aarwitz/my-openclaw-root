@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+from require_wrapper import require_wrapper
+require_wrapper()
+
 """Enforce one-message Telegram narration contracts on enabled agent crons.
 
 The useful Telegram message is sent explicitly by the job. Cron delivery must
 therefore remain ``none`` and the agent's final response must be silent; without
 both controls, operators receive a second "pass completed / note sent" receipt.
 """
-
-from __future__ import annotations
 
 import argparse
 import json

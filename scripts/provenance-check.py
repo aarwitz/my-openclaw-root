@@ -162,6 +162,14 @@ def check_pages_architecture(out):
         return
 
     expected_domains = {"lidi-solutions.pages.dev", "lidisolutions.ai", "www.lidisolutions.ai"}
+    allowed_env = {
+        "APP_PASS", "APP_USER", "SESSION_SECRET", "TRADER_CHAT_TOKEN",
+        "TRADER_CHAT_URL", "TRADER_RUNNER_TOKEN", "TRADER_RUNNER_URL",
+    }
+    production = (project.get("deployment_configs") or {}).get("production") or {}
+    env_keys = set((production.get("env_vars") or {}).keys())
+    d1_keys = set((production.get("d1_databases") or {}).keys())
+    kv_keys = set((production.get("kv_namespaces") or {}).keys())
     problems = []
     if source.get("type") != "github" or config.get("repo_name") != "lidi-solutions":
         problems.append("unexpected Git source")
@@ -178,11 +186,19 @@ def check_pages_architecture(out):
             f"Pages deployment inventory is not canonical-only "
             f"(total={deployment_total}, listed={len(deployments)})"
         )
+    unexpected_env = sorted(env_keys - allowed_env)
+    if unexpected_env:
+        problems.append(f"obsolete/unknown production variables={','.join(unexpected_env)}")
+    if d1_keys:
+        problems.append(f"unexpected production D1 bindings={','.join(sorted(d1_keys))}")
+    if kv_keys != {"TRADER_DATA"}:
+        problems.append(f"production KV bindings={','.join(sorted(kv_keys)) or 'none'}")
     out.append({
         "check": "pages_architecture",
         "status": "FAIL" if problems else "PASS",
         "detail": "; ".join(problems) or
-                  "Git source retained; automatic deploys disabled; one canonical deployment",
+                  "Git source retained; automatic deploys disabled; one canonical deployment; "
+                  "production bindings are minimal",
     })
 
     obsolete_url = "https://lidi-solutions.aaronhorowits97.workers.dev"

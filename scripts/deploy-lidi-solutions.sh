@@ -116,12 +116,72 @@ verify_production() {
   fi
 }
 
+prune_noncanonical_pages_deployments() {
+  [[ -f "$TOKEN_FILE" && -f "$META_FILE" ]] ||
+    fatal "Cloudflare API credentials are required to enforce canonical-only deployment inventory"
+
+  local api_token=""
+  local account_id=""
+  local api_base=""
+  local project_json=""
+  local deployments_json=""
+  local canonical_id=""
+  local deployment_id=""
+  local delete_json=""
+  local total=""
+  local -a stale_ids=()
+
+  api_token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+  account_id="$(python3 -c "import json; print(json.load(open('$META_FILE'))['account_id'])")"
+  [[ -n "$api_token" && -n "$account_id" ]] || fatal "Cloudflare API credentials are incomplete"
+  api_base="https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects/lidi-solutions"
+
+  project_json="$(curl --fail --silent --show-error --max-time 20 \
+    "$api_base" -H "Authorization: Bearer ${api_token}")" ||
+    fatal "could not resolve the canonical Pages deployment"
+  canonical_id="$(jq -r '.result.canonical_deployment.id // empty' <<<"$project_json")"
+  [[ -n "$canonical_id" ]] || fatal "Pages project has no canonical deployment"
+
+  while true; do
+    deployments_json="$(curl --fail --silent --show-error --max-time 20 \
+      "${api_base}/deployments?page=1&per_page=25" \
+      -H "Authorization: Bearer ${api_token}")" ||
+      fatal "could not list Pages deployments"
+    mapfile -t stale_ids < <(
+      jq -r --arg canonical "$canonical_id" \
+        '.result[] | select(.id != $canonical) | .id' <<<"$deployments_json"
+    )
+    [[ "${#stale_ids[@]}" -gt 0 ]] || break
+
+    for deployment_id in "${stale_ids[@]}"; do
+      [[ "$deployment_id" != "$canonical_id" ]] || fatal "refusing to delete canonical deployment"
+      delete_json="$(curl --fail --silent --show-error --max-time 20 -X DELETE \
+        "${api_base}/deployments/${deployment_id}" \
+        -H "Authorization: Bearer ${api_token}")" ||
+        fatal "failed to delete noncanonical Pages deployment ${deployment_id}"
+      [[ "$(jq -r '.success // false' <<<"$delete_json")" == "true" ]] ||
+        fatal "Cloudflare rejected deletion of noncanonical deployment ${deployment_id}"
+      echo "[deploy-site] removed noncanonical Pages deployment ${deployment_id}"
+    done
+  done
+
+  deployments_json="$(curl --fail --silent --show-error --max-time 20 \
+    "${api_base}/deployments?page=1&per_page=25" \
+    -H "Authorization: Bearer ${api_token}")" ||
+    fatal "could not verify Pages deployment inventory"
+  total="$(jq -r '.result_info.total_count // (.result | length)' <<<"$deployments_json")"
+  [[ "$total" == "1" ]] || fatal "Pages deployment inventory has ${total} entries after cleanup"
+  [[ "$(jq -r '.result[0].id // empty' <<<"$deployments_json")" == "$canonical_id" ]] ||
+    fatal "remaining Pages deployment is not canonical"
+}
+
 DEPLOY_TMP="$(mktemp -d -t lidi-pages-deploy.XXXXXX)"
 
 LIVE_SHA="$(read_live_sha || true)"
 if [[ "$LIVE_SHA" == "$GIT_SHA" ]]; then
   echo "[deploy-site] commit $GIT_SHA is already live; skipping duplicate deployment"
   verify_production
+  prune_noncanonical_pages_deployments
   echo "[deploy-site] OK"
   exit 0
 fi
@@ -155,4 +215,5 @@ fi
 tail -25 "$DEPLOY_TMP/wrangler.log"
 
 verify_production
+prune_noncanonical_pages_deployments
 echo "[deploy-site] OK — live SHA matches $GIT_SHA"
