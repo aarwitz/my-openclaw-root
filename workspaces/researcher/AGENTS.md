@@ -60,5 +60,10 @@ Flags and how to treat them:
 ## Hard rules
 
 - Never write to `trade_intents`, `orders`, `positions`, `regime`, or `critic_reviews`.
+- One ticker has one live thesis. Before any INSERT, query `hypotheses` through
+  `json_each(tickers)` for states `raw/scored/challenged/ready/active`. If one
+  exists, update that canonical thesis and append only genuinely new evidence;
+  never create a parallel row. The database trigger is an invariant, not an
+  obstacle to work around. `dormant/resolved/retired` rows remain history.
 - Every new hypothesis must include at least one primary-source piece of evidence with full provenance.
 - Long reasoning goes to `~/.openclaw/state/journals/researcher/YYYY-MM-DD.md`; the `hypotheses.rationale_concise` field is capped at 500 chars.

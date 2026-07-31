@@ -34,6 +34,7 @@ sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from developer_db import audit, connect, emit, now_iso  # noqa: E402
+from connectors.marketdata import market_clock  # noqa: E402
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import backend  # noqa: E402  (adapter, D52)
@@ -41,6 +42,8 @@ from broker import backend  # noqa: E402  (adapter, D52)
 EXPECTED_SCHEMA_VERSION = 12
 REGIME_FRESH_HOURS = 24
 FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
+MIN_POST_CUTOFF_CASES = 30
+MIN_NEGATIVE_CONTROL_CASES = 60
 RUN_LOG = Path(os.path.expanduser("~/.openclaw/logs/script-runs.jsonl"))
 CRITICAL_RUNS = {
     # Do not inspect the previous full trader pass from inside the current
@@ -118,6 +121,23 @@ def run_checks(conn) -> list[dict]:
         issues.append({"severity": "yellow", "area": "pipeline",
                        "detail": f"raw_hypotheses={raw_count} (>200)"})
 
+    validation = dict(conn.execute(
+        "SELECT case_class,COUNT(*) AS n FROM validation_cases GROUP BY case_class"
+    ).fetchall())
+    post_cutoff = int(validation.get("post_cutoff", 0))
+    negative = int(validation.get("negative_control", 0))
+    if post_cutoff < MIN_POST_CUTOFF_CASES or negative < MIN_NEGATIVE_CONTROL_CASES:
+        issues.append({
+            "severity": "yellow",
+            "area": "validation_corpus",
+            "detail": (
+                "reasoning_gate=fail: validation corpus below production-edge minimum "
+                f"(post_cutoff={post_cutoff}/{MIN_POST_CUTOFF_CASES}, "
+                f"negative_control={negative}/{MIN_NEGATIVE_CONTROL_CASES}); "
+                "internal-paper simulation may continue, production/edge claims may not"
+            ),
+        })
+
     pauses = conn.execute(
         "SELECT COUNT(*) AS n FROM system_pauses WHERE ended_at IS NULL"
     ).fetchone()["n"]
@@ -139,7 +159,10 @@ def run_checks(conn) -> list[dict]:
         "'falsifier_enforcer_v1','horizon_enforcer_v1') "
         "AND state IN ('proposed','critic_review','risk_review','approved')"
     ).fetchall()
-    if stranded:
+    # Approved exits created while closed are deliberately deferred, not
+    # resting orders. They become stranded only once the session is actually
+    # open and the executor has had a chance to submit them in this pass.
+    if stranded and market_clock().get("is_open"):
         sample = ",".join(f"{r['ticker']}:{r['state']}" for r in stranded[:4])
         issues.append({"severity": "red", "area": "protection",
                        "detail": f"{len(stranded)} protective intents stranded ({sample})"})

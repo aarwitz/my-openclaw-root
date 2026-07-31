@@ -266,6 +266,23 @@ def _count_open_intents(conn) -> int:
     return int(row["n"] if row else 0)
 
 
+def _robust_active_edge_count(conn) -> int:
+    """Count only mechanisms promoted by the robust calibrated integrator.
+
+    ``status='active'`` alone is not provenance: legacy origination code once
+    seeded neutral mechanisms directly into the live set. The integrator stamps
+    both calibrated=true and bonferroni=true in notes for accepted survivors.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) FROM mechanisms "
+        "WHERE status IN ('active','crowded') "
+        "AND json_valid(notes) "
+        "AND json_extract(notes, '$.calibrated') = 1 "
+        "AND json_extract(notes, '$.bonferroni') = 1"
+    ).fetchone()
+    return int(row[0] or 0)
+
+
 def _has_open_exposure(conn, ticker: str) -> bool:
     sym = ticker.upper()
     pos = conn.execute(
@@ -616,9 +633,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     conn = _connect()
-    active_edge_count = conn.execute(
-        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
-    ).fetchone()[0]
+    active_edge_count = _robust_active_edge_count(conn)
     if active_edge_count == 0:
         print(json.dumps({
             "authored": 0,

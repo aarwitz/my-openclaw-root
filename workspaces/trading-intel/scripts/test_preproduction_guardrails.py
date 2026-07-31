@@ -30,14 +30,21 @@ import promote_mechanisms  # noqa: E402
 import signal_scan  # noqa: E402
 import author_intents  # noqa: E402
 import broker  # noqa: E402
+import sim_broker  # noqa: E402
 import write_postmortems  # noqa: E402
 import worldmodel  # noqa: E402
 import symbol_lifecycle  # noqa: E402
 import mechanism_backtest  # noqa: E402
 import causal_graph  # noqa: E402
 import feature_store  # noqa: E402
+import valuation  # noqa: E402
+from connectors import edgar  # noqa: E402
+from connectors import _http as connector_http  # noqa: E402
 import integrity_check  # noqa: E402
+import hypothesis_hygiene  # noqa: E402
+import sync_symbol_aliases  # noqa: E402
 import market_debrief  # noqa: E402
+import macro_calendar  # noqa: E402
 import capital_efficiency_audit  # noqa: E402
 import compute_attribution  # noqa: E402
 from connectors import marketdata  # noqa: E402
@@ -49,6 +56,20 @@ _launcher_spec = importlib.util.spec_from_file_location(
 assert _launcher_spec and _launcher_spec.loader
 dwight_launch_from_issue = importlib.util.module_from_spec(_launcher_spec)
 _launcher_spec.loader.exec_module(dwight_launch_from_issue)
+
+_pq_poller_spec = importlib.util.spec_from_file_location(
+    "poll_priority_queue", ROOT / "workspaces/dwight/scripts/poll_priority_queue.py"
+)
+assert _pq_poller_spec and _pq_poller_spec.loader
+poll_priority_queue = importlib.util.module_from_spec(_pq_poller_spec)
+_pq_poller_spec.loader.exec_module(poll_priority_queue)
+
+_pq_groom_spec = importlib.util.spec_from_file_location(
+    "pq_groom", ROOT / "workspaces/dwight/scripts/pq_groom.py"
+)
+assert _pq_groom_spec and _pq_groom_spec.loader
+pq_groom = importlib.util.module_from_spec(_pq_groom_spec)
+_pq_groom_spec.loader.exec_module(pq_groom)
 
 
 def _iso(minutes: int = 0) -> str:
@@ -65,6 +86,219 @@ def _scratch() -> tuple[sqlite3.Connection, str]:
 
 
 class SignalSafetyTests(unittest.TestCase):
+    def test_priority_queue_poller_loads_unattended_session_token(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".json", dir="/tmp")
+        os.close(fd)
+        try:
+            Path(path).write_text(json.dumps({"session_token": "service-token"}))
+            with mock.patch.dict(
+                os.environ,
+                {"TASK_MANAGER_BEARER_TOKEN": "", "TM_BEARER_TOKEN": ""},
+                clear=False,
+            ):
+                self.assertEqual(
+                    poll_priority_queue.tm_bearer_token(Path(path)),
+                    "service-token",
+                )
+        finally:
+            os.unlink(path)
+
+    def test_priority_queue_grooming_keeps_newest_family_observation(self) -> None:
+        rows = {
+            "old": {
+                "id": "old", "status": "open", "task_id": None,
+                "claimed_by": None, "submitted_at": "2026-07-01T00:00:00Z",
+                "title": "Fix Telegram target mismatch",
+            },
+            "new": {
+                "id": "new", "status": "open", "task_id": None,
+                "claimed_by": None, "submitted_at": "2026-07-02T00:00:00Z",
+                "title": "Cron Telegram group route mismatch",
+            },
+            "idea": {
+                "id": "idea", "status": "open", "task_id": None,
+                "claimed_by": None, "submitted_at": "2026-07-01T00:00:00Z",
+                "title": "Research a durable new signal",
+            },
+        }
+        changes = pq_groom.plan(rows)
+        self.assertEqual([row["id"] for row in changes], ["old"])
+        self.assertEqual(changes[0]["status"], "superseded")
+        self.assertEqual(changes[0]["superseded_by"], "new")
+        self.assertTrue(pq_groom.eligible(rows["new"]))
+        self.assertTrue(pq_groom.eligible(rows["idea"]))
+
+    def test_connector_errors_redact_credential_query_values(self) -> None:
+        redacted = connector_http._redacted_url(
+            "https://example.test/data?symbol=ABC&apikey=topsecret&token=alsosecret"
+        )
+        self.assertIn("symbol=ABC", redacted)
+        self.assertNotIn("topsecret", redacted)
+        self.assertNotIn("alsosecret", redacted)
+        self.assertEqual(redacted.count("REDACTED"), 2)
+
+    def test_edgar_uses_the_canonical_connector_error_class(self) -> None:
+        self.assertIs(edgar.ConnectorError, connector_http.ConnectorError)
+        with mock.patch.object(
+            edgar, "_facts", side_effect=connector_http.ConnectorError("offline")
+        ):
+            with mock.patch.object(valuation, "price_history", return_value=[100.0] * 260):
+                result = valuation.value("TEST")
+        self.assertFalse(result["applicable"])
+        self.assertEqual(result["reason"], "offline")
+
+    def test_share_count_rejects_stale_and_thousands_scale_facts(self) -> None:
+        shares, source = edgar._select_share_count(
+            {"end": "2026-04-30", "val": 44_933},
+            {"end": "2026-06-15", "val": 44_727_068},
+            "2026-04-30",
+        )
+        self.assertEqual(shares, 44_727_068)
+        self.assertEqual(source, "cover_instant_unit_repair")
+        shares, source = edgar._select_share_count(
+            None,
+            {"end": "2010-01-27", "val": 469_280_842},
+            "2025-09-30",
+        )
+        self.assertIsNone(shares)
+        self.assertEqual(source, "missing_or_stale")
+
+    def test_market_cap_share_crosscheck_repairs_large_denominator_error(self) -> None:
+        shares, source, repaired = valuation._reconcile_share_count(
+            469_280_842, 1_750_000_000, "cover_instant"
+        )
+        self.assertEqual(shares, 1_750_000_000)
+        self.assertEqual(source, "universe_market_cap_override")
+        self.assertTrue(repaired)
+        shares, source, repaired = valuation._reconcile_share_count(
+            44_727_068, 45_000_000, "cover_instant_unit_repair"
+        )
+        self.assertEqual(shares, 44_727_068)
+        self.assertFalse(repaired)
+
+    def test_valuation_universe_is_one_atomic_asof_snapshot(self) -> None:
+        conn, path = _scratch()
+        conn.executescript(
+            (ROOT / "workspaces/trading-intel/sql/migrations/0011_valuations.sql").read_text()
+        )
+        conn.close()
+        try:
+            def fake_value(ticker: str) -> dict:
+                return {
+                    "ticker": ticker,
+                    "applicable": True,
+                    "price": 10.0,
+                    "fair_value": 12.0,
+                    "margin_of_safety": 0.2,
+                    "zone": "fair",
+                    "confidence": 0.5,
+                }
+
+            with mock.patch.object(valuation, "DB_PATH", Path(path)), \
+                    mock.patch.object(valuation, "value", side_effect=fake_value), \
+                    mock.patch.object(
+                        valuation.edgar,
+                        "now_iso",
+                        side_effect=[
+                            "2026-07-31T13:00:00Z",
+                            "2026-07-31T13:00:01Z",
+                            "2026-07-31T13:00:02Z",
+                            "2026-07-31T13:00:03Z",
+                            "2026-07-31T13:00:04Z",
+                        ],
+                    ):
+                report = valuation.value_universe(["AAA", "BBB"])
+
+            check = sqlite3.connect(path)
+            snapshots = check.execute(
+                "SELECT as_of,COUNT(*) FROM valuations GROUP BY as_of"
+            ).fetchall()
+            check.close()
+            self.assertEqual(report["as_of"], "2026-07-31T13:00:00Z")
+            self.assertEqual(snapshots, [("2026-07-31T13:00:00Z", 2)])
+        finally:
+            os.unlink(path)
+
+    def test_database_enforces_one_live_hypothesis_per_ticker(self) -> None:
+        conn, path = _scratch()
+        try:
+            conn.execute(
+                "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+                "VALUES('h1',?,'researcher','[\"ABC\"]','first','ready')",
+                (_iso(),),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+                    "VALUES('h2',?,'researcher','[\"ABC\"]','duplicate','raw')",
+                    (_iso(),),
+                )
+            conn.execute(
+                "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+                "VALUES('h3',?,'researcher','[\"ABC\"]','history','dormant')",
+                (_iso(),),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("UPDATE hypotheses SET state='scored' WHERE id='h3'")
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_hypothesis_hygiene_reopens_positions_and_dormants_noise(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE hypotheses(
+              id TEXT PRIMARY KEY,tickers TEXT,state TEXT,created_at TEXT,
+              resolved_at TEXT,resolved_state TEXT,archivist_grade TEXT
+            );
+            CREATE TABLE positions(id TEXT,hypothesis_id TEXT,ticker TEXT,state TEXT);
+            CREATE TABLE trade_intents(hypothesis_id TEXT,state TEXT);
+            CREATE TABLE audits(
+              id TEXT PRIMARY KEY,timestamp TEXT,actor TEXT,entity_type TEXT,
+              entity_id TEXT,action TEXT,before_state TEXT,after_state TEXT,
+              rationale_concise TEXT
+            );
+            """
+        )
+        old = "2026-01-01T00:00:00Z"
+        conn.executemany(
+            "INSERT INTO hypotheses VALUES(?,?,?,?,?,?,?)",
+            [
+                ("held", '["ABC"]', "resolved", old, old, "correct_right_reasons", "old grade"),
+                ("duplicate", '["ABC"]', "ready", old, None, None, None),
+                ("orphan", '["XYZ"]', "active", old, None, None, None),
+                ("clean", '["NEW"]', "ready", old, None, None, None),
+            ],
+        )
+        conn.execute("INSERT INTO positions VALUES('p','held','ABC','open')")
+        report = hypothesis_hygiene.inspect_and_repair(
+            conn, repair=True, grace_hours=0
+        )
+        self.assertEqual(report["reopened_position_theses"], ["held"])
+        states = dict(conn.execute("SELECT id,state FROM hypotheses"))
+        self.assertEqual(states["held"], "active")
+        self.assertEqual(states["duplicate"], "dormant")
+        self.assertEqual(states["orphan"], "dormant")
+        self.assertEqual(states["clean"], "ready")
+        self.assertIsNone(
+            conn.execute("SELECT resolved_at FROM hypotheses WHERE id='held'").fetchone()[0]
+        )
+        conn.close()
+
+    def test_open_risk_requires_robust_mechanism_provenance(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE mechanisms(id TEXT,status TEXT,notes TEXT)")
+        conn.execute("INSERT INTO mechanisms VALUES('legacy','active',NULL)")
+        self.assertEqual(author_intents._robust_active_edge_count(conn), 0)
+        conn.execute(
+            "INSERT INTO mechanisms VALUES('robust','active',?)",
+            (json.dumps({"calibrated": True, "bonferroni": True}),),
+        )
+        self.assertEqual(author_intents._robust_active_edge_count(conn), 1)
+        conn.close()
+
     def test_unknown_cross_sectional_operators_fail_closed(self) -> None:
         feats = {"news": (1.0, "2026-07-29")}
         self.assertFalse(signal_scan.cond_holds([["news", "hi", 0.2]], feats))
@@ -118,6 +352,35 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertTrue(symbol_lifecycle.is_live_feature_fresh(
             "2026-07-29", today=today
         ))
+
+    def test_symbol_alias_sync_is_idempotent_after_redirect(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        try:
+            conn = sqlite3.connect(path)
+            conn.execute(
+                "CREATE TABLE universe(symbol TEXT PRIMARY KEY,market_cap REAL,"
+                "sector TEXT,status TEXT,ipo_date TEXT,delisted_date TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO universe VALUES('LAAC',100,'Materials','active',NULL,NULL)"
+            )
+            conn.commit()
+            conn.close()
+            alias = {"old": "LAAC", "new": "LAR", "effective_date": "2025-01-24"}
+            with mock.patch.object(sync_symbol_aliases.symbol_lifecycle, "aliases", return_value=(alias,)):
+                first = sync_symbol_aliases.sync(Path(path))
+                second = sync_symbol_aliases.sync(Path(path))
+            self.assertEqual(first["changed"], 1)
+            self.assertEqual(second["changed"], 0)
+            conn = sqlite3.connect(path)
+            self.assertEqual(
+                dict(conn.execute("SELECT symbol,status FROM universe")),
+                {"LAAC": "renamed", "LAR": "active"},
+            )
+            conn.close()
+        finally:
+            os.unlink(path)
 
     def test_daily_bar_completeness_uses_session_close_not_is_open(self) -> None:
         et = ZoneInfo("America/New_York")
@@ -202,6 +465,52 @@ class SignalSafetyTests(unittest.TestCase):
             author_source,
         )
 
+    def test_simulator_mark_atomically_updates_canonical_position_view(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE positions(id TEXT,ticker TEXT,qty REAL,cost_basis REAL,"
+            "book TEXT,state TEXT,current_price REAL,current_value REAL,"
+            "unrealized_pnl_pct REAL,pnl_ideal REAL,pnl_slippage_adjusted REAL)"
+        )
+        conn.executemany(
+            "INSERT INTO positions(id,ticker,qty,cost_basis,book,state) VALUES(?,?,?,?,?,?)",
+            [
+                ("long", "AAA", 2, 10, "desk", "open"),
+                ("short", "BBB", -3, 20, "desk", "open"),
+                ("model", "AAA", 1, 10, "model", "open"),
+            ],
+        )
+        self.assertEqual(
+            sim_broker._sync_canonical_marks(conn, "desk", {"AAA": 12, "BBB": 18}),
+            2,
+        )
+        long = conn.execute(
+            "SELECT current_price,current_value,unrealized_pnl_pct,pnl_ideal "
+            "FROM positions WHERE id='long'"
+        ).fetchone()
+        short = conn.execute(
+            "SELECT current_price,current_value,unrealized_pnl_pct,pnl_ideal "
+            "FROM positions WHERE id='short'"
+        ).fetchone()
+        self.assertEqual(long, (12.0, 24.0, 20.0, 4.0))
+        self.assertEqual(short, (18.0, -54.0, 10.0, 6.0))
+        self.assertIsNone(
+            conn.execute("SELECT current_price FROM positions WHERE id='model'").fetchone()[0]
+        )
+        conn.close()
+
+    def test_historical_shadow_book_cannot_be_marked_or_narrated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not operational"):
+            sim_broker.mark_book(sqlite3.connect(":memory:"), "shadow")
+        jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
+        premarket = next(
+            job for job in jobs if job.get("name") == "pre-market-reconcile-0845-et"
+        )
+        message = str((premarket.get("payload") or {}).get("message", ""))
+        self.assertIn("open desk rows in sim_positions", message)
+        self.assertIn("Historical `shadow` rows are inert audit artifacts", message)
+        self.assertIn("never inspect, reconcile, mark, page, or narrate them", message)
+
     def test_market_debrief_backfill_uses_event_date_bar(self) -> None:
         bars = [
             {"t": "2026-07-23", "c": 100.0},
@@ -210,6 +519,38 @@ class SignalSafetyTests(unittest.TestCase):
         ]
         self.assertEqual(market_debrief._move_as_of(bars, "2026-07-24"), 1.0)
         self.assertIsNone(market_debrief._move_as_of(bars, "2026-07-25"))
+
+    def test_macro_calendar_uses_official_dates_not_weekday_approximations(self) -> None:
+        self.assertEqual(
+            macro_calendar._official_release_day("NFP", 2026, 7).isoformat(),
+            "2026-07-02",
+        )
+        self.assertEqual(
+            macro_calendar._official_release_day("CPI_YOY", 2026, 9).isoformat(),
+            "2026-09-11",
+        )
+        self.assertIsNone(macro_calendar._official_release_day("CPI_YOY", 2027, 1))
+        source = (ROOT / "workspaces/trading-intel/scripts/macro_calendar.py").read_text()
+        self.assertNotIn("_approx_cpi_day", source)
+        self.assertNotIn("_first_friday", source)
+
+    def test_protective_health_check_respects_closed_market_deferral(self) -> None:
+        source = (
+            ROOT / "workspaces/developer/scripts/audit_pipeline_health.py"
+        ).read_text()
+        stranded_block = source.split("stranded = conn.execute", 1)[1].split(
+            "bypass = conn.execute", 1
+        )[0]
+        self.assertIn('market_clock().get("is_open")', stranded_block)
+
+    def test_pipeline_health_blocks_production_edge_claims_without_corpus(self) -> None:
+        source = (
+            ROOT / "workspaces/developer/scripts/audit_pipeline_health.py"
+        ).read_text()
+        self.assertIn('validation.get("post_cutoff", 0)', source)
+        self.assertIn('validation.get("negative_control", 0)', source)
+        self.assertIn("reasoning_gate=fail", source)
+        self.assertIn("internal-paper simulation may continue", source)
 
     def test_cash_without_validated_edge_is_not_idea_supply_drag(self) -> None:
         self.assertEqual(
@@ -273,6 +614,21 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIn("resolve_prediction_backlog(conn, dry_run=True)", pipeline_source)
         self.assertNotIn("maturity_days =", pipeline_source)
 
+    def test_health_sweep_closes_learning_loop_before_verification(self) -> None:
+        sweep = (ROOT / "scripts/sweep-and-page.sh").read_text()
+        closer = (ROOT / "scripts/close-matured-predictions.sh").read_text()
+
+        self.assertLess(
+            sweep.index("close-matured-predictions.sh"),
+            sweep.index("system-health-sweep.py"),
+        )
+        self.assertIn('"learning_loop_closure"', sweep)
+        self.assertIn("PREFLIGHT_RC -ne 0", sweep)
+        self.assertIn("grade_outcomes.py", closer)
+        self.assertIn("calibrate.py", closer)
+        self.assertIn("--no-propose", closer)
+        self.assertIn("state/trading-money-path.lock", closer)
+
     def test_backup_health_uses_mtime_not_mixed_filename_order(self) -> None:
         source = (ROOT / "scripts/system-health-sweep.py").read_text()
         body = source.split("def check_ledger_backup()", 1)[1].split(
@@ -283,6 +639,7 @@ class SignalSafetyTests(unittest.TestCase):
 
     def test_all_money_path_writers_share_one_lock(self) -> None:
         for relative in (
+            "scripts/close-matured-predictions.sh",
             "scripts/trader-pass-deterministic.sh",
             "scripts/guard-pass.sh",
             "scripts/learning-chain.sh",
@@ -308,6 +665,30 @@ class SignalSafetyTests(unittest.TestCase):
             message = str((job.get("payload") or {}).get("message", ""))
             self.assertIn("FINAL OUTPUT CONTRACT (no duplicate receipts):", message)
             self.assertIn("return exactly SILENT_SUCCESS", message)
+            if "[OVERSEER-DRIVE-V3]" in message:
+                self.assertIn("group -1003846579956", message)
+                self.assertNotIn("-1003237263898", message)
+
+    def test_routine_overseer_crons_cannot_force_research_churn(self) -> None:
+        jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
+        by_name = {str(job.get("name")): job for job in jobs}
+        self.assertNotIn("mechanism-proposer-daily", by_name)
+        drive_jobs = [
+            job for job in jobs
+            if job.get("enabled") and "[OVERSEER-DRIVE-V3]" in str((job.get("payload") or {}).get("message", ""))
+        ]
+        self.assertTrue(drive_jobs)
+        for job in drive_jobs:
+            name = str(job.get("name"))
+            message = str((job.get("payload") or {}).get("message", ""))
+            self.assertNotIn("NOT allowed to conclude", message)
+            self.assertNotIn("last_researcher_pass_age_min > 360", message)
+            if name == "catalyst-research-0830-et":
+                self.assertIn("the only routine research spawn", message)
+                self.assertIn("UPDATE that thesis", message)
+                self.assertIn("at most 5 net-new", message)
+            else:
+                self.assertIn("Do not spawn researcher", message)
 
     def test_live_integrator_has_no_wipe_flag_and_requires_robust_survivors(self) -> None:
         source = (

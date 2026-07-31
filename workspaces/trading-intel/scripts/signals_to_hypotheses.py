@@ -115,8 +115,12 @@ def main():
         if r.get("novelty", 1.0) < 0.5:
             continue
         # dedupe: skip if an unresolved hypothesis already exists for this ticker
-        dup = conn.execute("SELECT 1 FROM hypotheses WHERE tickers LIKE ? AND state NOT IN "
-                           "('resolved','retired') LIMIT 1", (f'%"{t}"%',)).fetchone()
+        dup = conn.execute(
+            "SELECT 1 FROM hypotheses h, json_each(h.tickers) jt "
+            "WHERE UPPER(jt.value)=? AND h.state IN "
+            "('raw','scored','challenged','ready','active') LIMIT 1",
+            (t,),
+        ).fetchone()
         if dup:
             continue
         top = sorted(r["fired"], key=lambda f: -f["posterior"])[:3]

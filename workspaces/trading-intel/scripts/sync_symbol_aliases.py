@@ -34,7 +34,7 @@ def sync(db_path: Path = FEATURE_DB, *, dry_run: bool = False) -> dict:
         for alias in symbol_lifecycle.aliases():
             old, new = alias["old"], alias["new"]
             old_universe = conn.execute(
-                "SELECT * FROM universe WHERE symbol=?", (old,)
+                "SELECT * FROM universe WHERE symbol=? AND status!='renamed'", (old,)
             ).fetchone()
             new_universe = conn.execute(
                 "SELECT 1 FROM universe WHERE symbol=?", (new,)

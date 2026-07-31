@@ -38,6 +38,38 @@ CREATE TABLE IF NOT EXISTS hypotheses (
 CREATE INDEX IF NOT EXISTS idx_hypotheses_state       ON hypotheses(state);
 CREATE INDEX IF NOT EXISTS idx_hypotheses_resolved_at ON hypotheses(resolved_at);
 
+-- Research agents write directly to this table, so prompt-level dedupe is not
+-- a sufficient invariant. Dormant/resolved/retired rows are history; only one
+-- live thesis may own a ticker at a time.
+CREATE TRIGGER IF NOT EXISTS hypotheses_one_live_ticker_insert
+BEFORE INSERT ON hypotheses
+WHEN NEW.state IN ('raw','scored','challenged','ready','active')
+  AND EXISTS (
+    SELECT 1 FROM json_each(NEW.tickers) incoming
+    JOIN hypotheses h
+    JOIN json_each(h.tickers) existing
+      ON UPPER(existing.value) = UPPER(incoming.value)
+    WHERE h.state IN ('raw','scored','challenged','ready','active')
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'one live hypothesis per ticker; update the existing thesis/evidence');
+END;
+
+CREATE TRIGGER IF NOT EXISTS hypotheses_one_live_ticker_update
+BEFORE UPDATE OF tickers, state ON hypotheses
+WHEN NEW.state IN ('raw','scored','challenged','ready','active')
+  AND EXISTS (
+    SELECT 1 FROM json_each(NEW.tickers) incoming
+    JOIN hypotheses h
+    JOIN json_each(h.tickers) existing
+      ON UPPER(existing.value) = UPPER(incoming.value)
+    WHERE h.id != NEW.id
+      AND h.state IN ('raw','scored','challenged','ready','active')
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'one live hypothesis per ticker; update the existing thesis/evidence');
+END;
+
 -- ----------------------------------------------------------------------------
 -- Hypothesis Evidence
 -- ----------------------------------------------------------------------------

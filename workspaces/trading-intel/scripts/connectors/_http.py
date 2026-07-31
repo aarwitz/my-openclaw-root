@@ -35,6 +35,25 @@ def now_iso() -> str:
 
 
 RATE_LIMIT_CODES = {429, 502, 503, 504}   # rate-limit / transient-server -> back off LONGER and retry
+_SECRET_QUERY_KEYS = {
+    "apikey", "api_key", "key", "token", "access_token", "secret", "client_secret",
+}
+
+
+def _redacted_url(url: str) -> str:
+    """Return a diagnostic URL with credential-bearing query values removed."""
+    try:
+        split = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qsl(split.query, keep_blank_values=True)
+        clean = [
+            (key, "REDACTED" if key.lower() in _SECRET_QUERY_KEYS else value)
+            for key, value in query
+        ]
+        return urllib.parse.urlunsplit(
+            (split.scheme, split.netloc, split.path, urllib.parse.urlencode(clean), split.fragment)
+        )
+    except Exception:
+        return "<redacted-url>"
 
 
 def _request(req: "urllib.request.Request", timeout: float, retries: int) -> bytes:
@@ -63,7 +82,9 @@ def _request(req: "urllib.request.Request", timeout: float, retries: int) -> byt
             last_err = exc
             if attempt < retries:
                 time.sleep(0.6 * (2 ** attempt))
-    raise ConnectorError(f"http request failed for {getattr(req, 'full_url', '?')}: {last_err}")
+    raise ConnectorError(
+        f"http request failed for {_redacted_url(getattr(req, 'full_url', '?'))}: {last_err}"
+    )
 
 
 def http_get(url: str, headers: dict[str, str] | None = None, timeout: float = 10.0,

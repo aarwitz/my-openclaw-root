@@ -3,8 +3,8 @@
 
 Three jobs:
   seed       — populate the forward calendar of high-impact scheduled releases
-               (NFP = first Friday of the month, exact; CPI = mid-month,
-               approximate until a BLS schedule is wired). Idempotent.
+               from the published BLS calendar. Unknown dates fail closed;
+               calendar arithmetic is never presented as an official date.
   upcoming   — list scheduled releases in the next N days, each annotated with
                the mechanism it tends to fire — so the desk pre-positions
                duration/risk BEFORE the print and can pull matching episodes.
@@ -13,7 +13,7 @@ Three jobs:
                rate-path lean, and on a LARGE surprise write a market_event +
                mechanism_observation so the world model learns the macro link.
 
-Free + deterministic only (FRED fredgraph.csv, computed schedule). No browser.
+Free + deterministic only (FRED actuals, reviewed BLS release calendar). No browser.
 
 Usage:
   python3 macro_calendar.py seed [--months 3]
@@ -36,7 +36,23 @@ from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors._http import ConnectorError  # noqa: E402
 from connectors.fred import fetch_series  # noqa: E402
 
-EXPERIMENT_ID = "macro_calendar_v1"
+EXPERIMENT_ID = "macro_calendar_bls_v2"
+BLS_SCHEDULE_SOURCE = "https://www.bls.gov/schedule/2026/home.htm"
+
+# Release-month dates copied from the official BLS 2026 calendar. Employment
+# Situation carries both NFP and UNRATE. Keep this explicit and reviewable:
+# holidays and special scheduling make "first Friday" / "second Wednesday"
+# false (2026-07 employment was Thursday 07-02; 2026-09 CPI is Friday 09-11).
+_BLS_2026 = {
+    "employment": {
+        1: 9, 2: 6, 3: 6, 4: 3, 5: 8, 6: 5,
+        7: 2, 8: 7, 9: 4, 10: 2, 11: 6, 12: 4,
+    },
+    "cpi": {
+        1: 13, 2: 13, 3: 11, 4: 10, 5: 12, 6: 10,
+        7: 14, 8: 12, 9: 11, 10: 14, 11: 10, 12: 10,
+    },
+}
 
 # Release definitions. mechanisms = the world-model links a surprise tends to fire.
 RELEASES = {
@@ -67,17 +83,12 @@ RELEASES = {
 }
 
 
-def _first_friday(y: int, m: int) -> date:
-    d = date(y, m, 1)
-    return d + timedelta(days=(4 - d.weekday()) % 7)
-
-
-def _approx_cpi_day(y: int, m: int) -> date:
-    """CPI is typically released ~mid-month (2nd full week). Approximate as the
-    second Wednesday; flagged approximate until a BLS schedule is wired."""
-    d = date(y, m, 1)
-    first_wed = d + timedelta(days=(2 - d.weekday()) % 7)
-    return first_wed + timedelta(days=7)
+def _official_release_day(series: str, y: int, m: int) -> date | None:
+    if y != 2026:
+        return None
+    family = "cpi" if series == "CPI_YOY" else "employment"
+    day = _BLS_2026[family].get(m)
+    return date(y, m, day) if day else None
 
 
 def _months_ahead(n: int) -> list[tuple[int, int]]:
@@ -96,33 +107,85 @@ def seed(conn, months: int) -> dict:
     """Populate scheduled rows. The release on date D reports the PRIOR month's
     data (NFP first Friday of June -> May data)."""
     added = 0
+    corrected = []
+    missing_official_schedule = []
     for (y, m) in _months_ahead(months):
         # period reported = the month before the release month
         py, pm = (y, m - 1) if m > 1 else (y - 1, 12)
         period = f"{py:04d}-{pm:02d}"
-        plan = [
-            ("NFP", _first_friday(y, m)),
-            ("CPI_YOY", _approx_cpi_day(y, m)),
-            ("UNRATE", _first_friday(y, m)),
-        ]
+        plan = []
+        for series in ("NFP", "CPI_YOY", "UNRATE"):
+            rel_date = _official_release_day(series, y, m)
+            if rel_date is None:
+                missing_official_schedule.append(f"{series}:{y:04d}-{m:02d}")
+            else:
+                plan.append((series, rel_date))
         for series, rel_date in plan:
             spec = RELEASES[series]
             rid = f"MAC-{series}-{rel_date.isoformat()}"
-            exists = conn.execute("SELECT 1 FROM macro_releases WHERE id=?", (rid,)).fetchone()
+            existing = conn.execute(
+                "SELECT id,release_date FROM macro_releases WHERE series=? AND period=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (series, period),
+            ).fetchone()
+            official_ts = rel_date.isoformat() + "T12:30:00Z"
+            if existing and (
+                existing["id"] != rid or existing["release_date"] != official_ts
+            ):
+                old_id, old_date = existing["id"], existing["release_date"]
+                conn.execute(
+                    "UPDATE macro_releases SET id=?,release_date=?,notes=?,updated_at=?,"
+                    "experiment_id=? WHERE id=?",
+                    (rid, official_ts, f"official BLS schedule: {BLS_SCHEDULE_SOURCE}",
+                     now_iso(), EXPERIMENT_ID, old_id),
+                )
+                event_id = f"mev-macro-{series}-{period}"
+                conn.execute(
+                    "UPDATE market_events SET event_date=? WHERE id=?",
+                    (rel_date.isoformat(), event_id),
+                )
+                conn.execute(
+                    "UPDATE mechanism_observations SET observed_at=? WHERE source_id=?",
+                    (official_ts, event_id),
+                )
+                audit(
+                    conn, actor="developer", entity_type="macro_release", entity_id=rid,
+                    action="correct_official_release_date",
+                    rationale=(f"{series} {period}: {old_date} -> {official_ts}; "
+                               f"source={BLS_SCHEDULE_SOURCE}"),
+                    experiment_id=EXPERIMENT_ID,
+                )
+                corrected.append({"series": series, "period": period,
+                                  "from": old_date, "to": official_ts})
+                existing = conn.execute(
+                    "SELECT id,release_date FROM macro_releases WHERE id=?", (rid,)
+                ).fetchone()
+            exists = bool(existing) or bool(
+                conn.execute("SELECT 1 FROM macro_releases WHERE id=?", (rid,)).fetchone()
+            )
             if exists:
+                conn.execute(
+                    "UPDATE macro_releases SET notes=?,experiment_id=? WHERE id=?",
+                    (f"official BLS schedule: {BLS_SCHEDULE_SOURCE}", EXPERIMENT_ID, rid),
+                )
                 continue
             conn.execute(
                 "INSERT INTO macro_releases (id, series, label, release_date, period, status, "
                 "impact, fred_series_id, linked_mechanism_ids_json, notes, created_at, experiment_id) "
                 "VALUES (?, ?, ?, ?, ?, 'scheduled', 'high', ?, ?, ?, ?, ?)",
-                (rid, series, spec["label"], rel_date.isoformat() + "T12:30:00Z", period,
+                (rid, series, spec["label"], official_ts, period,
                  spec["fred"], json.dumps(spec["mechanisms"]),
-                 "approx mid-month date" if series == "CPI_YOY" else None,
+                 f"official BLS schedule: {BLS_SCHEDULE_SOURCE}",
                  now_iso(), EXPERIMENT_ID),
             )
             added += 1
     conn.commit()
-    return {"scheduled_added": added}
+    return {
+        "scheduled_added": added,
+        "corrected_dates": corrected,
+        "missing_official_schedule": missing_official_schedule,
+        "schedule_source": BLS_SCHEDULE_SOURCE,
+    }
 
 
 def upcoming(conn, days: int) -> dict:

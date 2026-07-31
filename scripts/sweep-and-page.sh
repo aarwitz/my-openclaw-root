@@ -2,13 +2,38 @@
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -uo pipefail
 
-# sweep-and-page.sh — deterministic escalation for the health sweep (D57).
+# sweep-and-page.sh — deterministic repair + escalation for the health sweep.
 # crit -> page the operator via the direct Bot API (page-operator.sh works with
 # the gateway down); warn -> silent telegram. No LLM in this path.
 
 OC="$HOME/.openclaw"
+
+# Overnight vendor bars can make forecasts mature after the post-close learning
+# chain. Close that expected availability gap before diagnosing the loop. A
+# grader/calibrator/lock failure is appended to the health report as its own
+# CRIT so a partially repaired loop can never look green.
+PREFLIGHT_OUT=$(bash "$OC/scripts/close-matured-predictions.sh" 2>&1)
+PREFLIGHT_RC=$?
 OUT=$(python3 "$OC/scripts/system-health-sweep.py" 2>/dev/null)
 RC=$?
+if [[ $PREFLIGHT_RC -ne 0 ]]; then
+  PREFLIGHT_DETAIL="${PREFLIGHT_OUT:0:360}"
+  OUT=$(printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+detail = f"pre-sweep prediction closure failed (rc={sys.argv[1]}): {sys.argv[2]}"
+row = {"check": "learning_loop_closure", "severity": "crit", "detail": detail}
+d.setdefault("findings", []).append(row)
+d.setdefault("escalate", []).append(row)
+d["overall"] = "crit"
+counts = {s: sum(1 for f in d["findings"] if f.get("severity") == s)
+          for s in ("ok", "warn", "crit")}
+d["counts"] = counts
+d["summary"] = f"{counts['"'"'ok'"'"']} ok / {counts['"'"'warn'"'"']} warn / {counts['"'"'crit'"'"']} crit"
+print(json.dumps(d))
+' "$PREFLIGHT_RC" "$PREFLIGHT_DETAIL")
+  RC=2
+fi
 BAD=$(echo "$OUT" | python3 -c "
 import json, re, sys
 d = json.load(sys.stdin)

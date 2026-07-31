@@ -66,7 +66,28 @@ def enforce_hosted_tm_base(raw_base: str | None, env_name: str = "TASK_MANAGER_U
 
 TM_BASE = enforce_hosted_tm_base(os.environ.get("TASK_MANAGER_URL"))
 TM_HTTP_TIMEOUT = float(os.environ.get("TM_HTTP_TIMEOUT", "20"))
-TM_BEARER_TOKEN = (os.environ.get("TASK_MANAGER_BEARER_TOKEN") or "").strip()
+
+
+def tm_bearer_token(cred_path: Path | None = None) -> str:
+    """Load the unattended service token used by every other TM rail."""
+    token = (
+        os.environ.get("TASK_MANAGER_BEARER_TOKEN")
+        or os.environ.get("TM_BEARER_TOKEN")
+        or ""
+    ).strip()
+    if token:
+        return token
+    path = cred_path or Path(os.path.expanduser(
+        "~/.openclaw/credentials/task-manager-agent.json"
+    ))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return str(payload.get("session_token") or "").strip()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return ""
+
+
+TM_BEARER_TOKEN = tm_bearer_token()
 DEFAULT_SPRINT = 5
 DEFAULT_OWNER = "Dwight"
 QUEUE_MARKER_RE = re.compile(r"\bpq:([A-Za-z0-9-]+)\b")
@@ -179,9 +200,10 @@ def build_issue_payload(row: dict, assignee: str, sprint_id: int) -> dict:
         details,
     ]).strip()
     acceptance_criteria = "\n".join([
-        f"- Assigned to {assignee}.",
-        "- Traceable back to the queue row by pq id.",
-        "- Progress comment records the next concrete action.",
+        "- Reproduce the queued observation against current canonical state, or close it with the disproving evidence.",
+        "- The fix/research result includes a falsifiable before/after measurement tied to the observation.",
+        "- Add an automated regression/health check where the condition is machine-testable.",
+        f"- Final evidence is recorded by {assignee} and remains traceable to the pq id.",
     ])
     return {
         "title": title,
@@ -364,6 +386,15 @@ def main() -> int:
     p.add_argument("--sprint", type=int, default=DEFAULT_SPRINT)
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
+
+    # Collapse repeated pass-by-pass symptoms before issue promotion. The queue
+    # remains append-only and the newest observation in each family stays open.
+    from pq_groom import plan as groom_plan
+    groom_updates = groom_plan(coalesce_latest(load_rows()))
+    if groom_updates and not a.dry_run:
+        with QUEUE.open("a", encoding="utf-8") as handle:
+            for update in groom_updates:
+                handle.write(json.dumps(update, ensure_ascii=False) + "\n")
 
     rows = load_rows()
     latest = coalesce_latest(rows)

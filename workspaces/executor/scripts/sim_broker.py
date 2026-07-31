@@ -32,15 +32,60 @@ from _db import audit, connect, now_iso  # noqa: E402
 from connectors import fmp, massive  # noqa: E402
 from connectors.marketdata import market_clock  # noqa: E402
 
-# Fill model (P2 'model' book; the shadow book mirrors real fill prices instead):
+# Fill model for the quarantined P2 ``model`` experiment. Historical ``shadow``
+# rows are retained only as audit evidence and are not an operational book.
 SPREAD_K = 8.0          # half-spread bps ≈ max(1, K/sqrt(ADV$ millions))
 PARTICIPATION_CAP = 0.02  # max fraction of trailing-21d ADV per order
 CASH_YIELD_MAX_APY = float(os.environ.get("SIM_CASH_YIELD_MAX_APY", "0.10"))
 CASH_YIELD_FALLBACK_APY = float(os.environ.get("SIM_CASH_YIELD_FALLBACK_APY", "0.045"))
+MODELED_EXIT_SLIPPAGE_BPS = 8.0
+OPERATIONAL_BOOKS = frozenset({"desk", "model"})
 
 
 def _iso_today() -> str:
     return date.today().isoformat()
+
+
+def _sync_canonical_marks(conn, book: str, marks: dict[str, float]) -> int:
+    """Make the canonical position view use the paper ledger's same quote cut.
+
+    The old guard and simulator markers fetched independently, so every
+    pre-open reconcile reported harmless dollar drift and portfolio/risk views
+    disagreed about equity. The simulator mark is the desk ledger authority;
+    mirror its exact prices and sign-aware P&L in the canonical view atomically.
+    """
+    if book != "desk" or not marks:
+        return 0
+    updated = 0
+    for row in conn.execute(
+        "SELECT id,ticker,qty,cost_basis FROM positions "
+        "WHERE book=? AND state IN ('opening','open','scaling','trimming','closing')",
+        (book,),
+    ):
+        ticker = str(row[1]).upper()
+        if ticker not in marks:
+            continue
+        price = float(marks[ticker])
+        qty = float(row[2] or 0.0)
+        basis = float(row[3] or 0.0)
+        direction = 1.0 if qty >= 0 else -1.0
+        ret_pct = direction * (price - basis) / basis * 100.0 if basis > 0 else None
+        pnl = (price - basis) * qty
+        pnl_slip = pnl - abs(qty * price) * (MODELED_EXIT_SLIPPAGE_BPS / 10_000.0)
+        conn.execute(
+            "UPDATE positions SET current_price=?,current_value=?,"
+            "unrealized_pnl_pct=?,pnl_ideal=?,pnl_slippage_adjusted=? WHERE id=?",
+            (
+                price,
+                qty * price,
+                None if ret_pct is None else round(ret_pct, 4),
+                round(pnl, 2),
+                round(pnl_slip, 2),
+                row[0],
+            ),
+        )
+        updated += 1
+    return updated
 
 
 def _ensure_cash_yield_tables(conn):
@@ -437,6 +482,11 @@ def _mark_price(sym: str) -> float | None:
 
 
 def mark_book(conn, book: str) -> dict:
+    if book not in OPERATIONAL_BOOKS:
+        raise ValueError(
+            f"book {book!r} is not operational; allowed books: "
+            + ",".join(sorted(OPERATIONAL_BOOKS))
+        )
     ensure_book(conn, book)
     _ensure_cash_yield_tables(conn)
     cy = _apply_cash_yield_once_per_day(conn, book)
@@ -479,6 +529,7 @@ def mark_book(conn, book: str) -> dict:
         equity += pos["qty"] * px
         conn.execute("UPDATE sim_positions SET current_price=?, current_value=? WHERE id=?",
                      (px, pos["qty"] * px, pos["id"]))
+    canonical_marks_synced = _sync_canonical_marks(conn, book, marks)
     conn.execute("INSERT OR REPLACE INTO book_equity (book, date, equity, cash) VALUES (?,?,?,?)",
                  (book, _iso_today(), equity, cash))
     # intraday sample for the 1D/1W chart (D53); 14-day retention
@@ -500,6 +551,7 @@ def mark_book(conn, book: str) -> dict:
             "stored_symbols": sorted(stored_fallbacks),
             "cached_daily_close": len(cached_fallbacks),
             "cached_symbols": sorted(cached_fallbacks),
+            "canonical_marks_synced": canonical_marks_synced,
         },
         "cash_yield": {
             "annual_yield": round(float(cy.get("annual_yield") or 0.0), 6),
@@ -552,9 +604,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init"); p.add_argument("--book", required=True); p.add_argument("--cash", type=float, default=100_000.0)
-    p = sub.add_parser("mark"); p.add_argument("--book", required=True)
-    p = sub.add_parser("corporate-actions"); p.add_argument("--book", required=True)
-    p = sub.add_parser("integrity"); p.add_argument("--book", default="desk")
+    p = sub.add_parser("mark"); p.add_argument("--book", required=True, choices=sorted(OPERATIONAL_BOOKS))
+    p = sub.add_parser("corporate-actions"); p.add_argument("--book", required=True, choices=sorted(OPERATIONAL_BOOKS))
+    p = sub.add_parser("integrity"); p.add_argument("--book", default="desk", choices=sorted(OPERATIONAL_BOOKS))
     p = sub.add_parser("rebalance-model"); p.add_argument("--force", action="store_true")
     sub.add_parser("nightly")
     a = ap.parse_args(argv)

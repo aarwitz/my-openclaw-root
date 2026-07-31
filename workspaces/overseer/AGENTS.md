@@ -71,7 +71,7 @@ Append-only JSONL. Schema per row:
   "title": "<short>",
   "details": "<longer>",
   "priority": 1-5,                  // 1 = highest
-  "status": "open|claimed|done|rejected",
+  "status": "open|claimed|done|rejected|superseded",
   "claimed_by": null | "<agent_id>",
   "task_id": null | "<dwight task-manager issue id>"
 }
@@ -115,25 +115,16 @@ Scheduled-job truthfulness contract:
   reports `NO_EDGE`, cash is intentional. Research may continue, but idle-cash
   reduction and new-risk intent counts are not success criteria.
 
-### How to spawn pipeline agents
+### Agent boundary
 
-- Use Codex-native `spawn_agent` for upstream stages (researcher, quant,
-  critic, risk, archivist, trader, executor, developer). Those agents are
-  Codex-backed; OpenClaw `sessions_spawn` is for ACP delegation only and
-  `sessions_send` (30s timeout) is wrong for initial delegation.
-- For each stage, call `spawn_agent` with the agent name and a clear task
-  prompt that includes the required inputs and the expected canonical-DB
-  write contract.
-- After spawning, use `wait` / `wait_agent` for the child's final result
-  before launching the next stage. Once that result has been consumed,
-  immediately `close_agent` / `closeAgent` for the child in the same pass.
-  Do not leave completed children parked for later archive reaping; explicit
-  close is the default lifecycle rule.
-- If the child stalls, use `sendInput` to nudge. If it must be abandoned,
-  `close_agent` / `closeAgent` it before moving on.
-- If `spawn_agent` is not available or returns a forbidden/not-allowed
-  error, report the exact error text, append a P1 priority-queue row, and
-  stop the pipeline. Do not fall back to `sessions_send`.
+- Routine market checkpoints do not spawn researcher, quant, critic, trader,
+  risk, executor, or archivist. The deterministic core owns that normal chain.
+- The dedicated daily catalyst-research job is the sole routine Researcher
+  spawn. An explicit operator investigation may also delegate a bounded task.
+- When delegation is actually authorized, use Codex-native `spawn_agent`, wait
+  for the result, and close the child after consuming it. Do not substitute
+  `sessions_send` or file a platform bug merely because a routine pass has no
+  spawn tool.
 
 ### Non-trading days (check FIRST, before any drive rule)
 
@@ -147,36 +138,20 @@ archivist learning work, and one short Telegram note ("market holiday —
 standing down until <next session>"). The forbidden-output list below does not
 apply to that holiday note.
 
-### Cold-start + every-pass drive rules
+### Routine drive rules
 
-Run `~/.openclaw/scripts/run-with-trace.sh ~/.openclaw/workspaces/overseer/scripts/pipeline_status.py` to
-inventory the canonical DB. Then execute each rule that applies, in order:
-
-1. **Cold-start seed** — if `hypotheses_total < 5` OR
-   `last_researcher_pass_age_min > 360` (6h) OR null: spawn `researcher`
-   with `"Source 5 fresh primary-source-grounded equity hypotheses, mix of
-   catalysts. INSERT into hypotheses (state=raw, created_by=researcher,
-   rationale_concise<=500 chars). Add ≥1 hypothesis_evidence row per
-   hypothesis. Return inserted ids."` Then `wait`, consume the result, and
-   `close_agent`.
-2. **Score** — if any `state=raw` OR `oldest_unscored_age_min > 120`:
-   spawn `quant` to score everything raw → scored; refresh regime if stale.
-3. **Critique** — if any `state=scored` with `quant_score>=60`: spawn
-   `critic` to advance pass/fail → `ready`/`challenged`.
-4. **Author intents** — if any `state=ready`: spawn `trader` to author one
-   `trade_intent` per ready hypothesis (sized by fractional Kelly from the
-   latest world-model prediction).
-5. **Risk gate (mandatory)** — if any `state=risk_review`: spawn `risk` to run
-   `gate_risk_intents.py --all-pending`, capping size to per-name (≤10% equity)
-   and gross (≤60% equity) limits, halting on risk_off regime or daily
-   drawdown, and writing `risk_reviews`. Only `approved` intents may proceed.
-6. **Execute** — if any `state=approved`: spawn `executor` to
-   submit to the internal paper broker and verify fills/ledger lineage.
-7. **Learn** — if any hypothesis closed this pass OR
-   `last_archivist_pass_age_min > 1440` (24h): spawn `archivist`
-   fire-and-forget.
-
-Re-run the deterministic core after the spawns to capture new state.
+1. Run the deterministic core once, then inventory the canonical DB.
+2. Do not originate research merely because the last Researcher timestamp is
+   old. Quiet is valid; stale activity counters are not idea-quality signals.
+3. Do not spawn stage agents from a routine checkpoint. Re-run the core only
+   if a separately authorized stage changed canonical state.
+4. The daily research job must query `json_each(hypotheses.tickers)` before any
+   insert. `raw/scored/challenged/ready/active` are live; update the canonical
+   thesis and append genuinely new evidence. Add at most five unrepresented
+   tickers, and zero is valid. Never work around the database duplicate guard.
+5. The post-close learning job owns debrief/calibration. The health sweep first
+   invokes `scripts/close-matured-predictions.sh`, so a matured backlog is a
+   closure failure rather than a reason to manufacture new trades.
 
 ### Forbidden output
 

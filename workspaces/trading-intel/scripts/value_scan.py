@@ -64,7 +64,7 @@ def _seed_mechanisms(conn) -> None:
             "consequent_class, direction, horizon, prior_alpha, prior_beta, observed_hits, "
             "observed_misses, posterior_mean, half_life_days, status, experiment_id) "
             "VALUES (?, ?, 'quant', ?, ?, ?, 'long', 'quarter_63d', 1.0, 1.0, 0, 0, 0.5, 90, "
-            "'active', 'world_model_v1')",
+            "'candidate', 'world_model_v1')",
             (m["id"], _now(), m["name"], m["antecedent"], m["consequent"]))
 
 

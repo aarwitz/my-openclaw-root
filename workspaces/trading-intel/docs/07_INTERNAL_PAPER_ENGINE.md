@@ -10,6 +10,10 @@ parity path.
 - `model`: quarantined mechanical ranker experiment.
 - Historical `shadow` rows may remain for audit continuity but are inert.
 
+Operational mark, corporate-action, and integrity commands accept only `desk`
+or `model`; they fail closed for `shadow` or an unknown book. Agent inventory
+and narration must always scope simulator queries to an operational book.
+
 ## Fill and ledger contract
 
 - Input is an approved `trade_intent`; only

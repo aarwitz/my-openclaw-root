@@ -385,13 +385,18 @@ Run as the `portfolio_risk` pass stage (after reconcile); each snapshot writes a
 `cron/jobs.json` is the live, hot-reloaded job source (there is **no**
 cron→SQLite migration in this build). The overseer drives the desk:
 
-- **Five market-time weekday passes** (`OVERSEER-DRIVE-V2`): pre-market 09:00,
+- **Five market-time weekday passes** (`OVERSEER-DRIVE-V3`): pre-market 09:00,
   open 09:30, confirmation 11:00, rotation 13:30, close-risk 15:30 ET. Each runs
-  the deterministic core, then spawns agents in strict order
-  `researcher → quant → critic → trader → risk → executor → archivist` (Codex
-  `spawn_agent` + `wait`). After each child result is consumed, overseer must
-  explicitly `close_agent` before moving to the next stage rather than relying
-  on later archive reaping. Then narrates to Telegram via `druck`.
+  the deterministic core and narrates the material portfolio change (or a
+  truthful quiet pass) to Telegram via `druck`. Routine checkpoints do not
+  spawn stage agents: the deterministic core owns
+  `score → review → predict → risk → execute → reconcile`. This prevents the
+  former every-pass five-idea quota from manufacturing duplicate theses.
+- **One dedicated daily catalyst-research pass** may spawn Researcher once.
+  It updates an existing live ticker thesis when one exists, may add at most
+  five previously unrepresented tickers, and may correctly add zero. SQLite
+  enforces one live thesis per ticker; dormant/resolved/retired rows are
+  retained history.
 - **Daily post-close learning pass** (`overseer-daily-learning-1630-et`): runs
   **every weekday, trade or no-trade** — Researcher gathers what moved + why from
   primary sources, Quant quantifies, Archivist runs `market_debrief.py` +

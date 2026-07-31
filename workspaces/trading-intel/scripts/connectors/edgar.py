@@ -22,12 +22,19 @@ ticker "not applicable" rather than fabricate a number.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _http import ConnectorError, cache_read, cache_write, http_get, now_iso  # noqa: E402
+try:
+    # Package import is the canonical runtime path. Using a second top-level
+    # ``_http`` module created a distinct ConnectorError class, so valuation's
+    # fail-soft handler did not catch EDGAR network failures.
+    from ._http import ConnectorError, cache_read, cache_write, http_get, now_iso
+except ImportError:  # pragma: no cover - permits `python connectors/edgar.py`
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _http import ConnectorError, cache_read, cache_write, http_get, now_iso
 
 # A contact UA is mandatory for SEC. Public project contact only — no secrets/PII.
 # (No Accept-Encoding: urllib won't auto-gunzip, so we request plain JSON.)
@@ -194,6 +201,44 @@ def _instant(facts: dict, key: str) -> float | None:
     return float(p["val"]) if p else None
 
 
+def _select_share_count(
+    diluted_annual: dict | None,
+    cover_instant: dict | None,
+    financial_end: str | None,
+) -> tuple[float | None, str]:
+    """Choose a current, unit-plausible share denominator.
+
+    Companyfacts occasionally contains a filing-table value expressed in
+    thousands even though the XBRL unit says ``shares`` (SWBI: 44,933 vs
+    44.7m). It can also retain only an ancient cover-page count (Visa: 2010).
+    Reject both rather than turning them into fictitious EPS and DCF values.
+    """
+    from datetime import date
+
+    def fresh(point: dict | None) -> bool:
+        if not point or not financial_end:
+            return bool(point)
+        try:
+            return abs(
+                (date.fromisoformat(str(point["end"])[:10]) - date.fromisoformat(financial_end[:10])).days
+            ) <= 550
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    diluted = float(diluted_annual["val"]) if fresh(diluted_annual) else None
+    instant = float(cover_instant["val"]) if fresh(cover_instant) else None
+    if diluted and instant:
+        ratio = diluted / instant
+        if 0.5 <= ratio <= 2.0:
+            return diluted, "diluted_weighted_average"
+        return instant, "cover_instant_unit_repair"
+    if diluted:
+        return diluted, "diluted_weighted_average_unconfirmed"
+    if instant:
+        return instant, "cover_instant"
+    return None, "missing_or_stale"
+
+
 def fundamentals(ticker: str) -> dict[str, Any]:
     """Normalized fundamentals for a US filer. Prefers TTM for flows, falls back
     to latest annual. Raises ConnectorError when SEC has no usable facts."""
@@ -220,14 +265,22 @@ def fundamentals(ticker: str) -> dict[str, Any]:
     capex = pick(capex_ttm, capex_ann)
     dep_amort = pick(da_ttm, da_ann)
 
-    # shares: diluted weighted-average (us-gaap, dilution-aware), else the most
-    # recent dei/us-gaap shares-outstanding instant from the cover page.
+    # shares: require a denominator from the same broad financial vintage and
+    # cross-check annual diluted shares against the cover-page instant. This
+    # catches both stale facts and issuer-scale mistakes.
+    ni_annual_point = _latest_annual(_unit_points(facts, _CONCEPTS["net_income"]))
+    rev_annual_point = _latest_annual(_unit_points(facts, _CONCEPTS["revenue"]))
+    financial_end = (
+        (ni_annual_point or {}).get("end")
+        or (rev_annual_point or {}).get("end")
+    )
     sh_la = _latest_annual(_unit_points(facts, _CONCEPTS["shares_diluted"], unit_pref=("shares",)))
-    shares = float(sh_la["val"]) if sh_la else None
-    if not shares:
-        p = _latest_instant(_unit_points(facts, ["EntityCommonStockSharesOutstanding",
-                                                 "CommonStockSharesOutstanding"], unit_pref=("shares",)))
-        shares = float(p["val"]) if p else None
+    share_instant = _latest_instant(_unit_points(
+        facts,
+        ["EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"],
+        unit_pref=("shares",),
+    ))
+    shares, shares_source = _select_share_count(sh_la, share_instant, financial_end)
 
     cash = _instant(facts, "cash")
     lt_debt = _instant(facts, "lt_debt") or 0.0
@@ -256,6 +309,7 @@ def fundamentals(ticker: str) -> dict[str, Any]:
         "fcf": fcf,
         "ebitda": ebitda,
         "shares": shares,
+        "shares_source": shares_source,
         "cash": cash,
         "total_debt": total_debt,
         "net_debt": net_debt,

@@ -18,8 +18,9 @@ Pure stdlib (matches worldmodel.py). Fails *soft*: anything it can't value (ETFs
 negative-FCF names, missing fundamentals) comes back `applicable=False` with a
 reason, so the pipeline degrades to its prior behavior rather than breaking.
 
-Data sources: SEC EDGAR (fundamentals), Yahoo (price + realized vol + beta),
-FRED (risk-free). All free, keyless, cached.
+Data sources: SEC EDGAR (fundamentals), Massive with Yahoo/yfinance fallback
+(price + realized vol + beta), FRED (risk-free), and the point-in-time universe
+(market-cap share-count cross-check). Cached where supported.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ WACC_MIN, WACC_MAX = 0.07, 0.13
 GROWTH_MIN, GROWTH_MAX = 0.0, 0.22
 RF_DEFAULT = 0.043
 MOS_CLAMP = 0.60  # single-stock DCF is noisy; bound the usable signal hard.
+FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 
 
 def _daily_log_returns(closes: list[float]) -> list[float]:
@@ -178,6 +180,39 @@ def _risk_free() -> float:
     return RF_DEFAULT
 
 
+def _market_cap_implied_shares(ticker: str, price: float | None) -> float | None:
+    """Current total shares derived from the point-in-time universe market cap."""
+    if not price or price <= 0 or not FEATURE_DB.exists():
+        return None
+    import sqlite3
+    try:
+        conn = sqlite3.connect(f"file:{FEATURE_DB}?mode=ro", uri=True)
+        row = conn.execute(
+            "SELECT market_cap FROM universe WHERE symbol=? AND status='active'",
+            (ticker.upper(),),
+        ).fetchone()
+        conn.close()
+        market_cap = float(row[0]) if row and row[0] else None
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return market_cap / price if market_cap and market_cap > 0 else None
+
+
+def _reconcile_share_count(
+    reported: float | None, market_implied: float | None, reported_source: str
+) -> tuple[float | None, str, bool]:
+    """Use market-cap shares when the filing count is absent or off by >2x."""
+    r = float(reported) if reported and reported > 0 else None
+    m = float(market_implied) if market_implied and market_implied > 0 else None
+    if r and m and not (0.5 <= r / m <= 2.0):
+        return m, "universe_market_cap_override", True
+    if r:
+        return r, reported_source or "edgar", False
+    if m:
+        return m, "universe_market_cap_fallback", True
+    return None, "missing", False
+
+
 def value(ticker: str) -> dict[str, Any]:
     t = ticker.upper().strip()
     out: dict[str, Any] = {"ticker": t, "applicable": False}
@@ -199,10 +234,14 @@ def value(ticker: str) -> dict[str, Any]:
         out["reason"] = str(e)
         return out
 
-    shares = f.get("shares")
+    market_shares = _market_cap_implied_shares(t, price)
+    shares, shares_source, shares_repaired = _reconcile_share_count(
+        f.get("shares"), market_shares, str(f.get("shares_source") or "edgar")
+    )
     fcf = f.get("fcf")
     net_debt = f.get("net_debt") or 0.0
-    eps = f.get("eps_ttm")
+    net_income = f.get("net_income")
+    eps = (net_income / shares) if (net_income and shares) else None
     revenue = f.get("revenue")
     ebitda = f.get("ebitda")
 
@@ -247,7 +286,7 @@ def value(ticker: str) -> dict[str, Any]:
     # depressed vs earnings (positive NI, FCF < 40% of NI), the DCF leg is down-weighted
     # (0.65 -> 0.25) so the growth-justified earnings multiple carries the estimate, and
     # confidence is cut so downstream consumers scale back either way.
-    ni = f.get("net_income")
+    ni = net_income
     fcf_depressed = bool(ni and ni > 0 and fcf is not None and fcf < 0.4 * ni)
     parts = []
     if fair_dcf and fair_dcf > 0:
@@ -290,6 +329,10 @@ def value(ticker: str) -> dict[str, Any]:
         conf *= 0.85  # growth pinned at the ceiling = high-growth extrapolation
     if fcf_depressed:
         conf *= 0.75  # capex-cycle trough FCF: the DCF anchor is least trustworthy here (D71)
+    if shares_source in ("diluted_weighted_average_unconfirmed", "cover_instant"):
+        conf *= 0.85
+    if shares_repaired:
+        conf *= 0.70
     conf = max(0.1, min(0.95, conf))
 
     out.update({
@@ -312,9 +355,15 @@ def value(ticker: str) -> dict[str, Any]:
         "wacc": round(wacc, 4),
         "risk_free": round(rf, 4),
         "multiples": multiples,
-        "fundamentals": {k: f.get(k) for k in ("revenue", "fcf", "net_income", "ebitda",
-                                               "shares", "net_debt", "eps_ttm")},
-        "source": "edgar+yahoo+fred",
+        "fundamentals": {
+            **{k: f.get(k) for k in ("revenue", "fcf", "net_income", "ebitda", "net_debt")},
+            "shares": shares,
+            "shares_source": shares_source,
+            "shares_repaired": shares_repaired,
+            "market_cap_implied_shares": market_shares,
+            "eps_ttm": eps,
+        },
+        "source": "edgar+massive/yahoo/yfinance+fred+universe",
         "as_of": edgar.now_iso(),
     })
     return out
@@ -405,12 +454,18 @@ def universe_tickers(conn: sqlite3.Connection) -> list[str]:
 def value_universe(tickers: list[str] | None = None, experiment_id: str | None = None) -> dict:
     conn = _conn()
     syms = tickers or universe_tickers(conn)
+    # A universe run is one snapshot. Consumers such as value_scan select the
+    # latest batch with ``as_of = MAX(as_of)``; allowing this timestamp to tick
+    # per symbol made an otherwise complete run look like an arbitrary partial
+    # tail (14/63 names on 2026-07-31).
+    batch_as_of = edgar.now_iso()
     rows, applic, na = [], 0, 0
     for t in syms:
         try:
             v = value(t)
         except Exception as e:  # never let one ticker break the pass
             v = {"ticker": t, "applicable": False, "reason": f"error: {e}"}
+        v["as_of"] = batch_as_of
         write_valuation(conn, v, experiment_id)
         if v.get("applicable"):
             applic += 1
@@ -418,7 +473,13 @@ def value_universe(tickers: list[str] | None = None, experiment_id: str | None =
         else:
             na += 1
     conn.close()
-    return {"valued": applic, "n_a": na, "tickers": len(syms), "summary": rows}
+    return {
+        "valued": applic,
+        "n_a": na,
+        "tickers": len(syms),
+        "as_of": batch_as_of,
+        "summary": rows,
+    }
 
 
 if __name__ == "__main__":
@@ -432,4 +493,3 @@ if __name__ == "__main__":
     else:
         # back-compat: `valuation.py AAPL`
         print(json.dumps(value(cmd), indent=2, default=str))
-

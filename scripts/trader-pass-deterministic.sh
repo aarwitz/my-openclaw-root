@@ -114,6 +114,10 @@ printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]]
 run_step "classify_regime" 90 python3 workspaces/quant/scripts/classify_regime.py
 run_step "value_universe" 180 python3 workspaces/trading-intel/scripts/valuation.py universe
 run_step "sync_symbol_aliases" 20 python3 workspaces/trading-intel/scripts/sync_symbol_aliases.py
+# Keep the research board honest before origination: retire terminal "active"
+# rows to dormant, reopen any thesis whose position is still live, and collapse
+# same-ticker live duplicates without deleting evidence or forecast history.
+run_step "hypothesis_hygiene" 30 python3 workspaces/trading-intel/scripts/hypothesis_hygiene.py --repair
 # Deterministic world-model ORIGINATION. D68: keep the signal lane inside the
 # normal pass so idle cash caused by no qualified ideas is attacked by more
 # candidates flowing through the unchanged score -> critic -> trader -> risk

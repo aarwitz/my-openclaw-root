@@ -170,6 +170,10 @@ When in doubt, assign and add a comment explaining why.
 - Eligible rows are latest `open` or `claimed` rows whose `task_id` is still empty.
 - Assignee resolution is deterministic: explicit `assigned_to`/`lane` wins; otherwise row text falls back through keyword rules and then category defaults.
 - When Dwight creates or reconciles an issue, he must add a short comment with the next concrete action and append a queue row carrying the resulting `task_id`.
+- The queue is an observation rail, not a second issue tracker. Before polling,
+  run `scripts/pq_groom.py --apply`; it coalesces repeated symptom families and
+  leaves only the newest observation reviewable. It never auto-resolves the
+  newest row or deletes queue history.
 
 
 ## Inline vs lane (coordination doctrine, 2026-07-03)

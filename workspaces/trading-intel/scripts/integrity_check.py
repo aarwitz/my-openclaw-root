@@ -75,6 +75,52 @@ def data_reality(conn) -> list[dict]:
             "detail": f"cannot run foreign_key_check: {exc}",
         })
 
+    # One ticker cannot have several simultaneously live theses. That made the
+    # same name look like repeated independent evidence and left 242 "active"
+    # rows over a 38-name book. Dormant/resolved rows are retained history.
+    try:
+        duplicates = conn.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT UPPER(jt.value) ticker FROM hypotheses h,json_each(h.tickers) jt "
+            "WHERE h.state IN ('raw','scored','challenged','ready','active') "
+            "GROUP BY UPPER(jt.value) HAVING COUNT(*) > 1)"
+        ).fetchone()[0]
+        out.append({
+            "family": "data",
+            "id": "integrity:duplicate_live_hypotheses",
+            "status": "RED" if duplicates else "OK",
+            "detail": f"{duplicates} ticker(s) have more than one live hypothesis",
+        })
+    except sqlite3.Error as exc:
+        out.append({
+            "family": "data",
+            "id": "integrity:duplicate_live_hypotheses",
+            "status": "RED",
+            "detail": f"cannot verify live-hypothesis uniqueness: {exc}",
+        })
+
+    # A live position backed by a resolved/dormant thesis has no truthful
+    # lifecycle owner and encourages research to originate the held name again.
+    try:
+        mismatches = conn.execute(
+            "SELECT COUNT(*) FROM positions p JOIN hypotheses h ON h.id=p.hypothesis_id "
+            "WHERE p.state IN ('opening','open','scaling','trimming','closing') "
+            "AND h.state != 'active'"
+        ).fetchone()[0]
+        out.append({
+            "family": "data",
+            "id": "integrity:position_thesis_lifecycle",
+            "status": "RED" if mismatches else "OK",
+            "detail": f"{mismatches} open position(s) are backed by a non-active thesis",
+        })
+    except sqlite3.Error as exc:
+        out.append({
+            "family": "data",
+            "id": "integrity:position_thesis_lifecycle",
+            "status": "RED",
+            "detail": f"cannot verify position/thesis lifecycle: {exc}",
+        })
+
     for tbl, col, where, max_frac, label in NULL_HOLE_CHECKS:
         try:
             r = conn.execute(f"SELECT COUNT(*) n, SUM({col} IS NULL) nulls FROM {tbl} WHERE {where}").fetchone()
