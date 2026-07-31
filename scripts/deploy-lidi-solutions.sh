@@ -217,15 +217,25 @@ fi
 
 COMMIT_MESSAGE="$(git log -1 --format=%s)"
 echo "[deploy-site] deploying $GIT_SHA to Cloudflare Pages (auth=$AUTH_MODE)"
-if ! ./node_modules/.bin/wrangler pages deploy dist \
-  --project-name=lidi-solutions \
-  --branch=main \
-  --commit-hash="$GIT_SHA" \
-  --commit-message="$COMMIT_MESSAGE" \
-  --commit-dirty=false >"$DEPLOY_TMP/wrangler.log" 2>&1; then
+DEPLOYMENT_OK=false
+for attempt in 1 2 3; do
+  if ./node_modules/.bin/wrangler pages deploy dist \
+    --project-name=lidi-solutions \
+    --branch=main \
+    --commit-hash="$GIT_SHA" \
+    --commit-message="$COMMIT_MESSAGE" \
+    --commit-dirty=false >"$DEPLOY_TMP/wrangler.log" 2>&1; then
+    DEPLOYMENT_OK=true
+    break
+  fi
+
+  echo "[deploy-site] Pages API attempt $attempt/3 failed" >&2
   tail -40 "$DEPLOY_TMP/wrangler.log" >&2
-  fatal "Cloudflare Pages deployment failed"
-fi
+  if [[ "$attempt" -lt 3 ]]; then
+    sleep "$((attempt * 5))"
+  fi
+done
+[[ "$DEPLOYMENT_OK" == "true" ]] || fatal "Cloudflare Pages deployment failed after 3 attempts"
 tail -25 "$DEPLOY_TMP/wrangler.log"
 
 verify_production
