@@ -167,11 +167,20 @@ Validation corpus ingestion protocol:
 - Researcher is the default producer of validation cases because it already sees source material first.
 - Cases must be anonymized before storage: strip ticker, company name, deal name, date, and any direct mnemonic that could let the model memorize the answer.
 - Each case must be labeled `winner`, `negative_control`, or `post_cutoff`, with optional `fake_date_variant` metadata.
-- Every case must include a machine-readable model decision and a resolved outcome object before being counted as pass/fail evidence.
-- `passed = true` means the model conclusion matched the resolved outcome under the anonymized representation and the fake-date variant did not flip the conclusion.
+- The human-approved masked packet and model decision must be frozen before the
+  outcome resolves. The decision records the exact packet hash, model id,
+  policy hash, knowledge cutoff, numeric confidence, rationale hash, and
+  decision timestamp.
+- Resolution may add only `resolved_outcome_json`; it may not rewrite the
+  packet or decision. The runner derives `passed` from the frozen decision,
+  expected decision/direction, and fake-date invariance.
+- Pending, malformed, post-hoc, unpaired, or fake-date companion rows do not
+  count toward minimum sample sizes.
 - Negative controls must intentionally produce no trade or a correctly blocked trade.
 - Post-cutoff cases are weighted most heavily for go/no-go decisions.
-- The validation runner writes one row per case into `validation_cases` and one audit row for the batch run.
+- `workspaces/developer/scripts/validation_corpus.py --freeze` and `--resolve`
+  perform the only supported transitions. Each batch is atomic, requires an
+  explicit human-approval marker, and writes one audit row.
 
 Regime rules ingestion protocol:
 
@@ -205,7 +214,7 @@ Regime rules ingestion protocol:
 	- operations lane: real, specific thesis/execution data for live paper decisions.
 	- evaluation lane: masked validation cases for leakage-resistant measurement.
 - Continuous learning loop:
-	1. export resolved hypothesis outcomes into a review queue,
-	2. approve high-quality candidates,
-	3. convert approved raw detailed cases into masked evaluation cases,
-	4. re-run corpus validation.
+	1. mask and approve an unresolved forward case,
+	2. run the evaluation model and freeze its decision before resolution,
+	3. resolve the paired base/fake-date case after the horizon matures,
+	4. re-run corpus validation; never backfill a decision from a known outcome.

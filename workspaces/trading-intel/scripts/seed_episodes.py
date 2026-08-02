@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Seed the named/dated episode library (and the mechanisms it exercises).
 
-This is the curated, real-name ground-truth set the desk learns market structure
-from. It replaces the abandoned anonymized validation_corpus. Sources: the
+This is the curated, real-name research-memory set the desk learns market structure
+from. It replaces masked cases for retrieval, but never replaces the independent
+blinded ``validation_cases`` evaluation lane. Sources: the
 operator's hand-written ground-truth cases
 (workspaces/trading-intel/aaron_manual_ground_truth_cases.txt) plus the desk's
 own resolved market_events.

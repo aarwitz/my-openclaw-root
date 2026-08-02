@@ -900,8 +900,10 @@ class SignalSafetyTests(unittest.TestCase):
         source = (
             ROOT / "workspaces/developer/scripts/audit_pipeline_health.py"
         ).read_text()
-        self.assertIn('validation.get("post_cutoff", 0)', source)
-        self.assertIn('validation.get("negative_control", 0)', source)
+        self.assertIn("validation = audit_corpus(conn)", source)
+        self.assertIn('validation["eligible_resolved_counts"]', source)
+        self.assertIn('validation["structural_ok"]', source)
+        self.assertIn('validation["reasoning_gate"]', source)
         self.assertIn("reasoning_gate=fail", source)
         self.assertIn("internal-paper simulation may continue", source)
 

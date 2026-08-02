@@ -161,6 +161,11 @@ def main() -> int:
             [py, "workspaces/developer/scripts/prediction_replay.py"],
             json_ok=True,
         ),
+        _run(
+            "validation-corpus-structure",
+            [py, "workspaces/developer/scripts/validation_corpus.py"],
+            json_ok=True,
+        ),
     ]
 
     if args.quick:

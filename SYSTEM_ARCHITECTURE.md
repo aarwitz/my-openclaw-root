@@ -272,13 +272,15 @@ priced-in insider distribution).
 > deprecated and open-risk authoring is quarantined. Historical rows remain for
 > audit and learning continuity.
 
-### 6.7 Episode library (`episodes`) — named, dated ground truth (schema v9)
+### 6.7 Episode library (`episodes`) — named, dated research memory (schema v9)
 The desk learns market structure from a curated library of **real, named,
 dated** market episodes (migration `0009`; seeded by
 `trading-intel/scripts/seed_episodes.py` from the operator's ground-truth cases).
-This **replaces** the abandoned anonymized `validation_corpus` (masking tickers/
-dates to "prevent overfitting" destroyed the signal). Overfitting is instead
-controlled by **walk-forward discipline**, not anonymization:
+This replaced masked cases only as the desk's **research retrieval and
+mechanism-learning memory**. It does not replace the separate blinded
+`validation_cases` evaluation lane required by §6.12 and the implementation
+policy. Research memory keeps names and dates because retrieval needs them;
+look-ahead is controlled by **walk-forward discipline**:
 - `knowable_at` — earliest primary-source availability. Retrieval at decision
   time may only surface episodes with `knowable_at` strictly before the decision
   (no look-ahead). Enforced by `trading-intel/scripts/retrieve_episodes.py`.
@@ -296,6 +298,23 @@ At decision time the researcher and trader call
 `trading-intel/scripts/retrieve_episodes.py` (walk-forward gated by `as_of`) to
 pull the closest analogues — surfacing each episode's `correct_action` and
 `naive_trap` so the desk doesn't repeat a known mistake.
+
+### 6.12 Blinded validation corpus (`validation_cases`)
+
+The named episode library may generate research analogues; it may not prove
+reasoning quality. `validation_cases` is the independent evaluation lane. A
+human-approved masked packet and its model decision are frozen before the
+outcome resolves; the exact packet hash, model id, policy hash, knowledge
+cutoff, confidence, rationale hash, and decision timestamp live inside the JSON
+contracts. Resolution may add only the outcome object. `validation_corpus.py`
+derives the grade, checks fake-date pairs, accuracy, negative-control false
+positives, invariance, and ECE, and rejects post-hoc or mutated evidence.
+
+Only structurally valid, resolved, substantive base cases count toward 30
+post-cutoff and 60 negative-control minimums. Pending rows and fake-date
+companions never inflate sample size. An empty corpus is honest and keeps the
+production-edge reasoning gate closed; it is not a reason to invent cases or
+stop internal-paper simulation.
 
 ### 6.8 Macro expectations & surprise (`macro_releases`, schema v10)
 The desk's biggest blind spot was being *surprised* by scheduled macro prints it

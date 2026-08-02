@@ -224,7 +224,12 @@ Append-only. Every state transition writes an audit row.
 
 ### 3.14 `validation_cases`
 
-Leakage-resistant validation corpus and outcomes.
+Leakage-resistant validation corpus and outcomes. `created_at` is the immutable
+freeze time. `model_decision_json` commits the masked-packet hash, model/policy
+identity, knowledge cutoff, confidence, rationale hash, and decision timestamp;
+`resolved_outcome_json` is appended only after the horizon resolves. Fake-date
+companions use the `_fakedate` id suffix and never count as independent cases.
+Only `validation_corpus.py` may freeze/resolve these rows.
 
 Fields: `id`, `masked_case_json`, `case_class` (`winner` / `negative_control` / `post_cutoff`), `fake_date_variant`, `model_decision_json`, `resolved_outcome_json`, `passed`, `created_at`, `experiment_id`.
 

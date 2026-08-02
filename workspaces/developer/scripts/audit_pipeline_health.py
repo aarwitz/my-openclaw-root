@@ -36,14 +36,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors.marketdata import market_clock  # noqa: E402
 from integrity_check import completed_sessions_since  # noqa: E402
+from validation_corpus import (  # noqa: E402
+    MIN_NEGATIVE_CONTROL as MIN_NEGATIVE_CONTROL_CASES,
+    MIN_POST_CUTOFF as MIN_POST_CUTOFF_CASES,
+    audit_corpus,
+)
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import backend  # noqa: E402  (adapter, D52)
 
 EXPECTED_SCHEMA_VERSION = 12
 FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
-MIN_POST_CUTOFF_CASES = 30
-MIN_NEGATIVE_CONTROL_CASES = 60
 RUN_LOG = Path(os.path.expanduser("~/.openclaw/logs/script-runs.jsonl"))
 CRITICAL_RUNS = {
     # Do not inspect the previous full trader pass from inside the current
@@ -121,12 +124,23 @@ def run_checks(conn) -> list[dict]:
         issues.append({"severity": "yellow", "area": "pipeline",
                        "detail": f"raw_hypotheses={raw_count} (>200)"})
 
-    validation = dict(conn.execute(
-        "SELECT case_class,COUNT(*) AS n FROM validation_cases GROUP BY case_class"
-    ).fetchall())
-    post_cutoff = int(validation.get("post_cutoff", 0))
-    negative = int(validation.get("negative_control", 0))
-    if post_cutoff < MIN_POST_CUTOFF_CASES or negative < MIN_NEGATIVE_CONTROL_CASES:
+    validation = audit_corpus(conn)
+    counts = validation["eligible_resolved_counts"]
+    post_cutoff = int(counts.get("post_cutoff", 0))
+    negative = int(counts.get("negative_control", 0))
+    if not validation["structural_ok"]:
+        issues.append({
+            "severity": "red",
+            "area": "validation_corpus",
+            "detail": (
+                f"validation corpus has {validation['invalid_rows']} invalid row(s): "
+                + "; ".join(validation["errors"][:3])
+            ),
+        })
+    if not validation["reasoning_gate"]:
+        failed_checks = ",".join(
+            name for name, passed in validation["checks"].items() if not passed
+        )
         issues.append({
             "severity": "yellow",
             "area": "validation_corpus",
@@ -134,6 +148,7 @@ def run_checks(conn) -> list[dict]:
                 "reasoning_gate=fail: validation corpus below production-edge minimum "
                 f"(post_cutoff={post_cutoff}/{MIN_POST_CUTOFF_CASES}, "
                 f"negative_control={negative}/{MIN_NEGATIVE_CONTROL_CASES}); "
+                f"failed_checks={failed_checks}; "
                 "internal-paper simulation may continue, production/edge claims may not"
             ),
         })
