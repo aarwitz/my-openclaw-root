@@ -32,6 +32,7 @@ import promote_mechanisms  # noqa: E402
 import signal_scan  # noqa: E402
 import author_intents  # noqa: E402
 import broker  # noqa: E402
+import reconcile  # noqa: E402
 import sim_broker  # noqa: E402
 import write_postmortems  # noqa: E402
 import worldmodel  # noqa: E402
@@ -971,6 +972,81 @@ class IntentSafetyTests(unittest.TestCase):
                 broker.place_order("TEST", 1, "buy", order_type="limit", limit_price=100.50)
         finally:
             broker._conn, broker._sim, broker._massive.latest_trade = old_conn, old_sim, old_trade
+
+
+class ReconciliationExitContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.conn, self.path = _scratch()
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        os.unlink(self.path)
+
+    def _position(self, ticker: str = "AAA") -> None:
+        self.conn.execute(
+            "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+            "VALUES('h-rec',?,'researcher',?,'reconcile fixture','active')",
+            (_iso(), json.dumps([ticker])),
+        )
+        self.conn.execute(
+            "INSERT INTO positions(id,hypothesis_id,ticker,vehicle,qty,cost_basis,state,opened_at) "
+            "VALUES('p-rec','h-rec',?,'direct_equity',2,100,'open',?)",
+            (ticker, _iso()),
+        )
+        self.conn.commit()
+
+    def test_dry_run_returns_nonzero_on_divergence(self) -> None:
+        self._position()
+        with (
+            mock.patch.object(reconcile, "connect", return_value=self.conn),
+            mock.patch.object(reconcile, "list_positions", return_value=[]),
+            mock.patch.object(reconcile, "list_orders", return_value=[]),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(reconcile.main(["--dry-run"]), 1)
+
+    def test_repair_must_verify_clean_before_returning_success(self) -> None:
+        self._position()
+        with (
+            mock.patch.object(reconcile, "connect", return_value=self.conn),
+            mock.patch.object(reconcile, "list_positions", return_value=[]),
+            mock.patch.object(reconcile, "list_orders", return_value=[]),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(reconcile.main(["--repair"]), 0)
+        row = self.conn.execute(
+            "SELECT resolved FROM reconciliation_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual(row["resolved"], 1)
+        self.assertEqual(
+            self.conn.execute("SELECT state FROM positions WHERE id='p-rec'").fetchone()[0],
+            "closed",
+        )
+
+    def test_unrepairable_divergence_remains_failed(self) -> None:
+        phantom = {
+            "id": "sim-phantom",
+            "client_order_id": "sim-phantom-client",
+            "symbol": "AAA",
+            "status": "new",
+        }
+
+        def orders(*, status="open", limit=100):
+            return [phantom] if status == "open" else []
+
+        with (
+            mock.patch.object(reconcile, "connect", return_value=self.conn),
+            mock.patch.object(reconcile, "list_positions", return_value=[]),
+            mock.patch.object(reconcile, "list_orders", side_effect=orders),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(reconcile.main(["--repair"]), 1)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT resolved FROM reconciliation_runs ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()[0],
+            0,
+        )
 
 
 class GateLineageTests(unittest.TestCase):

@@ -5,10 +5,9 @@ Status: active. Schedules, approved actions, deferred features, build phases, an
 ## 1. Approved actions at launch
 
 - Long and short direct equity in the internal paper account.
-- ETF positions.
-- LEAPS calls and call spreads consistent with `01_OPERATING_AUTHORITY.md`.
-- Shorter-dated options for explicit catalyst windows.
-- Pair trades and competitor shorts with the constraints in `01_OPERATING_AUTHORITY.md`.
+- Liquid US ETF positions.
+- Pair trades expressed as two separately gated equity/ETF intents, and
+  competitor shorts subject to `01_OPERATING_AUTHORITY.md`.
 
 ## 2. Explicitly deferred at launch
 

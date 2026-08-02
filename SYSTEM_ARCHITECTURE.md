@@ -194,6 +194,8 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
                                                                governor + fractional-Kelly, state=proposed)
   → gate_evaluator       trading-intel/scripts/gate_evaluator.py  proposed|critic_review → risk_review | blocked
   → risk_gate            risk/scripts/gate_risk_intents.py     risk_review → approved|blocked (size capped)
+  → sim_integrity_pre    executor/scripts/sim_broker.py        owned-ledger arithmetic preflight
+  → reconcile_preflight  executor/scripts/reconcile.py         canonical vs simulator dry-run; nonzero on drift
   → execute_intent       executor/scripts/execute_intent.py    approved → submitted (internal ledger)
   → sync_fills           executor/scripts/sync_fills.py        broker truth per order id → orders (fill
                                                                price/time), intents (actuals), positions
@@ -671,5 +673,7 @@ deprecated, and link-count growth is never treated as learning quality.
 10. Code changes do not wait for a trading day to reveal regressions. The merge
     gate and nightly learning chain run `scripts/autotrade-preflight.py`: config,
     syntax, doc/architecture semantics, internal-paper exclusivity, all unit
-    tests, and money-path conservation on offline fixtures.
+    tests, money-path conservation, and no-write trading-day/holiday/failure
+    scenario replay on offline fixtures. Any critical decision-path, owned-ledger,
+    or reconciliation-preflight failure disarms execution for that pass.
 ```

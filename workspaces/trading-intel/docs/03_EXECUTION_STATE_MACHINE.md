@@ -110,3 +110,7 @@ These cases must pass before the internal-paper system is considered production-
 12. ADV-cap breach marks intent as not realistically fillable and blocks submission.
 13. Ledger-wide anomaly auto-creates `exits_trims_only` pause and blocks new entries portfolio-wide.
 14. Regime classifier is deterministic: known signal snapshot maps to expected regime label.
+15. Any critical upstream stage, ledger-integrity, or reconciliation-preflight
+    failure disarms execution while allowing diagnostic stages to finish.
+16. Reconciliation returns nonzero until a post-repair read-back proves zero
+    remaining divergences and zero unresolved repairs.

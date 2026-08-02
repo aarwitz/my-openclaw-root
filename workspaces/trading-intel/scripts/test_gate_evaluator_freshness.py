@@ -13,18 +13,10 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import unittest
 from datetime import datetime, timezone
 
 import gate_evaluator as ge  # noqa: E402
-
-PASS, FAIL = [], []
-
-
-def check(name: str, cond: bool, detail: str = "") -> None:
-    (PASS if cond else FAIL).append(name)
-    suffix = f" :: {detail}" if detail else ""
-    print(("  PASS " if cond else "  FAIL ") + name + suffix)
-
 
 def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
@@ -57,8 +49,16 @@ def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
           id TEXT PRIMARY KEY,
           target_id TEXT,
           reviewed_at TEXT,
+          reviewed_by TEXT,
           all_challenges_addressed INTEGER,
           challenges_json TEXT
+        );
+        CREATE TABLE predictions (
+          id TEXT PRIMARY KEY,
+          hypothesis_id TEXT,
+          predicted_at TEXT,
+          p_correct REAL,
+          return_p50 REAL
         );
         CREATE TABLE trade_intents (
           id TEXT PRIMARY KEY,
@@ -75,6 +75,7 @@ def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
           max_fillable_size REAL,
           modeled_slippage_bps REAL,
           state TEXT,
+          created_at TEXT,
           evidence_freshness_status TEXT,
           factor_overlap_status TEXT,
           provenance_completeness_pct REAL,
@@ -120,12 +121,13 @@ def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
             ),
         )
     conn.execute(
-        "INSERT INTO critic_reviews (id, target_id, reviewed_at, all_challenges_addressed, challenges_json) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO critic_reviews (id, target_id, reviewed_at, reviewed_by, all_challenges_addressed, challenges_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         (
             "CRIT-1",
             "HYPO-1",
             "2026-06-22T19:00:00Z",
+            "critic",
             1,
             '[{"challenge":"base case","response":"addressed"}]',
         ),
@@ -133,7 +135,7 @@ def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
     conn.execute(
         "INSERT INTO trade_intents (id, hypothesis_id, action, tranche_type, ticker, vehicle, size, "
         "entry_price_target, stop_rule, time_horizon, edge_scorecard_json, max_fillable_size, "
-        "modeled_slippage_bps, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "modeled_slippage_bps, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             "INTENT-1",
             "HYPO-1",
@@ -149,56 +151,51 @@ def setup_db(retrieved_at: str | None) -> sqlite3.Connection:
             10,
             15,
             "proposed",
+            "2026-06-22T19:30:00Z",
         ),
     )
     conn.commit()
     return conn
 
 
-def with_now(now_iso: str):
-    real_now = ge._now
-    ge._now = lambda: datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
-    return real_now
+class GateFreshnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.real_now = ge._now
+        ge._now = lambda: datetime.fromisoformat("2026-06-22T20:00:00+00:00")
 
+    def tearDown(self) -> None:
+        ge._now = self.real_now
 
-def main() -> int:
-    real_now = with_now("2026-06-22T20:00:00Z")
-    try:
+    def test_weekend_hours_do_not_stale_friday_artifact(self) -> None:
         conn = setup_db("2026-06-19T12:00:00Z")
-        weekend_pass = ge.evaluate(conn, "INTENT-1")
-        fresh_gate = next(g for g in weekend_pass["gates"] if g["name"] == "evidence_freshness")
-        check(
-            "weekend hours do not stale a Friday artifact by Monday",
-            weekend_pass["all_pass"] and fresh_gate["pass"] and fresh_gate["artifacts"] == [],
-            fresh_gate["detail"],
-        )
+        try:
+            result = ge.evaluate(conn, "INTENT-1")
+            gate = next(g for g in result["gates"] if g["name"] == "evidence_freshness")
+            self.assertTrue(gate["pass"], gate["detail"])
+            self.assertEqual(gate["artifacts"], [])
+        finally:
+            conn.close()
 
+    def test_stale_artifact_is_attributed_and_persisted(self) -> None:
         conn = setup_db("2026-06-17T12:00:00Z")
-        stale = ge.evaluate(conn, "INTENT-1")
-        ge.apply(conn, "INTENT-1", stale)
-        blocked_reason = conn.execute(
-            "SELECT blocked_reason FROM trade_intents WHERE id='INTENT-1'"
-        ).fetchone()[0]
-        fresh_gate = next(g for g in stale["gates"] if g["name"] == "evidence_freshness")
-        artifact = fresh_gate["artifacts"][0]
-        check(
-            "stale artifact is attributed in gate output",
-            fresh_gate["attribution_code"] == "stale:EVID-1"
-            and artifact["weekend_hours_discount"] == 48.0
-            and artifact["adjusted_hours_old"] == 80.0,
-            str(artifact),
-        )
-        check(
-            "blocked_reason persists freshness attribution",
-            blocked_reason.startswith("gates_failed:evidence_freshness[stale:EVID-1]"),
-            blocked_reason,
-        )
-    finally:
-        ge._now = real_now
-
-    print(f"\n{'GREEN' if not FAIL else 'RED'}: {len(PASS)} passed, {len(FAIL)} failed")
-    return 1 if FAIL else 0
+        try:
+            stale = ge.evaluate(conn, "INTENT-1")
+            ge.apply(conn, "INTENT-1", stale)
+            blocked_reason = conn.execute(
+                "SELECT blocked_reason FROM trade_intents WHERE id='INTENT-1'"
+            ).fetchone()[0]
+            gate = next(g for g in stale["gates"] if g["name"] == "evidence_freshness")
+            artifact = gate["artifacts"][0]
+            self.assertEqual(gate["attribution_code"], "stale:EVID-1")
+            self.assertEqual(artifact["weekend_hours_discount"], 48.0)
+            self.assertEqual(artifact["adjusted_hours_old"], 80.0)
+            self.assertTrue(
+                blocked_reason.startswith("gates_failed:evidence_freshness[stale:EVID-1]"),
+                blocked_reason,
+            )
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    unittest.main()

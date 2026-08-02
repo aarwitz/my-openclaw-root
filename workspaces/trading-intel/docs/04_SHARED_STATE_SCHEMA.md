@@ -6,7 +6,7 @@ Status: active. Authoritative entity model. The implementing DDL lives in `sql/s
 
 - Engine: SQLite (WAL mode).
 - Location: `~/.openclaw/state/trading-intel.sqlite`.
-- Access: all five trading agents share this DB. Write permissions are enforced at the application layer (see `~/.openclaw/SYSTEM_ARCHITECTURE.md` §4).
+- Access: all nine AutoTrade desk agents share this DB. Write permissions are enforced at the application layer (see `~/.openclaw/SYSTEM_ARCHITECTURE.md` §4).
 - Backups: daily snapshot to `~/.openclaw/state/backups/trading-intel-YYYY-MM-DD.sqlite`.
 
 ## 2. Storage policy for reasoning
@@ -74,10 +74,10 @@ Each row is one piece of evidence. Append-only.
 |---|---|---|
 | `id` | TEXT PK | |
 | `hypothesis_id` | TEXT FK | |
-| `vehicle` | TEXT | `direct_equity` / `etf` / `leaps` / `short_options` / `competitor_short` / `pair_trade` |
-| `ticker` | TEXT | underlying or contract symbol |
-| `option_contract` | TEXT | OCC symbol for options, nullable |
-| `event_date` | TEXT | required for shorter-dated options |
+| `vehicle` | TEXT | runtime: `direct_equity` / `etf`; legacy inactive values may remain in historical rows |
+| `ticker` | TEXT | equity or ETF symbol |
+| `option_contract` | TEXT | legacy inactive field; runtime must leave null |
+| `event_date` | TEXT | optional catalyst date; does not enable unsupported options |
 | `conviction_weight` | REAL | 0–1 |
 | `quant_rationale` | TEXT | <= 500 chars |
 | `recommended` | INTEGER | 0/1 |
@@ -212,7 +212,7 @@ Append-only. Every state transition writes an audit row.
 |---|---|---|
 | `id` | TEXT PK | |
 | `timestamp` | TEXT | |
-| `actor` | TEXT | one of the five agents or `human` |
+| `actor` | TEXT | one of the nine desk agents, `human`, or `system` (see DDL CHECK) |
 | `entity_type` | TEXT | |
 | `entity_id` | TEXT | |
 | `action` | TEXT | concise verb |

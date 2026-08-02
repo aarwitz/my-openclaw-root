@@ -6,7 +6,8 @@ require_wrapper()
 
 """doc-lint — weekly documentation-rot check (run from the Sunday overseer audit).
 
-Deterministic checks only; contradictions in *meaning* are the reviewing agent's job.
+Deterministic checks over paths plus the small set of semantic contracts that
+have repeatedly regressed in active agent memory.
   1. path-refs   : repo-relative paths mentioned in living docs that no longer exist
   2. superseded  : living docs still citing archived docs (they were retired 2026-07-02)
   3. revalidate  : FINDINGS.md quantitative claims whose `revalidate-by:` date has passed
@@ -26,6 +27,8 @@ ROOT = Path.home() / ".openclaw"
 TI = ROOT / "workspaces" / "trading-intel"
 
 # Living docs to scan for stale path references and superseded citations.
+AGENT_DOCS = sorted((ROOT / "workspaces").glob("*/AGENTS.md"))
+
 LIVING_DOCS = [
     ROOT / "CLAUDE.md",
     ROOT / "SYSTEM_ARCHITECTURE.md",
@@ -37,6 +40,7 @@ LIVING_DOCS = [
     TI / "OPERATOR_GUIDE.md",
     TI / "HUMAN_USE_GUIDE.md",
     *sorted((TI / "docs").glob("*.md")),
+    *AGENT_DOCS,
 ]
 
 # Word-boundary patterns so ARCHITECTURE.md never matches inside SYSTEM_ARCHITECTURE.md.
@@ -53,6 +57,11 @@ ARCHIVED_CTX = re.compile(r"archiv|supersed|retired|formerly|historical", re.I)
 PATH_RE = re.compile(
     r"(?<![\w/])((?:workspaces|scripts|sql|docs|cron|state|tools|credentials)"
     r"/[\w./-]+\.(?:py|sh|sql|md|json|ts|js|sqlite|jsonl))\b"
+)
+ABS_PATH_RE = re.compile(
+    re.escape(str(ROOT))
+    + r"/((?:workspaces|scripts|sql|docs|cron|state|tools|credentials)"
+    + r"/[\w./-]+\.(?:py|sh|sql|md|json|ts|js|sqlite|jsonl))\b"
 )
 PLACEHOLDER_RE = re.compile(r"(NNNN|<[^>]+>|\{[^}]+\}|\*|\.\.\.|XXX)")
 
@@ -86,7 +95,8 @@ def main() -> int:
             return bool(ARCHIVED_CTX.search(text[max(0, pos - 120):pos + 160]))
 
         seen = set()
-        for m in PATH_RE.finditer(text):
+        path_matches = list(PATH_RE.finditer(text)) + list(ABS_PATH_RE.finditer(text))
+        for m in sorted(path_matches, key=lambda item: item.start()):
             ref = m.group(1)
             if ref in seen or PLACEHOLDER_RE.search(ref):
                 continue
@@ -95,6 +105,22 @@ def main() -> int:
                 line = text.count("\n", 0, m.start()) + 1
                 findings.append({"check": "path-ref", "doc": rel_doc, "line": line, "ref": ref,
                                  "detail": "referenced path does not exist"})
+
+        if doc in AGENT_DOCS:
+            version_pin = re.search(
+                r"(?:topology|DB schema|schema)\s+v[0-9]+(?:/v[0-9]+)?",
+                text,
+                re.I,
+            )
+            if version_pin:
+                line = text.count("\n", 0, version_pin.start()) + 1
+                findings.append({
+                    "check": "agent-version-pin",
+                    "doc": rel_doc,
+                    "line": line,
+                    "ref": version_pin.group(0),
+                    "detail": "agent memory must defer mutable topology/schema versions to SYSTEM_ARCHITECTURE.md",
+                })
 
         for pat in SUPERSEDED:
             for m in pat.finditer(text):
@@ -187,6 +213,24 @@ def main() -> int:
                 "doc": "workspaces/overseer/IDENTITY.md",
                 "ref": identity_topology.group(1) if identity_topology else "missing",
                 "detail": f"overseer identity must match canonical {topology.group(1)}",
+            })
+
+    # Active vehicle policy must not contradict itself. The old implementation
+    # policy simultaneously approved options in section 1 and deferred them in
+    # section 2, which kept reviving unsupported expressions in agent prompts.
+    implementation = TI / "docs" / "05_IMPLEMENTATION_POLICY.md"
+    if implementation.exists():
+        impl_text = implementation.read_text(errors="replace")
+        approved = impl_text.split("## 2.", 1)[0]
+        forbidden = re.search(r"\b(?:options?|LEAPS?|call spreads?)\b", approved, re.I)
+        if forbidden:
+            line = impl_text.count("\n", 0, forbidden.start()) + 1
+            findings.append({
+                "check": "unsupported-vehicle-policy",
+                "doc": "workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md",
+                "line": line,
+                "ref": forbidden.group(0),
+                "detail": "approved runtime actions may only include simulator-supported equity/ETF vehicles",
             })
 
     out = {"ok": not findings, "as_of": date.today().isoformat(), "n": len(findings), "findings": findings}

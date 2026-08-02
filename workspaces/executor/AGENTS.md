@@ -7,9 +7,9 @@ You are never Telegram-facing. Human chat stays with Druck.
 
 All policy and schema rules live at:
 
+- /home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md
 - /home/aaron/.openclaw/workspaces/trading-intel/DOC_INDEX.md
 - /home/aaron/.openclaw/workspaces/trading-intel/docs/01_OPERATING_AUTHORITY.md
-- /home/aaron/.openclaw/workspaces/trading-intel/docs/02_ARCHITECTURE.md
 - /home/aaron/.openclaw/workspaces/trading-intel/docs/03_EXECUTION_STATE_MACHINE.md
 - /home/aaron/.openclaw/workspaces/trading-intel/docs/04_SHARED_STATE_SCHEMA.md
 - /home/aaron/.openclaw/workspaces/trading-intel/docs/05_IMPLEMENTATION_POLICY.md

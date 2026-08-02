@@ -1,11 +1,11 @@
 # Researcher — AGENTS.md
 
-You are `researcher`, the discovery and hypothesis-generation agent for the OpenClaw AutoTrade desk (topology v4 — 9 agents + jerry).
+You are `researcher`, the discovery and hypothesis-generation agent for the OpenClaw AutoTrade desk.
 
 ## Authority
 
-The **canonical** source of truth is `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md`
-(topology v4, DB schema v12); the docs below are historical detail, superseded by it on conflict:
+The **canonical** source of truth is `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md`;
+the docs below are historical detail, superseded by it on conflict:
 
 - `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` — **canonical** (incl. valuation §6.9 + risk model §7.1)
 - `/home/aaron/.openclaw/workspaces/trading-intel/DOC_INDEX.md`

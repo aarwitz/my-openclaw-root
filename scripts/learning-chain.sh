@@ -58,10 +58,9 @@ log "===== learning chain start (pid $$) ====="
 # the tight 08:52 pre-open refresh stays at 150 (daily bars only change at close).
 # D54: the internal ledger IS the brokerage — back it up before anything else.
 step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
-# D57: money-path CI — the ledger IS the brokerage; its math gets tested nightly.
+# D110/D111: one release gate owns syntax, docs, every discoverable unit,
+# money-path conservation, and no-write trading-day/failure scenario replay.
 step "autotrade-preflight" bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/autotrade-preflight.py"
-step "exec-edgecases"      "$PY" "$TI/test_pipeline_edgecases.py"
-step "risk-opposition"     "$PY" "$TI/test_risk_opposition_sweep.py"
 step "sync-symbol-aliases" "$PY" "$TI/sync_symbol_aliases.py"
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
 # LLM feature factory (P3): type today's news into point-in-time features

@@ -34,6 +34,12 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 #
 # Usage:
 #   trader-pass-deterministic.sh [--skip-execute] [--skip-snapshot]
+#   trader-pass-deterministic.sh --scenario
+#
+# `--scenario` is a no-write orchestration replay used by preflight.  Every
+# stage is simulated, while the real branching, dependency circuit, JSON
+# assembly, and exit semantics run unchanged.  It is explicit-only so an
+# environment variable can never accidentally disable a live paper pass.
 
 set -uo pipefail
 
@@ -46,13 +52,21 @@ SKIP_SNAPSHOT=0
 PUBLISH=0
 PIPELINE_RC=0
 PIPELINE_FAILURES=()
+EXECUTION_BLOCKERS=()
+SCENARIO=0
 for arg in "$@"; do
   case "$arg" in
     --skip-execute) SKIP_EXECUTE=1 ;;
     --skip-snapshot) SKIP_SNAPSHOT=1 ;;
     --publish) PUBLISH=1 ;;
+    --scenario) SCENARIO=1 ;;
   esac
 done
+
+if [[ "$SCENARIO" -eq 1 && "$PUBLISH" -eq 1 ]]; then
+  echo '{"ok":false,"error":"--scenario cannot publish"}'
+  exit 2
+fi
 
 cd "$OPENCLAW" || { echo '{"ok":false,"error":"cd failed"}'; exit 2; }
 
@@ -66,22 +80,40 @@ fi
 
 # One writer pipeline at a time. Eight scheduled roles can otherwise overlap
 # their full/second passes and contend on the trading + feature databases.
-exec 9>"$OPENCLAW/state/trading-money-path.lock"
-if ! flock -n 9; then
-  printf '{"started_at":"%s","skipped":true,"reason":"another money-path pipeline holds the lock","finished_at":"%s"}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  exit 0
+# Scenario replay never writes, so it must not contend with or suppress a live
+# money-path pass.
+if [[ "$SCENARIO" -eq 0 ]]; then
+  exec 9>"$OPENCLAW/state/trading-money-path.lock"
+  if ! flock -n 9; then
+    printf '{"started_at":"%s","skipped":true,"reason":"another money-path pipeline holds the lock","finished_at":"%s"}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    exit 0
+  fi
+  export TRADING_MONEY_LOCK_HELD=1
 fi
-export TRADING_MONEY_LOCK_HELD=1
 
 run_step() {
   local name="$1" cmd_timeout="$2"; shift 2
-  local out
-  out=$(timeout "$cmd_timeout" "$@" 2>&1)
-  local rc=$?
+  local out rc
+  if [[ "$SCENARIO" -eq 1 ]]; then
+    if [[ ",${AUTOTRADE_SCENARIO_FAIL_STEPS:-}," == *",${name},"* ]]; then
+      out="scenario-injected failure: ${name}"
+      rc=42
+    else
+      out="{\"scenario_step\":\"${name}\",\"ok\":true}"
+      rc=0
+    fi
+  else
+    out=$(timeout "$cmd_timeout" "$@" 2>&1)
+    rc=$?
+  fi
   if (( rc != 0 )); then
     PIPELINE_RC=1
     PIPELINE_FAILURES+=("$name:$rc")
+    case "$name" in
+      classify_regime|value_universe|hypothesis_hygiene|score_hypotheses|critic_baseline|predict|enforce_horizons|enforce_falsifiers|enforce_stops|author_intents|gate_evaluator|risk_gate|sim_integrity_pre|reconcile_preflight)
+        EXECUTION_BLOCKERS+=("$name:$rc") ;;
+    esac
   fi
   # quote payload for JSON; collapse to single line
   local one
@@ -90,6 +122,10 @@ run_step() {
 }
 
 printf '{\n  "started_at": "%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$SCENARIO" -eq 1 ]]; then
+  printf ',\n  "scenario": {"enabled": true, "injected_failures": %s}' \
+    "$(printf '%s' "${AUTOTRADE_SCENARIO_FAIL_STEPS:-}" | python3 -c 'import json,sys; print(json.dumps([x for x in sys.stdin.read().split(",") if x]))')"
+fi
 
 # Market-calendar gate: cron only knows Mon-Fri; the exchange calendar knows
 # holidays (2026-07-03: five passes ran on the Jul-4-observed holiday and one
@@ -97,7 +133,10 @@ printf '{\n  "started_at": "%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # still refreshes data/scoreboard/snapshot but skips authoring and execution.
 # Fail-open on calendar errors (a dead calendar API must not halt the desk on
   # a real trading day — the executor has its own fail-closed clock gate).
-TRADING_DAY=$(timeout 20 python3 -c "
+if [[ "$SCENARIO" -eq 1 ]]; then
+  TRADING_DAY="${AUTOTRADE_SCENARIO_TRADING_DAY:-1}"
+else
+  TRADING_DAY=$(timeout 20 python3 -c "
 import sys
 sys.path.insert(0, 'workspaces/trading-intel/scripts')
 from datetime import datetime
@@ -108,6 +147,7 @@ try:
     print('1' if is_trading_day(today) else '0')
 except Exception:
     print('1')" 2>/dev/null)
+fi
 [[ "$TRADING_DAY" == "0" ]] || TRADING_DAY=1
 printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]] && echo true || echo false)"
 
@@ -144,16 +184,28 @@ if [[ "$TRADING_DAY" == "1" ]]; then
   run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
   run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
   run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
+  # Verify the owned ledger and canonical-vs-simulator position/order lineage
+  # BEFORE any submission. Post-fill reconciliation still runs below. A broken
+  # preflight, or any critical upstream decision-stage failure, disarms the
+  # executor for this pass while allowing diagnostics/snapshots to finish.
+  run_step "sim_integrity_pre" 30 python3 workspaces/executor/scripts/sim_broker.py integrity --book desk
+  run_step "reconcile_preflight" 30 python3 workspaces/executor/scripts/reconcile.py --dry-run
 else
   printf ',\n  "enforce_horizons": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "enforce_falsifiers": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "enforce_stops": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "author_intents": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "gate_evaluator": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "risk_gate": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "sim_integrity_pre": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "reconcile_preflight": {"rc": 0, "skipped": "non-trading day"}'
 fi
-if [[ "$SKIP_EXECUTE" -eq 0 && "$TRADING_DAY" == "1" ]]; then
+if [[ "$SKIP_EXECUTE" -eq 0 && "$TRADING_DAY" == "1" && "${#EXECUTION_BLOCKERS[@]}" -eq 0 ]]; then
   run_step "execute_intent" 60 python3 workspaces/executor/scripts/execute_intent.py
 else
-  printf ',\n  "execute_intent": {"rc": 0, "skipped": true}'
+  printf ',\n  "execute_intent": {"rc": 0, "skipped": true, "reason": %s, "blockers": %s}' \
+    "$(if [[ "${#EXECUTION_BLOCKERS[@]}" -gt 0 ]]; then printf '%s' 'critical pre-execution dependency failed'; elif [[ "$TRADING_DAY" != "1" ]]; then printf '%s' 'non-trading day'; else printf '%s' 'requested'; fi | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+    "$(printf '%s\n' "${EXECUTION_BLOCKERS[@]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
 fi
 # sync_fills BEFORE reconcile: pulls broker truth per order id (fill price,
 # filled_at) and books positions against the real hypothesis lineage. Without
@@ -199,7 +251,9 @@ run_step "macro_actuals" 45 python3 workspaces/trading-intel/scripts/macro_calen
 run_step "rotation" 120 python3 workspaces/trading-intel/scripts/rotation_monitor.py snapshot
 run_step "capital_efficiency" 45 python3 workspaces/trading-intel/scripts/capital_efficiency_audit.py
 if [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
-  mkdir -p "$SNAPSHOT_DIR"
+  if [[ "$SCENARIO" -eq 0 ]]; then
+    mkdir -p "$SNAPSHOT_DIR"
+  fi
   run_step "snapshot" 60 python3 workspaces/developer/scripts/snapshot_builder.py --out "$APP_DATA_JSON"
   # Runtime jobs write only ignored state. Cron must never mutate the tracked
   # website checkout: that recreated a dirty repo every ten minutes, blocked

@@ -303,7 +303,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(result, indent=2, default=str))
     if args.dry_run:
-        return 0
+        # A dry run is the pre-execution circuit breaker. Returning success
+        # while reporting a divergence made it impossible for orchestration to
+        # fail closed before submission.
+        return 0 if (
+            result["summary"]["divergence_count"] == 0
+            and not result.get("broker_data_suspect")
+        ) else 1
 
     started = now_iso()
     rid = _new_id("RECON")
@@ -311,9 +317,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.repair:
         repairs = apply_repairs(conn, result)
 
+    # Verify the repaired state, rather than equating "repair was attempted"
+    # with resolution. The owned simulator and canonical strategy tables are
+    # in the same SQLite store, so this read-back is deterministic.
+    verification = compute_divergences(conn) if args.repair else result
+    verification_error = verification.get("connector_error")
+    remaining_divergences = (
+        None if verification_error else verification["summary"]["divergence_count"]
+    )
+    resolved = bool(
+        not verification_error
+        and remaining_divergences == 0
+        and not verification.get("broker_data_suspect")
+        and not repairs["unresolved"]
+    )
+
     div_count = result["summary"]["divergence_count"]
     payload = dict(result)
     payload["repairs"] = repairs
+    payload["verification"] = verification
     conn.execute(
         "INSERT INTO reconciliation_runs (id, started_at, finished_at, divergences_json, resolved) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -322,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
             started,
             now_iso(),
             json.dumps(payload),
-            1 if (div_count == 0 and len(repairs["unresolved"]) == 0) else 0,
+            1 if resolved else 0,
         ),
     )
     audit(conn, actor="executor", entity_type="reconciliation_run", entity_id=rid,
@@ -330,11 +352,17 @@ def main(argv: list[str] | None = None) -> int:
           rationale=f"internal paper ledger vs strategy db: db_pos={result['summary']['db_positions']} "
                     f"broker_pos={result['summary']['broker_positions']} "
                     f"divergences={div_count} repaired={len(repairs['repaired'])} "
-                    f"unresolved={len(repairs['unresolved'])}")
+                    f"unresolved={len(repairs['unresolved'])} "
+                    f"remaining={remaining_divergences if remaining_divergences is not None else 'unreadable'}")
     conn.commit()
 
-    print(json.dumps({"reconciliation_run_id": rid, "repairs": repairs}, indent=2, default=str))
-    return 0
+    print(json.dumps({
+        "reconciliation_run_id": rid,
+        "resolved": resolved,
+        "repairs": repairs,
+        "verification": verification,
+    }, indent=2, default=str))
+    return 0 if resolved else 1
 
 
 if __name__ == "__main__":

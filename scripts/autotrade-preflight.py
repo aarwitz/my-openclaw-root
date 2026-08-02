@@ -8,6 +8,7 @@ next regression in Telegram?": merge and nightly paths run the same suite first.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import subprocess
@@ -83,12 +84,50 @@ def _config_contract() -> dict:
     }
 
 
+def _test_discovery_contract() -> dict:
+    """Reject test_*.py files that unittest discovery would silently ignore."""
+    started = time.monotonic()
+    errors = []
+    for directory in (
+        ROOT / "workspaces/trading-intel/scripts",
+        ROOT / "workspaces/quant/scripts",
+    ):
+        for path in sorted(directory.glob("test_*.py")):
+            try:
+                tree = ast.parse(path.read_text(), filename=str(path))
+            except (OSError, SyntaxError) as exc:
+                errors.append(f"{path.relative_to(ROOT)}: {exc}")
+                continue
+            discoverable = any(
+                isinstance(node, ast.ClassDef)
+                and any(
+                    (isinstance(base, ast.Attribute) and base.attr == "TestCase")
+                    or (isinstance(base, ast.Name) and base.id == "TestCase")
+                    for base in node.bases
+                )
+                for node in tree.body
+            )
+            if not discoverable:
+                errors.append(
+                    f"{path.relative_to(ROOT)} has no unittest.TestCase; "
+                    "unittest discover would run zero assertions"
+                )
+    return {
+        "name": "test-discovery-contract",
+        "ok": not errors,
+        "exit_code": 0 if not errors else 1,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "detail": "ok" if not errors else "; ".join(errors),
+        "parsed": None,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="run the 64 high-value guardrail/Quant tests instead of all unit tests",
+        help="run the high-value guardrail subset instead of all trading unit tests",
     )
     parser.add_argument("--json", action="store_true", help="emit only the final JSON report")
     args = parser.parse_args()
@@ -97,6 +136,7 @@ def main() -> int:
     shell_files = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "scripts").glob("*.sh"))
     checks = [
         _config_contract(),
+        _test_discovery_contract(),
         _run(
             "python-syntax",
             [py, "-m", "compileall", "-q", "scripts", "workspaces/trading-intel/scripts",
@@ -120,6 +160,12 @@ def main() -> int:
              "-p", "test_*.py"],
         ))
     checks.extend([
+        _run(
+            "trading-day-scenarios",
+            [py, "scripts/autotrade-scenario-replay.py"],
+            timeout=120,
+            json_ok=True,
+        ),
         _run(
             "quant-unit-suite",
             [py, "-m", "unittest", "discover", "-s", "workspaces/quant/scripts",

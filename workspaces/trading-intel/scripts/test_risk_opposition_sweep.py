@@ -15,19 +15,11 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+import unittest
 from datetime import datetime, timezone
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/risk/scripts")
 import gate_risk_intents as risk_gate  # noqa: E402
-
-PASS, FAIL = [], []
-
-
-def check(name: str, cond: bool, detail: str = "") -> None:
-    (PASS if cond else FAIL).append(name)
-    suffix = f" :: {detail}" if detail else ""
-    print(("  PASS " if cond else "  FAIL ") + name + suffix)
-
 
 def setup_db(include_negative_evidence: bool = False) -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
@@ -144,58 +136,57 @@ def make_intent(action: str = "open") -> dict:
     }
 
 
-def main() -> int:
-    same_day = datetime.now(timezone.utc).date().isoformat()
-    adverse_news = [
-        {
-            "date": same_day,
-            "title": "UBS cuts Paychex stock price target to $98 on revenue growth concerns By Investing.com",
-            "source": "Investing.com",
-            "url": "https://www.investing.com/news/analyst-ratings/ubs-cuts-paychex-stock-price-target-to-98-on-revenue-growth-concerns-93CH-4760769",
-            "sentiment": 0.34,
-        },
-        {
-            "date": same_day,
-            "title": "JPMorgan Adjusts Price Target on Paychex to $105 From $100, Maintains Underweight Rating",
-            "source": "Market Screener",
-            "url": "https://www.marketscreener.com/news/jpmorgan-adjusts-price-target-on-paychex-to-105-from-100-maintains-underweight-rating-ce7f5fd8dd8cf325",
-            "sentiment": 0.07,
-        },
-    ]
+class RiskOppositionSweepTests(unittest.TestCase):
+    def setUp(self) -> None:
+        same_day = datetime.now(timezone.utc).date().isoformat()
+        self.adverse_news = [
+            {
+                "date": same_day,
+                "title": "UBS cuts Paychex stock price target to $98 on revenue growth concerns By Investing.com",
+                "source": "Investing.com",
+                "url": "https://www.investing.com/news/analyst-ratings/ubs-cuts-paychex-stock-price-target-to-98-on-revenue-growth-concerns-93CH-4760769",
+                "sentiment": 0.34,
+            },
+            {
+                "date": same_day,
+                "title": "JPMorgan Adjusts Price Target on Paychex to $105 From $100, Maintains Underweight Rating",
+                "source": "Market Screener",
+                "url": "https://www.marketscreener.com/news/jpmorgan-adjusts-price-target-on-paychex-to-105-from-100-maintains-underweight-rating-ce7f5fd8dd8cf325",
+                "sentiment": 0.07,
+            },
+        ]
+        self.original_recent_news = risk_gate.eventregistry.recent_news
+        risk_gate.eventregistry.recent_news = lambda *args, **kwargs: self.adverse_news
 
-    orig_recent_news = risk_gate.eventregistry.recent_news
-    risk_gate.eventregistry.recent_news = lambda *args, **kwargs: adverse_news
-    try:
+    def tearDown(self) -> None:
+        risk_gate.eventregistry.recent_news = self.original_recent_news
+
+    def test_entry_blocks_on_unresolved_same_day_adverse_flow(self) -> None:
         conn = setup_db(include_negative_evidence=False)
-        decision = risk_gate.gate(conn, make_intent("open"), equity=100000.0, day_pl=0.0, regime="neutral")
-        check(
-            "PAYX-like entry blocks on unresolved same-day adverse flow",
-            decision["verdict"] == "blocked" and "same_day_opposition" in decision["breaches"],
-            decision["reason"],
-        )
+        try:
+            decision = risk_gate.gate(conn, make_intent("open"), equity=100000.0, day_pl=0.0, regime="neutral")
+            self.assertEqual(decision["verdict"], "blocked", decision["reason"])
+            self.assertIn("same_day_opposition", decision["breaches"])
+        finally:
+            conn.close()
 
-        decision = risk_gate.gate(conn, make_intent("trim"), equity=100000.0, day_pl=0.0, regime="neutral")
-        check(
-            "trim bypasses opposition sweep",
-            decision["verdict"] == "approved" and decision["approved_qty"] == 12,
-            decision["reason"],
-        )
+    def test_trim_bypasses_opposition_sweep(self) -> None:
+        conn = setup_db(include_negative_evidence=False)
+        try:
+            decision = risk_gate.gate(conn, make_intent("trim"), equity=100000.0, day_pl=0.0, regime="neutral")
+            self.assertEqual(decision["verdict"], "approved", decision["reason"])
+            self.assertEqual(decision["approved_qty"], 12)
+        finally:
+            conn.close()
 
+    def test_entry_passes_when_adverse_articles_are_in_evidence(self) -> None:
         conn2 = setup_db(include_negative_evidence=True)
-        decision = risk_gate.gate(conn2, make_intent("open"), equity=100000.0, day_pl=0.0, regime="neutral")
-        check(
-            "entry passes when adverse article is already reflected in evidence",
-            decision["verdict"] != "blocked" or "same_day_opposition" not in decision["breaches"],
-            decision["reason"],
-        )
-    finally:
-        risk_gate.eventregistry.recent_news = orig_recent_news
-
-    print(
-        f"\n{'GREEN' if not FAIL else 'RED'}: {len(PASS)} passed, {len(FAIL)} failed"
-    )
-    return 1 if FAIL else 0
+        try:
+            decision = risk_gate.gate(conn2, make_intent("open"), equity=100000.0, day_pl=0.0, regime="neutral")
+            self.assertNotIn("same_day_opposition", decision["breaches"], decision["reason"])
+        finally:
+            conn2.close()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    unittest.main()

@@ -19,7 +19,7 @@ Beat the S&P 500 in the owned internal paper account by exploiting slow market d
 5. Bet small on new ideas. Bet larger as independent evidence confirms. Stay liquid.
 6. Cash is a real competitor on every marginal trade.
 7. Critic challenges are first-class. Every challenge requires a written response in the audit log before execution.
-8. Archivist is how the system improves. Patterns it extracts feed the other five agents.
+8. Archivist is how the system improves. Patterns it extracts feed the other desk agents.
 
 ## 3. Allowed expression vehicles
 
