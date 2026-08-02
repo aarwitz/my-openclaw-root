@@ -130,6 +130,65 @@ def main() -> int:
                                  "line": line, "ref": head[-1] if head else "?",
                                  "detail": f"revalidate-by {m.group(1)} has passed — re-verify or revise the claim"})
 
+    # Semantic architecture drift: these values have repeatedly remained stale
+    # while code and migrations advanced, causing the chat agent to state old
+    # limits and topology as current fact.
+    architecture = ROOT / "SYSTEM_ARCHITECTURE.md"
+    if architecture.exists():
+        arch_text = architecture.read_text(errors="replace")
+        migrations = sorted((TI / "sql" / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
+        latest_migration = migrations[-1].name[:4] if migrations else None
+        migration_marker = re.search(r"migrations:\*\* through ([0-9]{4})", arch_text)
+        if latest_migration and (
+            not migration_marker or migration_marker.group(1) != latest_migration
+        ):
+            findings.append({
+                "check": "architecture-migration-drift",
+                "doc": "SYSTEM_ARCHITECTURE.md",
+                "ref": migration_marker.group(1) if migration_marker else "missing",
+                "detail": f"canonical marker must match latest migration {latest_migration}",
+            })
+
+        risk_source = (ROOT / "workspaces" / "risk" / "scripts" / "gate_risk_intents.py")
+        risk_text = risk_source.read_text(errors="replace") if risk_source.exists() else ""
+        code_cap = re.search(r"^MAX_POSITIONS\s*=\s*([0-9]+)", risk_text, re.M)
+        doc_cap = re.search(r"Concurrent names:\*\* [^0-9]*([0-9]+)", arch_text)
+        if code_cap and (not doc_cap or doc_cap.group(1) != code_cap.group(1)):
+            findings.append({
+                "check": "architecture-risk-cap-drift",
+                "doc": "SYSTEM_ARCHITECTURE.md",
+                "ref": doc_cap.group(1) if doc_cap else "missing",
+                "detail": f"concurrent-name cap must match risk gate {code_cap.group(1)}",
+            })
+
+        required_shape = (
+            "System shape — canonical short answer",
+            "These are **not one unified graph**",
+            "do not directly contain thesis, prediction",
+        )
+        for phrase in required_shape:
+            if phrase not in arch_text:
+                findings.append({
+                    "check": "architecture-shape-contract",
+                    "doc": "SYSTEM_ARCHITECTURE.md",
+                    "ref": phrase,
+                    "detail": "canonical short/graph boundary contract is missing",
+                })
+
+        topology = re.search(r"\*\*Topology:\*\* (v[0-9]+)", arch_text)
+        identity = ROOT / "workspaces" / "overseer" / "IDENTITY.md"
+        identity_text = identity.read_text(errors="replace") if identity.exists() else ""
+        identity_topology = re.search(r"Topology version: (v[0-9]+)", identity_text)
+        if topology and (
+            not identity_topology or identity_topology.group(1) != topology.group(1)
+        ):
+            findings.append({
+                "check": "architecture-topology-drift",
+                "doc": "workspaces/overseer/IDENTITY.md",
+                "ref": identity_topology.group(1) if identity_topology else "missing",
+                "detail": f"overseer identity must match canonical {topology.group(1)}",
+            })
+
     out = {"ok": not findings, "as_of": date.today().isoformat(), "n": len(findings), "findings": findings}
     print(json.dumps(out, indent=2))
     for f in findings:

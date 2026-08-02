@@ -1,10 +1,10 @@
 # Trading Intelligence — Doc Index
 
 Status: doc map for the OpenClaw AutoTrade desk (topology v5).
-Effective: 2026-05-28; updated 2026-07-30.
+Effective: 2026-05-28; updated 2026-08-02.
 
 > **Canonical authority:** `/home/aaron/.openclaw/SYSTEM_ARCHITECTURE.md` (topology
-> v5, migrations through 0022) is the single source of truth — including the **valuation
+> v5, migrations through 0025) is the single source of truth — including the **valuation
 > engine** (§6.9, `valuations` table, `valuation.py` / `connectors/edgar.py`) and the
 > **covariance/factor risk model** (§7.1, `portfolio_risk` table, `risk_model.py`).
 > The docs below are historical detail; where they disagree, the canonical doc wins.

@@ -7,7 +7,7 @@
 > `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
 > to `archive/docs-retired-20260702/`.
 >
-> **Topology:** v5 · **DB schema/migrations:** through 0022 · **Last reconciled:** 2026-07-30
+> **Topology:** v5 · **DB schema/migrations:** through 0025 · **Last reconciled:** 2026-08-02
 
 ---
 
@@ -18,6 +18,40 @@ specialised LLM agents runs an institutional-style research → decision →
 execution → learning loop against an owned SQLite **paper simulator**, with the explicit
 goals of (a) beating the S&P on a risk-adjusted basis and (b) making the agents'
 decision process **visible** in the AutoTrade web app and over Telegram.
+
+### 1.1 System shape — canonical short answer
+
+Point-in-time prices, filings, fundamentals, macro, and news support falsifiable
+ticker theses. The relational thesis engine records each thesis, its evidence,
+falsifiers, valuation, substantive Critic review, forecast, and outcome lineage.
+Separate offline evidence graphs provide association and retrieval context, but
+never authorize risk. Deterministic code turns only reviewed theses into
+market-relative probability/return forecasts, Kelly-based size suggestions,
+portfolio-constrained intents, and internal-simulator fills. Realized outcomes
+grade forecasts and every selection stage, update calibration, and surface
+human-gated rule or code changes.
+
+That paragraph is the default answer to a concise architecture question. Do not
+replace it with the agent roster, a stage inventory, or volatile status. Current
+positions, performance, edge verdict, and health must be read from the runtime
+snapshot and health reports at answer time.
+
+### 1.2 Three distinct research structures
+
+- **Thesis engine (live SQLite, relational):** canonical live thesis per ticker,
+  evidence, Critic state, predictions, intents, fills, and realized outcomes.
+- **Quant knowledge graph (offline analytics SQLite):** ticker, sector,
+  mechanism, and regime nodes plus correlation, co-mention, theme, redundancy,
+  and regime-conditioning edges.
+- **Evidence graph (offline analytics SQLite):** market states, events,
+  catalyst types, policies, themes, tickers, and regimes; edges are explicitly
+  `association_validated`, `hypothesis`, or `deprecated`.
+
+These are **not one unified graph**. Episodes remain a separate point-in-time
+FTS library. The current graphs do not directly contain thesis, prediction,
+selection-outcome, or episode nodes; that lineage remains relational. Never say
+the graph is “the memory for the theses” or that it connects forecasts to
+outcomes unless those edges are actually implemented and verified.
 
 Two design commitments shape everything below:
 
@@ -110,9 +144,10 @@ decision) are separate and individually visible.
 
 ## 4. Data store
 
-Single SQLite database: `~/.openclaw/state/trading-intel.sqlite` (WAL mode),
-**schema v8**. Source-of-truth DDL: `workspaces/trading-intel/sql/schema.sql`;
-numbered migrations under `workspaces/trading-intel/sql/migrations/`.
+Single SQLite database: `~/.openclaw/state/trading-intel.sqlite` (WAL mode).
+`sql/schema.sql` contains the baseline schema (its world-model block originated
+as schema v8); the live contract is that baseline plus numbered migrations
+through **0025** under `workspaces/trading-intel/sql/migrations/`.
 
 Core pipeline tables: `hypotheses`, `hypothesis_evidence`, `regime`,
 `critic_reviews`, `expression_candidates`, `trade_intents`, `risk_reviews`,
@@ -138,6 +173,11 @@ from the live store so the empirical foundation can be (re)built without touchin
 
 `~/.openclaw/scripts/trader-pass-deterministic.sh` runs the deterministic
 prefix of every pass and emits one consolidated JSON. Stage order:
+
+Research intake and substantive Critic review are the outer thesis funnel, not
+steps this routine manufactures on every pass. The routine below processes the
+canonical state already present; `critic_baseline` is deterministic triage only,
+and `predict` ignores everything except substantively reviewed `ready` theses.
 
 ```
 classify_regime          quant/scripts/classify_regime.py      → regime row
@@ -354,7 +394,7 @@ The mandatory, final checkpoint before any order. It consumes intents in
 - **Per-name concentration:** ≤ 10% of equity in any one name (abs — shorts too).
 - **Gross exposure:** ≤ 60% of equity deployed (open positions + pending intents,
   abs-summed; a short consumes budget like a long, never netted).
-- **Concurrent names:** ≤ 24 (8→12 per D46, 12→24 per rp-e907106afbfb49a4aff1).
+- **Concurrent names:** ≤ 48 (24→48 by operator direction on 2026-07-07).
 - **Correlation-cluster cap (§7.1):** ≤ 25% of equity across a cluster of names
   correlated ≥ 0.70 — the "eight names, one bet" guard. Best-effort via the risk
   model; on a data gap it is skipped (it can only *tighten*, never loosen).
@@ -568,7 +608,7 @@ and a gated proposal; a single-script p-value cannot promote a mechanism.
 
 ---
 
-## 11b. Current state (2026-07-30) — evidence is quarantined until it earns trust
+## 11b. Current state (2026-08-02) — evidence is quarantined until it earns trust
 
 **Data backbone.** Massive is the primary split-adjusted price, snapshot, and
 news source. FMP supplies deeper/delisted history and fundamentals; FRED
@@ -577,11 +617,18 @@ ledger is the only broker/account surface. Scheduled feature refreshes bypass
 the normal intraday daily-bar cache and always include open positions plus
 recent/live hypothesis tickers in addition to the ranked discovery universe.
 
-**Robust replay verdict: NO EDGE.** The 1,542-name replay collapses same-entry-
+**Robust live verdict: NO EDGE.** The 1,542-name replay collapses same-entry-
 date stocks into portfolios, applies HAC inference, requires at least 30 entry
 dates and 20 names, includes costs, and controls false discovery. Zero
 mechanisms survived. All 100 live mechanism records are deprecated; no new-risk
 intent may be authored from them.
+
+The 2026-08-02 development replay found one Bonferroni-significant
+cross-sectional research artifact (`xs_filing_delta_hi`, 21 sessions, +1.489%
+mean market-relative spread across 48 entry dates). It has no per-name hit-rate
+posterior and comes from the explicitly reused development holdout. It is
+therefore **not live-integration eligible**, does not change the NO_EDGE verdict,
+and cannot authorize or size a trade.
 
 Evidence has three operational tiers:
 
@@ -595,7 +642,7 @@ Evidence has three operational tiers:
    posteriors. One forecast contributes at most one total unit of learning
    credit across all linked hypotheses.
 
-`config/evaluation_policy.json` labels the reused 2020 holdout as development
+`workspaces/trading-intel/config/evaluation_policy.json` labels the reused 2020 holdout as development
 only and locks a forward shadow evaluation beginning 2026-08-03 for at least 60
 sessions. No production edge claim is permitted before it completes.
 

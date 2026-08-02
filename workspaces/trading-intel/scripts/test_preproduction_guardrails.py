@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import io
 import importlib.util
 import json
 import sqlite3
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -35,6 +37,8 @@ import write_postmortems  # noqa: E402
 import worldmodel  # noqa: E402
 import symbol_lifecycle  # noqa: E402
 import mechanism_backtest  # noqa: E402
+import mechanism_correlation  # noqa: E402
+import integrate_calibrated  # noqa: E402
 import causal_graph  # noqa: E402
 import feature_store  # noqa: E402
 import valuation  # noqa: E402
@@ -309,6 +313,49 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIsNone(promote_mechanisms.posterior(None, 1000))
         self.assertAlmostEqual(promote_mechanisms.posterior(0.50, 1000), 0.50, places=3)
         self.assertGreater(promote_mechanisms.posterior(0.60, 1000), 0.58)
+
+    def test_correlation_report_accepts_missing_probability_posterior(self) -> None:
+        cells = [{
+            "id": "xs_filing_delta_hi",
+            "horizon": "month_21d",
+            "direction": "long",
+            "conds": [["filing_delta", "hi", 0.2]],
+            "net_alpha": 1.489,
+            "post": None,
+        }]
+        clusters = {
+            ("month_21d", "long"): [{"cid": 0, "members": [0], "size": 1}]
+        }
+        out = io.StringIO()
+        with redirect_stdout(out):
+            mechanism_correlation._report(
+                cells, clusters, {0: (0, 1, 1.0)},
+                {"xs_filing_delta_hi": {1, 2}}, 1.0, 1, 2,
+            )
+        self.assertIn("post=     -", out.getvalue())
+        self.assertIn("net_alpha= 1.489%", out.getvalue())
+
+    def test_development_cross_sectional_artifact_is_not_live_eligible(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE discovered_mechanisms(evaluation_label TEXT);
+            INSERT INTO discovered_mechanisms VALUES('development_reused_holdout');
+            CREATE TABLE calibrated_mechanisms(
+              id TEXT, source TEXT, bonf_sig INT, posterior_mean REAL,
+              net_alpha_pct REAL
+            );
+            INSERT INTO calibrated_mechanisms
+            VALUES('xs_filing_delta_hi','cross',1,NULL,1.489);
+            """
+        )
+        report = integrate_calibrated.integration_eligibility(conn)
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["calibrated_count"], 1)
+        self.assertEqual(report["eligible_survivors"], [])
+        self.assertIn("development/reused holdout provenance", report["blockers"])
+        conn.close()
 
     def test_backtest_inference_uses_date_clusters_and_hac(self) -> None:
         mean, p_value = mechanism_backtest._hac_mean_p(
@@ -704,6 +751,15 @@ class SignalSafetyTests(unittest.TestCase):
             else:
                 self.assertIn("Do not spawn researcher", message)
 
+    def test_data_scout_cannot_dirty_source_control_or_create_proposals(self) -> None:
+        jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
+        scout = next(job for job in jobs if job.get("name") == "data-scout-monthly")
+        message = str((scout.get("payload") or {}).get("message", ""))
+        self.assertIn("no repository or queue writes", message)
+        self.assertIn("Do not edit DATA_SOURCES.md", message)
+        self.assertIn("no persistent proposal", message)
+        self.assertNotIn("Append a dated 'Scout log'", message)
+
     def test_live_integrator_has_no_wipe_flag_and_requires_robust_survivors(self) -> None:
         source = (
             ROOT / "workspaces/trading-intel/scripts/integrate_calibrated.py"
@@ -711,6 +767,38 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertNotIn('add_argument("--reset"', source)
         self.assertNotIn('DELETE FROM mechanisms"', source)
         self.assertIn("bonf_sig=1", source)
+
+    def test_weekly_rediscovery_is_analytics_only_and_creates_no_backup(self) -> None:
+        source = (ROOT / "scripts/learning-rediscovery.sh").read_text()
+        self.assertNotIn("PRE-REDISCOVERY", source)
+        self.assertNotIn('run "backup db"', source)
+        self.assertNotIn('run "integrate"', source)
+        self.assertIn('integrate_calibrated.py" --check-only', source)
+        self.assertIn("live mechanism ledger unchanged", source)
+
+    def test_canonical_architecture_matches_live_contract_boundaries(self) -> None:
+        architecture = (ROOT / "SYSTEM_ARCHITECTURE.md").read_text()
+        risk_source = (
+            ROOT / "workspaces/risk/scripts/gate_risk_intents.py"
+        ).read_text()
+        self.assertIn("migrations:** through 0025", architecture)
+        self.assertIn("Concurrent names:** ≤ 48", architecture)
+        self.assertIn("MAX_POSITIONS = 48", risk_source)
+        self.assertIn("These are **not one unified graph**", architecture)
+        self.assertIn(
+            "do not directly contain thesis, prediction,", architecture
+        )
+        overseer = (ROOT / "workspaces/overseer/AGENTS.md").read_text()
+        self.assertIn("“Very concise” means", overseer)
+        self.assertIn("at most 100 words", overseer)
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        telegram = config["channels"]["telegram"]
+        topic_prompt = telegram["groups"]["-1003846579956"]["topics"]["641"]["systemPrompt"]
+        self.assertIn("answer in <=100 words and stop", topic_prompt)
+        self.assertNotIn(
+            "researcher -> quant -> critic -> trader -> risk -> executor",
+            topic_prompt,
+        )
 
     def test_canonical_connection_and_health_enforce_foreign_keys(self) -> None:
         db_helper = (

@@ -32,7 +32,12 @@ incident postmortems) need no tag.
   degrades to "empty success" is a guard that cannot fire. **Operator decision needed:
   top up X API credits (restores the #1 feature) or deliberately retire the family** —
   ApeWisdom (Reddit) is the free partial substitute now collecting 4x/day (D60).
-- revalidate-by: 2026-08-01 (confirm intake alive after credits decision + next month boundary)
+- **Revalidated 2026-08-02:** the feature store now contains 96,248 rows each
+  for `x_mention_vol_log` and `x_mention_vol_z`, knowable through 2026-07-30,
+  so intake did resume well past the July-1 failure. The latest point-in-time
+  ranker still measures `x_mention_vol_z` coverage-era IC at 0.0338. The
+  all-skipped fatal guard remains the relevant regression control.
+- revalidate-by: 2026-09-01 (confirm the next billing boundary stays live)
 
 ## 2026-07-15 (pm) — the placeholder disease came back, because a cutover makes healthy organs vestigial
 

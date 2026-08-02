@@ -130,6 +130,18 @@ def jaccard(a: set, b: set) -> float:
     return inter / (len(a) + len(b) - inter)
 
 
+def _fmt_optional(value, width=6, precision=3):
+    """Format nullable analytics without turning an absent estimate into zero.
+
+    Cross-sectional expectancy mechanisms intentionally have no per-name hit
+    rate or probability posterior.  ``None`` therefore means "not measured",
+    not failure and not 0.0.
+    """
+    if value is None:
+        return f"{'-':>{width}}"
+    return f"{float(value):>{width}.{precision}f}"
+
+
 def main():
     t_start = time.time()
     conn = sqlite3.connect(FEAT_DB, timeout=120.0)
@@ -283,8 +295,9 @@ def _report(cells, group_clusters, cell_cluster, firing, effective_total, nseen,
                 c = cells[ci]
                 fires = len(firing[c["id"]])
                 lead = "  *top*" if rank == 0 else "       "
-                print(f"   {lead} {c['id']:<40} net_alpha={c['net_alpha']:>6}%  "
-                      f"post={c['post']:<6}  fires={fires:>5}")
+                print(f"   {lead} {c['id']:<40} "
+                      f"net_alpha={_fmt_optional(c['net_alpha'])}%  "
+                      f"post={_fmt_optional(c['post'], precision=4)}  fires={fires:>5}")
 
     # most-over-counted themes (largest clusters across all groups)
     print("\n" + "-" * 78)

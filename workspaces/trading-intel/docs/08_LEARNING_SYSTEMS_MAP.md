@@ -1,6 +1,6 @@
 # 08 — The Learning Systems Map
 
-Status: active. Reconciled 2026-07-30. This is the one-page answer. When a new
+Status: active. Reconciled 2026-08-02. This is the one-page answer. When a new
 learning mechanism ships, ADD IT HERE (doc-lint's Sunday pass + this header are the reminder).
 
 The design has **two speeds** (SYSTEM_ARCHITECTURE §learning): *fast/autonomous* loops move
@@ -157,7 +157,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 
 ## #9 Institutional memory — *what the humans + LLMs remember*
 
-- **DECISION_LOG.md** (through D89): every architectural decision, why, approver. **FINDINGS.md**:
+- **DECISION_LOG.md** (through D109): every architectural decision, why, approver. **FINDINGS.md**:
   the lab notebook — dated claims with `revalidate-by` expiry so quantitative beliefs can't
   silently rot into canon. **Market debriefs:** the daily what-moved-and-why narrative.
   **Evidence graph** (historical table name `causal_edges`, rebuilt nightly):
@@ -165,6 +165,10 @@ can see** — that's why the observability organs (#8) exist alongside the learn
   attribution, and co-mention links are `hypothesis`. Correlation and backtests
   are never narrated as causal identification, and corroboration counts unique
   evidence rather than rebuilds.
+- The graphs are not the thesis/prediction memory. Thesis, forecast,
+  selection-outcome, and fill lineage remains relational in the live database;
+  episodes remain a separate FTS library. No current graph node type represents
+  those records directly.
 - Weekly: archivist retrospective (hit-rate/slippage/lessons) + Sunday audit synthesis.
 
 ---

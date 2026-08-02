@@ -70,6 +70,42 @@ def tokens(mid):
     return ("market signal", "outperformance")
 
 
+def integration_eligibility(cal: sqlite3.Connection) -> dict:
+    """Return the source-controlled live-integration gate without mutating state."""
+    labels = {
+        str(r[0] or "")
+        for r in cal.execute(
+            "SELECT DISTINCT evaluation_label FROM discovered_mechanisms"
+        )
+    }
+    calibrated_count = cal.execute(
+        "SELECT COUNT(*) FROM calibrated_mechanisms"
+    ).fetchone()[0]
+    survivors = [dict(r) for r in cal.execute(
+        "SELECT * FROM calibrated_mechanisms "
+        "WHERE posterior_mean IS NOT NULL AND source != 'cross' AND bonf_sig=1 "
+        "ORDER BY net_alpha_pct DESC"
+    )]
+    development_artifact = any(
+        token in label.lower()
+        for label in labels
+        for token in ("development", "reused", "smoke")
+    )
+    blockers = []
+    if development_artifact:
+        blockers.append("development/reused holdout provenance")
+    if not survivors:
+        blockers.append("zero Bonferroni survivors with a measured probability posterior")
+    return {
+        "eligible": not blockers,
+        "calibrated_count": calibrated_count,
+        "eligible_survivors": survivors,
+        "evaluation_labels": sorted(labels),
+        "development_artifact": development_artifact,
+        "blockers": blockers,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -77,31 +113,34 @@ def main():
         action="store_true",
         help="explicit fail-closed quarantine: deprecate every live mechanism while preserving history",
     )
+    ap.add_argument(
+        "--check-only",
+        action="store_true",
+        help="report live-integration eligibility without writing the live database",
+    )
     ap.add_argument("--reason", default="", help="required rationale for --deprecate-all")
     a = ap.parse_args()
+    if a.check_only and a.deprecate_all:
+        raise SystemExit("--check-only and --deprecate-all are mutually exclusive")
     if a.deprecate_all and len(a.reason.strip()) < 20:
         raise SystemExit("--deprecate-all requires a specific --reason (>=20 characters)")
 
     cal = sqlite3.connect(FEAT)
     cal.row_factory = sqlite3.Row
-    labels = {
-        str(r[0] or "")
-        for r in cal.execute(
-            "SELECT DISTINCT evaluation_label FROM discovered_mechanisms"
-        )
-    }
-    survivors = [dict(r) for r in cal.execute(
-        "SELECT * FROM calibrated_mechanisms "
-        "WHERE posterior_mean IS NOT NULL AND source != 'cross' AND bonf_sig=1 "
-        "ORDER BY net_alpha_pct DESC"
-    )]
+    eligibility = integration_eligibility(cal)
+    survivors = eligibility["eligible_survivors"]
     cal.close()
-    development_artifact = any(
-        token in label.lower()
-        for label in labels
-        for token in ("development", "reused", "smoke")
-    )
-    if not a.deprecate_all and development_artifact:
+    if a.check_only:
+        verdict = "ELIGIBLE" if eligibility["eligible"] else "BLOCKED"
+        print(f"LIVE INTEGRATION ELIGIBILITY: {verdict}")
+        print(f"  analytical survivors: {eligibility['calibrated_count']}")
+        print(f"  live-eligible survivors: {len(survivors)}")
+        print(f"  evaluation labels: {eligibility['evaluation_labels']}")
+        if eligibility["blockers"]:
+            print("  blockers: " + "; ".join(eligibility["blockers"]))
+        print("  live mechanism ledger: unchanged")
+        return
+    if not a.deprecate_all and eligibility["development_artifact"]:
         raise SystemExit(
             "refusing live integration from a development/reused holdout artifact; "
             "complete the locked forward evaluation"
