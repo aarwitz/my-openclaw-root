@@ -7,7 +7,7 @@ Emits JSON + writes an audit row. Categorises issues by severity.
 Checks:
   - schema_version meets the production baseline
   - actor_check is v2 (Phase A migration applied)
-  - regime row exists and is fresh (<= 24h)
+  - regime row exists and has missed no completed exchange session
   - regime not degraded for >24h
   - at least one cron job enabled
   - latest critical host-script runs succeeded
@@ -35,12 +35,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from developer_db import audit, connect, emit, now_iso  # noqa: E402
 from connectors.marketdata import market_clock  # noqa: E402
+from integrity_check import completed_sessions_since  # noqa: E402
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import backend  # noqa: E402  (adapter, D52)
 
 EXPECTED_SCHEMA_VERSION = 12
-REGIME_FRESH_HOURS = 24
 FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 MIN_POST_CUTOFF_CASES = 30
 MIN_NEGATIVE_CONTROL_CASES = 60
@@ -91,10 +91,10 @@ def run_checks(conn) -> list[dict]:
     if not rg:
         issues.append({"severity": "red", "area": "regime", "detail": "no regime rows"})
     else:
-        age = _hours_since(rg["determined_at"])
-        if age is None or age > REGIME_FRESH_HOURS:
+        missed_sessions = completed_sessions_since(rg["determined_at"])
+        if missed_sessions > 0:
             issues.append({"severity": "yellow", "area": "regime",
-                           "detail": f"regime stale: age_h={age}"})
+                           "detail": f"regime stale: completed_sessions_missed={missed_sessions}"})
         try:
             sig = json.loads(rg["signals_json"] or "{}")
             if sig.get("fail_closed"):
@@ -198,12 +198,17 @@ def run_checks(conn) -> list[dict]:
     ).fetchone()
     if critic_backlog["n"]:
         age = _hours_since(critic_backlog["oldest"])
+        missed_sessions = (
+            None if critic_backlog["oldest"] is None
+            else completed_sessions_since(critic_backlog["oldest"])
+        )
         issues.append({
-            "severity": "red" if age is None or age > 36 else "yellow",
+            "severity": "red" if missed_sessions is None or missed_sessions > 0 else "yellow",
             "area": "critic_throughput",
             "detail": (
                 f"{critic_backlog['n']} scored hypotheses await substantive Critic review; "
-                f"oldest_age_h={None if age is None else round(age, 1)}"
+                f"oldest_age_h={None if age is None else round(age, 1)}, "
+                f"completed_sessions_missed={missed_sessions}"
             ),
         })
 
@@ -260,11 +265,17 @@ def run_checks(conn) -> list[dict]:
                 "detail": "selection-funnel attribution is empty",
             })
         else:
-            age = _hours_since(selection["latest"])
-            if age is None or age > 36:
+            missed_sessions = (
+                None if selection["latest"] is None
+                else completed_sessions_since(selection["latest"])
+            )
+            if missed_sessions is None or missed_sessions > 0:
                 issues.append({
                     "severity": "yellow", "area": "selection_attribution",
-                    "detail": f"selection-funnel attribution stale: age_h={age}",
+                    "detail": (
+                        "selection-funnel attribution stale: "
+                        f"completed_sessions_missed={missed_sessions}"
+                    ),
                 })
             if int(selection["blocked"] or 0):
                 samples = conn.execute(

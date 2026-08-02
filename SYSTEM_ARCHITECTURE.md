@@ -590,22 +590,25 @@ survivors earn weight. An LLM proposer (richer multi-feature hypotheses) slots i
 FDR-significant, net-positive-alpha survivors with their measured edge + a provisional world-model
 posterior. This is the **bootstrap source** for the live world model.
 
-**LIVE as of 2026-06-18.** `integrate_calibrated.py` (backup-first) reset the hindsight-biased learned
-state and replaced the live `mechanisms` table with the **31 calibrated survivors** (active; calibrated
-weight encoded in `prior_alpha/prior_beta` with a pseudo-count so `calibrate.py` preserves it and live
-outcomes update it additively). Backup: `~/.openclaw/backups/trading-intel-PRE-CALIBRATION-*.sqlite`.
+**Historical 2026-06-18 cutover (superseded by the current zero-active NO_EDGE
+state).** `integrate_calibrated.py` reset the hindsight-biased learned state and
+installed 31 then-calibrated survivors. That event remains provenance, not a
+statement that those mechanisms are active today.
 
 Three loops now close around it:
-- **Live learning loop (closed):** `archivist/scripts/grade_outcomes.py` grades matured predictions from
-  realized market-relative returns → sets `hypotheses.resolved_state` → `calibrate.py` folds per-mechanism
-  observations into the posteriors. Run via the governed `scripts/trader-learn-deterministic.sh`
-  (grade_outcomes → calibrate → extract_patterns); the live trading pass is untouched.
+- **Live learning loop (closed):** `resolve_prediction_backlog.py` grades each
+  matured prediction from its frozen direction, timestamp, and horizon, then
+  emits bounded mechanism observations; it does not mutate hypothesis lifecycle.
+  `calibrate.py` folds those observations into retained posteriors. The weekday
+  `learning-chain.sh` owns this deterministic sequence.
 - **Selection-funnel loop:** `developer/scripts/selection_funnel_attribution.py`
   grades every genuine candidate at fixed 5/21/63-session horizons versus SPY,
   including ideas rejected before intent/fill. It freezes each stage at the
   counterfactual entry close, reports entry-date-clustered inference, and labels
   zero stage flags as selection-or-latency—not causal rejection—until explicit
-  decision reasons are available. Matured outcomes are immutable.
+  decision reasons are available. A newest ticker close that arrives before the
+  bounded SPY cache is `pending`, not a data hole; historical missing benchmark
+  dates remain `data_blocked`. Matured outcomes are immutable.
 - **Deterministic activation:** `signal_scan.py` fires the calibrated mechanisms from each ticker's
   *current* features → ranked conviction (advisory; wiring into live intents is the next gated step).
 - **Mechanism discovery (ongoing):** `mechanism_backtest.py` (`gen_candidates` single-feature +

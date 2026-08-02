@@ -71,6 +71,28 @@ class SelectionFunnelTests(unittest.TestCase):
         self.assertEqual(outcome["exit_date"], "2026-07-10")
         self.assertAlmostEqual(outcome["directional_excess_pct"], -5.101005, places=6)
 
+    def test_fresh_ticker_close_waiting_on_spy_cache_is_pending_not_blocked(self) -> None:
+        outcome = sfa.counterfactual_outcome(
+            decision_at="2026-07-31T13:00:00Z",
+            direction="long",
+            sessions=5,
+            ticker_returns={"2026-07-31": 1.0},
+            spy_closes={"2026-07-30": 700.0},
+        )
+        self.assertEqual(outcome["status"], "pending")
+        self.assertEqual(outcome["reason"], "awaiting_spy_entry_close")
+
+    def test_historical_spy_entry_gap_remains_data_blocked(self) -> None:
+        outcome = sfa.counterfactual_outcome(
+            decision_at="2026-07-30T13:00:00Z",
+            direction="long",
+            sessions=5,
+            ticker_returns={"2026-07-30": 1.0},
+            spy_closes={"2026-07-29": 699.0, "2026-07-31": 701.0},
+        )
+        self.assertEqual(outcome["status"], "data_blocked")
+        self.assertEqual(outcome["reason"], "missing_spy_entry_close")
+
     def test_stage_snapshot_rejects_post_entry_critic_lookahead(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row

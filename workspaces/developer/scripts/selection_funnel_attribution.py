@@ -159,6 +159,17 @@ def counterfactual_outcome(
             "exit_date": None,
         }
     if entry not in spy_closes:
+        # A fresh ticker close can land before the bounded SPY cache refreshes.
+        # That is an unripe benchmark window, not a permanent data hole. Only
+        # call it blocked when SPY has already advanced beyond the entry date
+        # while that exact close remains absent.
+        if not spy_closes or entry > max(spy_closes):
+            return {
+                "status": "pending",
+                "reason": "awaiting_spy_entry_close",
+                "entry_date": entry,
+                "exit_date": None,
+            }
         return {
             "status": "data_blocked",
             "reason": "missing_spy_entry_close",
