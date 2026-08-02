@@ -189,6 +189,8 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
   → enforce_horizons     trader/scripts/enforce_horizons.py    → exit intents for theses past
                                                                wm.HORIZON_DAYS + 5td grace (D55)
   → enforce_stops        trader/scripts/enforce_stops.py       → exit intents for stop breaches (D53)
+  → enforce_inventory_lineage trader/scripts/enforce_inventory_lineage.py → full exits for
+                                                               legacy/invalid opening provenance
   → author_intents       trader/scripts/author_intents.py      → trade_intents (adaptive deployment
                                                                governor + fractional-Kelly, state=proposed)
   → gate_evaluator       trading-intel/scripts/gate_evaluator.py  proposed|critic_review → risk_review | blocked
@@ -235,6 +237,11 @@ backfilled with invented provenance. Positions demonstrably opened before the
 or freshly re-underwritten through the current gates; any incomplete post-cutover
 opening is a red integrity failure. The runtime snapshot exposes counts, gross
 value, per-position gaps, and the cutover under `inventoryLineage`.
+
+At an open exchange, `enforce_inventory_lineage.py` turns every legacy or
+invalid row into a full risk-reducing exit before new intent authoring. This
+creates a clean forward book; it does not grandfather old exposure or liquidate
+on a stale closed-market mark.
 
 Two 2026-07-02 refinements (schema v13, D47/D48 in `DECISION_LOG.md`):
 - **Risk-reducing intents (`exit`/`trim`) face only sanity gates** — never

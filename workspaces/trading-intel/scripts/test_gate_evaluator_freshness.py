@@ -196,6 +196,18 @@ class GateFreshnessTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_exit_cannot_be_trapped_by_sparse_legacy_rationale(self) -> None:
+        conn = setup_db(None)
+        try:
+            conn.execute("UPDATE hypotheses SET rationale_concise='' WHERE id='HYPO-1'")
+            conn.execute("UPDATE trade_intents SET action='exit' WHERE id='INTENT-1'")
+            result = ge.evaluate(conn, "INTENT-1")
+            explain = next(g for g in result["gates"] if g["name"] == "explainability")
+            self.assertTrue(explain["pass"], explain["detail"])
+            self.assertTrue(result["all_pass"], result["failed_gates"])
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

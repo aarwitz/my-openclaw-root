@@ -332,9 +332,13 @@ def evaluate(conn, intent_id: str) -> dict:
 
     # 6. explainability
     text = (hypo["rationale_concise"] if hypo and hypo["rationale_concise"] else "") or ""
-    ex_ok = len(text.strip()) >= MIN_RATIONALE_LEN
+    # Explanation quality governs taking risk, never releasing it. Historical
+    # placeholder/legacy theses may have sparse prose; making that a condition
+    # of liquidation silently traps precisely the least-trusted exposure.
+    ex_ok = risk_reducing or len(text.strip()) >= MIN_RATIONALE_LEN
     gates.append({"name": "explainability", "pass": ex_ok,
-                  "detail": f"rationale_len={len(text)} min={MIN_RATIONALE_LEN}"})
+                  "detail": f"rationale_len={len(text)} min={MIN_RATIONALE_LEN}"
+                            + (" (exempt: risk-reducing)" if risk_reducing else "")})
 
     # 7. size_sanity
     size = float(intent["size"] or 0)

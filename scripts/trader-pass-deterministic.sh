@@ -12,6 +12,7 @@ source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 #   4b. ml_evidence_track (advisory ranker trust ledger; no trading control)
 #   5. enforce_horizons (exit theses past wm horizon + grace — D55)
 #   5b. enforce_stops (D53 stop-rule enforcement)
+#   5c. enforce_inventory_lineage (D120 legacy/invalid exposure cleanup)
 #   6. author_intents (adaptive deployment governor + probabilistic sizing)
 #   7. gate_evaluator on every proposed/critic_review intent -> risk_review
 #   8. risk_gate (Risk agent caps size; risk_review -> approved|blocked)
@@ -117,7 +118,7 @@ run_step() {
     PIPELINE_RC=1
     PIPELINE_FAILURES+=("$name:$rc")
     case "$name" in
-      classify_regime|value_universe|hypothesis_hygiene|score_hypotheses|critic_baseline|predict|enforce_horizons|enforce_falsifiers|enforce_stops|author_intents|gate_evaluator|risk_gate|sim_integrity_pre|reconcile_preflight)
+      classify_regime|value_universe|hypothesis_hygiene|score_hypotheses|critic_baseline|predict|enforce_horizons|enforce_falsifiers|enforce_stops|enforce_inventory_lineage|author_intents|gate_evaluator|risk_gate|sim_integrity_pre|reconcile_preflight)
         EXECUTION_BLOCKERS+=("$name:$rc") ;;
     esac
   fi
@@ -187,6 +188,10 @@ if [[ "$TRADING_DAY" == "1" ]]; then
   # D57: falsifier tripwire — exits positions whose thesis tripwire has fired.
   run_step "enforce_falsifiers" 60 python3 workspaces/trader/scripts/enforce_falsifiers.py
   run_step "enforce_stops" 90 python3 workspaces/trader/scripts/enforce_stops.py
+  # D120: carrying pre-cutover exposure is not a loophole around the modern
+  # evidence stack. At an open market, flatten every legacy/invalid-lineage
+  # position through the normal risk-reducing path before considering new risk.
+  run_step "enforce_inventory_lineage" 90 python3 workspaces/trader/scripts/enforce_inventory_lineage.py
   run_step "author_intents" 60 python3 workspaces/trader/scripts/author_intents.py
   run_step "gate_evaluator" 60 python3 workspaces/trading-intel/scripts/gate_evaluator.py --all-proposed
   run_step "risk_gate" 90 python3 workspaces/risk/scripts/gate_risk_intents.py --all-pending
@@ -200,6 +205,7 @@ else
   printf ',\n  "enforce_horizons": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "enforce_falsifiers": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "enforce_stops": {"rc": 0, "skipped": "non-trading day"}'
+  printf ',\n  "enforce_inventory_lineage": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "author_intents": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "gate_evaluator": {"rc": 0, "skipped": "non-trading day"}'
   printf ',\n  "risk_gate": {"rc": 0, "skipped": "non-trading day"}'

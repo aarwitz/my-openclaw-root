@@ -87,11 +87,12 @@ def main() -> int:
         _run("regular-session", trading_day=True),
         _run("exchange-closed", trading_day=False),
         _run("critical-upstream-failure", trading_day=True, fail_steps=("classify_regime",)),
+        _run("inventory-lineage-failure", trading_day=True, fail_steps=("enforce_inventory_lineage",)),
         _run("ledger-divergence", trading_day=True, fail_steps=("reconcile_preflight",)),
         _run("advisory-stage-failure", trading_day=True, fail_steps=("ml_evidence_track",)),
     ]
 
-    regular, closed, upstream, ledger, advisory = cases
+    regular, closed, upstream, inventory, ledger, advisory = cases
     for case in cases:
         case["failures"] = []
         _assert(case, case["parse_error"] is None, case["parse_error"] or "JSON parse failed")
@@ -101,6 +102,14 @@ def main() -> int:
     _assert(regular, regular["exit_code"] == 0, "regular session must exit 0")
     _assert(regular, r.get("market_today", {}).get("trading_day") is True, "regular session clock branch wrong")
     _assert(regular, not r.get("execute_intent", {}).get("skipped"), "healthy session did not arm executor")
+    _assert(
+        regular, _stage_order(r, "enforce_stops", "enforce_inventory_lineage"),
+        "stop enforcement must precede inventory cleanup",
+    )
+    _assert(
+        regular, _stage_order(r, "enforce_inventory_lineage", "author_intents"),
+        "inventory cleanup must precede new authoring",
+    )
     _assert(regular, _stage_order(r, "risk_gate", "sim_integrity_pre"), "risk must precede ledger preflight")
     _assert(regular, _stage_order(r, "sim_integrity_pre", "reconcile_preflight"), "ledger integrity must precede reconcile preflight")
     _assert(regular, _stage_order(r, "reconcile_preflight", "execute_intent"), "preflight must precede execution")
@@ -111,11 +120,20 @@ def main() -> int:
     _assert(closed, r.get("market_today", {}).get("trading_day") is False, "closed-session branch wrong")
     _assert(closed, r.get("enforce_falsifiers", {}).get("skipped") == "non-trading day", "closed day ran falsifier exits")
     _assert(closed, r.get("enforce_stops", {}).get("skipped") == "non-trading day", "closed day ran stop exits")
+    _assert(
+        closed,
+        r.get("enforce_inventory_lineage", {}).get("skipped") == "non-trading day",
+        "closed day ran inventory exits",
+    )
     _assert(closed, r.get("author_intents", {}).get("skipped") == "non-trading day", "closed day authored risk")
     _assert(closed, r.get("execute_intent", {}).get("reason") == "non-trading day", "closed day executor reason wrong")
     _assert(closed, "reconcile" in r and "sim_mark" in r, "closed day omitted safe ledger maintenance")
 
-    for case, stage in ((upstream, "classify_regime"), (ledger, "reconcile_preflight")):
+    for case, stage in (
+        (upstream, "classify_regime"),
+        (inventory, "enforce_inventory_lineage"),
+        (ledger, "reconcile_preflight"),
+    ):
         r = case["report"]
         _assert(case, case["exit_code"] == 1, f"{stage} failure must fail the pass")
         blockers = r.get("execute_intent", {}).get("blockers", [])
