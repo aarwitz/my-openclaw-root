@@ -2,6 +2,13 @@
   "version": 1,
   "aliases": [
     {
+      "old": "BK",
+      "new": "BNY",
+      "effective_date": "2026-06-02",
+      "reason": "Bank of New York Mellon changed its ticker; desk repair D73 renamed the live position.",
+      "decision_ref": "DECISION_LOG.md#2026-07-28-bkbny-symbol-change-repair--unmarkable-position-tripwires"
+    },
+    {
       "old": "LAAC",
       "new": "LAR",
       "effective_date": "2025-01-24",

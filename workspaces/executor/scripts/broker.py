@@ -18,8 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 
 from connectors import massive as _massive  # noqa: E402  (data feed for the sim backend)
+import trading_policy  # noqa: E402
 
 
 class ConnectorError(RuntimeError):
@@ -54,6 +56,8 @@ def get_account() -> dict:
     for sym, pos in positions.items():
         px = pos.get("current_price") or pos.get("cost_basis") or 0.0
         equity += pos["qty"] * px
+    restricted = trading_policy.short_collateral(positions.values())
+    buying_power = trading_policy.deployable_cash(cash, restricted)
     row = conn.execute(
         "SELECT equity FROM book_equity WHERE book=? ORDER BY date DESC LIMIT 1 OFFSET 1",
         (DESK_BOOK,)).fetchone()
@@ -65,7 +69,8 @@ def get_account() -> dict:
         "portfolio_value": f"{equity:.2f}",
         "last_equity": f"{last_equity:.2f}",
         "cash": f"{cash:.2f}",
-        "buying_power": f"{cash:.2f}",
+        "buying_power": f"{buying_power:.2f}",
+        "short_collateral": f"{restricted:.2f}",
         "source": "sim",
     }
 

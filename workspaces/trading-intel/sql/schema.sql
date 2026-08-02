@@ -731,7 +731,20 @@ CREATE TABLE IF NOT EXISTS sim_cash_yield_events (
   cash_start   REAL NOT NULL,
   credit       REAL NOT NULL,
   applied_at   TEXT NOT NULL,
+  original_cash_start REAL,
+  original_credit REAL,
+  corrected_at TEXT,
+  correction_reason TEXT,
   UNIQUE(book, as_of_date)
+);
+
+CREATE TABLE IF NOT EXISTS sim_ledger_repairs (
+  id           TEXT PRIMARY KEY,
+  applied_at   TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  book         TEXT NOT NULL,
+  cash_delta   REAL NOT NULL,
+  details_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS book_return_attribution (
@@ -764,7 +777,13 @@ CREATE TABLE IF NOT EXISTS capital_efficiency_snapshots (
   usd_stale     REAL,
   usd_waiting   REAL,
   edge_rate     REAL,
-  loss_json     TEXT
+  loss_json     TEXT,
+  method        TEXT NOT NULL DEFAULT 'gross_restricted_v2',
+  ledger_cash   REAL,
+  short_collateral REAL,
+  gross_exposure REAL,
+  pct_cash_no_edge REAL,
+  usd_cash_no_edge REAL
 );
 
 CREATE TABLE IF NOT EXISTS ml_evidence_tracking (

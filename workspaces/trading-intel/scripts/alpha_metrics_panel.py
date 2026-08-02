@@ -20,8 +20,12 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+import trading_policy  # noqa: E402
 
 DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 HORIZON_DAYS_TD = {"intraday": 1, "swing_1_5d": 3, "position_1_4w": 15,
@@ -44,7 +48,29 @@ def _scalar(conn, sql, params=(), default=None):
 
 def section_book(conn) -> dict:
     eq = _scalar(conn, "SELECT equity FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1", default=0.0)
-    cash = _scalar(conn, "SELECT cash FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1", default=0.0)
+    ledger_cash = float(_scalar(
+        conn,
+        "SELECT cash FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1",
+        default=0.0,
+    ))
+    positions = [
+        {
+            "qty": float(row[0] or 0.0),
+            "current_price": None if row[1] is None else float(row[1]),
+            "cost_basis": float(row[2] or 0.0),
+        }
+        for row in conn.execute(
+            "SELECT qty,current_price,cost_basis FROM sim_positions "
+            "WHERE book='desk' AND state='open' AND qty!=0"
+        )
+    ]
+    short_collateral = trading_policy.short_collateral(positions)
+    cash = trading_policy.deployable_cash(ledger_cash, short_collateral)
+    gross_exposure = sum(
+        abs(float(position["qty"]))
+        * max(0.0, float(position["current_price"] or position["cost_basis"] or 0.0))
+        for position in positions
+    )
     attr = conn.execute(
         "SELECT date, trading_pl, cash_yield_pl, total_pl, trading_return_pct, "
         "cash_yield_return_pct, total_return_pct FROM book_return_attribution "
@@ -53,7 +79,10 @@ def section_book(conn) -> dict:
     return {
         "equity": round(float(eq), 2),
         "cash": round(float(cash), 2),
-        "deployed_pct": round((1 - float(cash) / float(eq)) * 100, 2) if eq else None,
+        "ledger_cash": round(ledger_cash, 2),
+        "short_collateral": round(short_collateral, 2),
+        "gross_exposure": round(gross_exposure, 2),
+        "deployed_pct": round(gross_exposure / float(eq) * 100, 2) if eq else None,
         "today": None if attr is None else {
             "date": attr[0],
             "trading_pl": round(float(attr[1]), 2),
@@ -132,15 +161,19 @@ def section_lifecycle(conn) -> dict:
 def section_bottlenecks(conn, trend_days: int) -> dict:
     try:
         latest = conn.execute(
-            "SELECT as_of, pct_deployed, usd_blocked, usd_idle, usd_stale, usd_waiting, loss_json "
-            "FROM capital_efficiency_snapshots ORDER BY as_of DESC LIMIT 1").fetchone()
+            "SELECT as_of, pct_deployed, usd_blocked, usd_idle, usd_stale, usd_waiting, "
+            "loss_json,usd_cash_no_edge "
+            "FROM capital_efficiency_snapshots WHERE method='gross_restricted_v2' "
+            "ORDER BY as_of DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:
         return {"available": False, "note": "capital_efficiency_snapshots missing — run capital_efficiency_audit.py"}
     if latest is None:
         return {"available": False}
     prior = conn.execute(
-        "SELECT as_of, pct_deployed, usd_blocked, usd_idle, usd_stale, usd_waiting "
-        "FROM capital_efficiency_snapshots WHERE as_of <= datetime('now', ?) "
+        "SELECT as_of, pct_deployed, usd_blocked, usd_idle, usd_stale, usd_waiting, "
+        "usd_cash_no_edge "
+        "FROM capital_efficiency_snapshots WHERE method='gross_restricted_v2' "
+        "AND as_of <= datetime('now', ?) "
         "ORDER BY as_of DESC LIMIT 1", (f"-{trend_days} day",)).fetchone()
     losses = json.loads(latest[6] or "{}")
     ranked = sorted(losses.items(), key=lambda kv: -(kv[1] or 0))
@@ -148,7 +181,10 @@ def section_bottlenecks(conn, trend_days: int) -> dict:
         "available": True,
         "as_of": latest[0],
         "pct_deployed": latest[1],
-        "capital_usd": {"blocked": latest[2], "idle": latest[3], "stale": latest[4], "waiting": latest[5]},
+        "capital_usd": {
+            "blocked": latest[2], "idle": latest[3], "stale": latest[4],
+            "waiting": latest[5], "cash_no_validated_edge": latest[7],
+        },
         "ranked_expected_loss_usd": [{"bottleneck": k, "usd": round(v, 2)} for k, v in ranked],
     }
     if prior and prior[0] != latest[0]:
@@ -159,6 +195,7 @@ def section_bottlenecks(conn, trend_days: int) -> dict:
             "usd_idle": round((latest[3] or 0) - (prior[3] or 0), 2),
             "usd_stale": round((latest[4] or 0) - (prior[4] or 0), 2),
             "usd_waiting": round((latest[5] or 0) - (prior[5] or 0), 2),
+            "usd_cash_no_validated_edge": round((latest[7] or 0) - (prior[6] or 0), 2),
         }
     return out
 
@@ -166,7 +203,12 @@ def section_bottlenecks(conn, trend_days: int) -> dict:
 def section_learning(conn) -> dict:
     """Learning-loop health: postmortem coverage, patterns, exit regret (D56)."""
     resolved = int(_scalar(conn, "SELECT COUNT(*) FROM hypotheses WHERE state='resolved'", default=0))
-    with_pm = int(_scalar(conn, "SELECT COUNT(DISTINCT hypothesis_id) FROM postmortems", default=0))
+    with_pm = int(_scalar(
+        conn,
+        "SELECT COUNT(DISTINCT pm.hypothesis_id) FROM postmortems pm "
+        "JOIN hypotheses h ON h.id=pm.hypothesis_id WHERE h.state='resolved'",
+        default=0,
+    ))
     patterns = [dict(zip(("pattern", "confidence"), r)) for r in conn.execute(
         "SELECT pattern, confidence FROM patterns ORDER BY created_at DESC LIMIT 5")]
     exit_lanes = {}
@@ -226,7 +268,15 @@ def render_text(panel: dict) -> str:
     L.append(f"ALPHA METRICS PANEL — {panel['as_of']}")
     L.append("")
     t = b.get("today") or {}
-    L.append(f"BOOK   equity ${b['equity']:,.0f}  cash ${b['cash']:,.0f}  deployed {b['deployed_pct']}%")
+    L.append(
+        f"BOOK   equity ${b['equity']:,.0f}  deployable cash ${b['cash']:,.0f}  "
+        f"gross deployed {b['deployed_pct']}%"
+    )
+    if b.get("short_collateral"):
+        L.append(
+            f"       ledger cash ${b['ledger_cash']:,.0f} includes "
+            f"${b['short_collateral']:,.0f} restricted short collateral"
+        )
     if t:
         L.append(f"       today: trading {t['trading_pl']:+.2f}  cash-yield {t['cash_yield_pl']:+.2f}  total {t['total_pl']:+.2f}"
                  f"   (cum yield ${b['cumulative_cash_yield_pl']:.2f})")

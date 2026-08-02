@@ -37,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 from require_wrapper import require_wrapper
+import trading_policy
 
 require_wrapper()
 
@@ -308,7 +309,7 @@ def _equity_usd() -> float:
 def _account_snapshot() -> tuple[float, float]:
     acc = get_account()
     equity = float(acc.get("equity") or acc.get("portfolio_value") or 0.0)
-    cash = float(acc.get("cash") or 0.0)
+    cash = float(acc.get("buying_power") or acc.get("cash") or 0.0)
     return equity, cash
 
 
@@ -411,6 +412,13 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     ticker = str(tickers[0]).upper()
 
     direction = _infer_direction(ticker, hyp_row["thesis_summary"])
+    if trading_policy.blocks_new_short("open", direction):
+        return {
+            "id": hid,
+            "ticker": ticker,
+            "skip": True,
+            "reason": trading_policy.SHORT_OPEN_BLOCK_REASON,
+        }
     try:
         episode_ctx = _retrieve_episode_context(ticker, hyp_row["thesis_summary"])
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
@@ -421,10 +429,6 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
     if episode_mult <= 0:
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": episode_flag}
-    # direction=short authors a sell-to-open intent (executor maps it via the
-    # trade_intents.direction column, migration 0013). The episode multiplier
-    # above has already vetted the short against the analog library.
-
     if _has_open_exposure(conn, ticker):
         return {"id": hid, "ticker": ticker, "skip": True,
                 "reason": "open exposure already"}

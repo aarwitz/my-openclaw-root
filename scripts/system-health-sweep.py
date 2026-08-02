@@ -694,6 +694,103 @@ def check_learning_loop():
                    f"({pending} pending, {resolved} resolved lifetime)")
 
 
+def check_trading_accounting(db_path=None):
+    """Guard D113 cash, short, and capital-semantics invariants."""
+    db = str(db_path or f"{ROOT}/state/trading-intel.sqlite")
+    if not os.path.exists(db):
+        return finding("trading_accounting", "warn", "trading-intel.sqlite not found")
+    sys.path.insert(0, f"{ROOT}/workspaces/trading-intel/scripts")
+    from connectors.marketdata import is_trading_day
+    import trading_policy
+
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        bad_yield = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT as_of_date,credit FROM sim_cash_yield_events WHERE credit!=0"
+            )
+            if not is_trading_day(str(row["as_of_date"]))
+        ]
+        if bad_yield:
+            return finding(
+                "trading_accounting",
+                "crit",
+                f"{len(bad_yield)} non-trading-session cash-yield credit(s) are nonzero",
+            )
+
+        short_intents = conn.execute(
+            "SELECT id,ticker FROM trade_intents WHERE direction='short' "
+            "AND action NOT IN ('exit','trim') "
+            "AND state IN ('proposed','critic_review','risk_review','approved','submitted','partial')"
+        ).fetchall()
+        if short_intents:
+            return finding(
+                "trading_accounting",
+                "crit",
+                f"{len(short_intents)} live short-opening intent(s) bypassed runtime quarantine: "
+                + ",".join(str(row["id"]) for row in short_intents[:4]),
+            )
+
+        account = conn.execute(
+            "SELECT cash FROM sim_accounts WHERE book='desk'"
+        ).fetchone()
+        positions = [dict(row) for row in conn.execute(
+            "SELECT ticker,qty,current_price,cost_basis FROM sim_positions "
+            "WHERE book='desk' AND state='open' AND qty!=0"
+        )]
+        if account is None:
+            return finding("trading_accounting", "crit", "desk sim account missing")
+        ledger_cash = float(account["cash"])
+        collateral = trading_policy.short_collateral(positions)
+        deployable = trading_policy.deployable_cash(ledger_cash, collateral)
+        capital = conn.execute(
+            "SELECT ledger_cash,short_collateral,cash,method FROM capital_efficiency_snapshots "
+            "ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        if capital is None or capital["method"] != "gross_restricted_v2":
+            return finding(
+                "trading_accounting",
+                "crit",
+                "latest capital snapshot is missing corrected gross/restricted semantics",
+            )
+        mismatches = []
+        for label, observed, expected in (
+            ("ledger_cash", capital["ledger_cash"], ledger_cash),
+            ("short_collateral", capital["short_collateral"], collateral),
+            ("deployable_cash", capital["cash"], deployable),
+        ):
+            if observed is None or abs(float(observed) - expected) > 0.02:
+                mismatches.append(f"{label}={observed} expected={expected:.2f}")
+        if mismatches:
+            return finding(
+                "trading_accounting",
+                "crit",
+                "capital/account mismatch: " + "; ".join(mismatches),
+            )
+        shorts = sorted(
+            str(position["ticker"])
+            for position in positions
+            if float(position["qty"] or 0.0) < 0
+        )
+        if shorts:
+            return finding(
+                "trading_accounting",
+                "warn",
+                f"legacy shorts awaiting fresh-quote covers: {','.join(shorts)}; "
+                f"${collateral:.2f} collateral restricted, deployable cash ${deployable:.2f}",
+            )
+        return finding(
+            "trading_accounting",
+            "ok",
+            f"session-only yield, no short-opening intents, gross/restricted capital reconciled; "
+            f"deployable cash ${deployable:.2f}",
+        )
+    finally:
+        conn.close()
+
+
 def check_offsite_backup():
     """The powered-off Mac is an iOS builder, not a trading dependency.
 
@@ -828,7 +925,7 @@ CHECKS = [
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
-    check_integrity, check_dev_lane, check_provenance,
+    check_trading_accounting, check_integrity, check_dev_lane, check_provenance,
 ]
 
 

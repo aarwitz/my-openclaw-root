@@ -174,8 +174,8 @@ run_step "predict" 90 python3 workspaces/quant/scripts/predict.py --states ready
 run_step "prediction_challenger_record" 30 python3 workspaces/developer/scripts/prediction_challenger.py record
 run_step "ml_evidence_track" 30 python3 workspaces/trading-intel/scripts/track_ml_evidence.py
 if [[ "$TRADING_DAY" == "1" ]]; then
-  # D53: enforce declared stop rules BEFORE authoring new ideas — cut rule-
-  # breaching losers first, then deploy freed capital. (2026-07-07: ORCL sat
+  # D53/D113: enforce declared stops and quarantine legacy shorts BEFORE
+  # authoring new ideas — cut invalid/rule-breaching risk first. (2026-07-07: ORCL sat
   # at -22.6% against a stated -8% stop while the desk kept opening names.)
   run_step "enforce_horizons" 90 python3 workspaces/trader/scripts/enforce_horizons.py
   # D57: falsifier tripwire — exits positions whose thesis tripwire has fired.

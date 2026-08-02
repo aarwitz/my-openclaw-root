@@ -28,11 +28,13 @@ from pathlib import Path
 # Connector path
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 
 from _db import audit, connect, now_iso  # noqa: E402
 
 from connectors.marketdata import ConnectorError, daily_bars, latest_trade, market_clock  # noqa: E402  (market DATA)
 from broker import place_order  # noqa: E402  (trading state -> adapter, D52)
+import trading_policy  # noqa: E402
 
 # ---- freshness gate: never execute on stale reasoning or a price that moved since the signal priced it.
 # Tunable via env; defaults are conservative for a swing/position desk (cadence ~minutes-to-hours).
@@ -133,6 +135,32 @@ def process(intent_row, *, dry_run: bool, conn) -> dict:
     side = _side_from_action(intent_row["action"], direction,
                              _held_qty(conn, intent_row["ticker"]))
     qty = _qty_from_size(intent_row["size"], intent_row["vehicle"])
+
+    if trading_policy.blocks_new_short(intent_row["action"], direction):
+        reason = trading_policy.SHORT_OPEN_BLOCK_REASON
+        if not dry_run:
+            conn.execute(
+                "UPDATE trade_intents SET state='rejected', blocked_reason=? WHERE id=?",
+                (("execution:" + reason)[:300], intent_id),
+            )
+            audit(
+                conn,
+                actor="executor",
+                entity_type="trade_intent",
+                entity_id=intent_id,
+                action="reject",
+                before_state="approved",
+                after_state="rejected",
+                rationale=reason,
+            )
+            conn.commit()
+        return {
+            "intent_id": intent_id,
+            "submitted": False,
+            "short_open_blocked": True,
+            "reason": reason,
+            "dry_run": bool(dry_run),
+        }
 
     # ---- FRESHNESS GATE: don't act on stale reasoning or a price that moved since the signal priced it ----
     try:

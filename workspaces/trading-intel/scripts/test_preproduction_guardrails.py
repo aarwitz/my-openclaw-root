@@ -24,16 +24,23 @@ sys.path.insert(0, str(ROOT / "workspaces/trading-intel/scripts"))
 sys.path.insert(0, str(ROOT / "workspaces/quant/scripts"))
 sys.path.insert(0, str(ROOT / "workspaces/trader/scripts"))
 sys.path.insert(0, str(ROOT / "workspaces/executor/scripts"))
+sys.path.insert(0, str(ROOT / "workspaces/risk/scripts"))
 sys.path.insert(0, str(ROOT / "workspaces/archivist/scripts"))
 sys.path.insert(0, str(ROOT / "workspaces/developer/scripts"))
+sys.path.insert(0, str(ROOT / "scripts/lib"))
 
 import gate_evaluator  # noqa: E402
 import promote_mechanisms  # noqa: E402
 import signal_scan  # noqa: E402
 import author_intents  # noqa: E402
+import enforce_stops  # noqa: E402
 import broker  # noqa: E402
+import execute_intent  # noqa: E402
+import gate_risk_intents  # noqa: E402
+import repair_cash_yield_history  # noqa: E402
 import reconcile  # noqa: E402
 import sim_broker  # noqa: E402
+import trading_policy  # noqa: E402
 import write_postmortems  # noqa: E402
 import worldmodel  # noqa: E402
 import symbol_lifecycle  # noqa: E402
@@ -531,6 +538,286 @@ class SignalSafetyTests(unittest.TestCase):
             author_source,
         )
 
+    def test_runtime_short_policy_blocks_new_risk_but_allows_reductions(self) -> None:
+        self.assertTrue(trading_policy.blocks_new_short("open", "short"))
+        self.assertTrue(trading_policy.blocks_new_short("add", "short"))
+        self.assertFalse(trading_policy.blocks_new_short("exit", "short"))
+        self.assertFalse(trading_policy.blocks_new_short("trim", "short"))
+        self.assertTrue(trading_policy.would_increase_short(0, "sell", 1))
+        self.assertTrue(trading_policy.would_increase_short(-10, "sell", 1))
+        self.assertFalse(trading_policy.would_increase_short(10, "sell", 5))
+        self.assertFalse(trading_policy.would_increase_short(-10, "buy", 5))
+
+        blocked = gate_risk_intents.gate(
+            sqlite3.connect(":memory:"),
+            {
+                "id": "ti-short",
+                "ticker": "ABC",
+                "entry_price_target": 10,
+                "size": 1,
+                "action": "open",
+                "direction": "short",
+            },
+            equity=100_000,
+            day_pl=0,
+            regime="neutral",
+        )
+        self.assertEqual(blocked["verdict"], "blocked")
+        self.assertEqual(blocked["breaches"], ["short_borrow_model_missing"])
+
+        reducing = gate_risk_intents.gate(
+            sqlite3.connect(":memory:"),
+            {
+                "id": "ti-cover",
+                "ticker": "ABC",
+                "entry_price_target": 10,
+                "size": 1,
+                "action": "exit",
+                "direction": "short",
+            },
+            equity=100_000,
+            day_pl=0,
+            regime="risk_off",
+        )
+        self.assertEqual(reducing["verdict"], "approved")
+
+    def test_executor_defense_in_depth_rejects_approved_short_open(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        result = execute_intent.process(
+            {
+                "id": "ti-short",
+                "ticker": "ABC",
+                "vehicle": "equity",
+                "action": "open",
+                "size": 1,
+                "entry_price_target": 10,
+                "created_at": _iso(),
+                "state": "approved",
+                "direction": "short",
+            },
+            dry_run=True,
+            conn=conn,
+        )
+        self.assertTrue(result["short_open_blocked"])
+        self.assertFalse(result["submitted"])
+        conn.close()
+
+    def test_simulator_never_creates_or_enlarges_short_inventory(self) -> None:
+        conn, path = _scratch()
+        try:
+            sim_broker.ensure_book(conn, "desk", cash=1_000)
+            sim_broker.apply_fill(conn, "desk", "ABC", "buy", 5, 10)
+            sim_broker.apply_fill(conn, "desk", "ABC", "sell", 2, 12)
+            before = (
+                sim_broker.get_cash(conn, "desk"),
+                sim_broker.positions(conn, "desk")["ABC"]["qty"],
+                conn.execute("SELECT COUNT(*) FROM sim_orders").fetchone()[0],
+            )
+            with self.assertRaisesRegex(ValueError, "short_open_disabled"):
+                sim_broker.apply_fill(conn, "desk", "ABC", "sell", 4, 12)
+            after = (
+                sim_broker.get_cash(conn, "desk"),
+                sim_broker.positions(conn, "desk")["ABC"]["qty"],
+                conn.execute("SELECT COUNT(*) FROM sim_orders").fetchone()[0],
+            )
+            self.assertEqual(after, before)
+
+            conn.execute(
+                "UPDATE sim_positions SET qty=-5,cost_basis=20 WHERE book='desk' AND ticker='ABC'"
+            )
+            conn.commit()
+            sim_broker.apply_fill(conn, "desk", "ABC", "buy", 2, 18)
+            self.assertEqual(sim_broker.positions(conn, "desk")["ABC"]["qty"], -3)
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_cash_yield_skips_closed_sessions_and_restricts_short_proceeds(self) -> None:
+        conn, path = _scratch()
+        try:
+            sim_broker.ensure_book(conn, "desk", cash=1_200)
+            sim_broker._ensure_cash_yield_tables(conn)
+            with mock.patch.object(sim_broker, "_iso_today", return_value="2026-08-02"):
+                result = sim_broker._apply_cash_yield_once_per_day(
+                    conn,
+                    "desk",
+                    restricted_short_collateral=200,
+                )
+            self.assertTrue(result["non_trading_day"])
+            self.assertEqual(result["credit"], 0)
+            self.assertEqual(sim_broker.get_cash(conn, "desk"), 1_200)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM sim_cash_yield_events").fetchone()[0],
+                0,
+            )
+
+            with mock.patch.object(sim_broker, "_iso_today", return_value="2026-08-03"), \
+                    mock.patch.object(sim_broker, "_sgov_proxy_apy", return_value=0.0504):
+                result = sim_broker._apply_cash_yield_once_per_day(
+                    conn,
+                    "desk",
+                    restricted_short_collateral=200,
+                )
+            self.assertTrue(result["applied"])
+            self.assertEqual(result["cash_start"], 1_000)
+            self.assertEqual(result["credit"], 0.2)
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_health_pages_on_nontrading_cash_yield_credit(self) -> None:
+        conn, path = _scratch()
+        try:
+            conn.execute(
+                "INSERT INTO sim_cash_yield_events(id,book,as_of_date,annual_yield,cash_start,"
+                "credit,applied_at) VALUES('bad','desk','2026-08-02',0.045,1000,1,?)",
+                (_iso(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            result = system_health_sweep.check_trading_accounting(Path(path))
+            self.assertEqual(result["severity"], "crit")
+            self.assertIn("non-trading-session", result["detail"])
+        finally:
+            os.unlink(path)
+
+    def test_cash_yield_history_repair_is_audited_and_idempotent(self) -> None:
+        conn, path = _scratch()
+        try:
+            sim_broker.ensure_book(conn, "desk", cash=1_511)
+            conn.execute(
+                "INSERT INTO sim_orders(order_id,book,symbol,side,qty,fill_price,source,filled_at) "
+                "VALUES('short','desk','ABC','sell',5,100,'test','2026-07-11T15:00:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO sim_positions(id,book,ticker,qty,cost_basis,state,opened_at) "
+                "VALUES('short-pos','desk','ABC',-5,100,'open','2026-07-11T15:00:00Z')"
+            )
+            conn.executemany(
+                "INSERT INTO sim_cash_yield_events(id,book,as_of_date,annual_yield,cash_start,"
+                "credit,applied_at) VALUES(?,?,?,?,?,?,?)",
+                [
+                    ("sun", "desk", "2026-07-12", 0.252, 1_500, 1.0, "2026-07-12T16:00:00Z"),
+                    ("mon", "desk", "2026-07-13", 0.252, 1_501, 1.501, "2026-07-13T16:00:00Z"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO book_equity(book,date,equity,cash) VALUES('desk',?,?,?)",
+                [
+                    ("2026-07-12", 1_001, 1_501),
+                    ("2026-07-13", 1_002.501, 1_502.501),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO book_return_attribution(book,date,equity,last_equity,trading_pl,"
+                "cash_yield_pl,total_pl,created_at) VALUES('desk',?,?,?,?,?,?,?)",
+                [
+                    ("2026-07-12", 1_001, None, 0, 1, 0, _iso()),
+                    ("2026-07-13", 1_002.501, 1_001, 0, 1.501, 1.501, _iso()),
+                ],
+            )
+            conn.commit()
+
+            plan = repair_cash_yield_history.plan_corrections(conn)
+            self.assertEqual(plan[0]["corrected_credit"], 0)
+            self.assertEqual(plan[1]["short_collateral"], 500)
+            self.assertEqual(plan[1]["corrected_cash_start"], 1_000)
+            self.assertEqual(plan[1]["corrected_credit"], 1.0)
+
+            result = repair_cash_yield_history.apply_repair(conn)
+            self.assertTrue(result["applied"])
+            self.assertAlmostEqual(result["cash_delta"], -1.501)
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT credit,original_credit FROM sim_cash_yield_events ORDER BY applied_at"
+                )],
+                [(0.0, 1.0), (1.0, 1.501)],
+            )
+            self.assertAlmostEqual(sim_broker.get_cash(conn, "desk"), 1_509.499)
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT equity,cash FROM book_equity WHERE date='2026-07-13'"
+                ).fetchone()),
+                (1_001.0, 1_501.0),
+            )
+            again = repair_cash_yield_history.apply_repair(conn)
+            self.assertTrue(again["already_applied"])
+            self.assertAlmostEqual(sim_broker.get_cash(conn, "desk"), 1_509.499)
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_cash_yield_replay_distinguishes_seeded_long_sales_from_shorts(self) -> None:
+        conn, path = _scratch()
+        try:
+            conn.execute(
+                "INSERT INTO sim_orders(order_id,book,symbol,side,qty,fill_price,source,filled_at) "
+                "VALUES('close-seed','desk','ABC','sell',5,100,'test','2026-07-11T15:00:00Z')"
+            )
+            conn.commit()
+            orders = conn.execute(
+                "SELECT symbol,side,qty,fill_price,filled_at FROM sim_orders "
+                "WHERE book='desk' ORDER BY filled_at,order_id"
+            ).fetchall()
+            initial = repair_cash_yield_history._initial_positions(conn, orders, "desk")
+            self.assertEqual(initial["ABC"]["qty"], 5)
+            self.assertEqual(
+                repair_cash_yield_history._short_collateral_at(
+                    orders,
+                    "2026-07-12T16:00:00Z",
+                    initial,
+                ),
+                0,
+            )
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_legacy_shorts_are_forced_to_exit_through_normal_gates(self) -> None:
+        conn, path = _scratch()
+        try:
+            conn.execute(
+                "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+                "VALUES('h-short',?,'researcher','[\"ABC\"]','legacy short','active')",
+                (_iso(),),
+            )
+            conn.execute(
+                "INSERT INTO positions(id,hypothesis_id,ticker,vehicle,qty,cost_basis,state,opened_at,book) "
+                "VALUES('p-short','h-short','ABC','direct_equity',-5,100,'open',?,'desk')",
+                (_iso(-60),),
+            )
+            conn.commit()
+            output = io.StringIO()
+            with mock.patch.object(enforce_stops, "DB_PATH", Path(path)), \
+                    mock.patch.object(
+                        enforce_stops,
+                        "latest_trades",
+                        return_value={"ABC": {"price": 90}},
+                    ), redirect_stdout(output):
+                rc = enforce_stops.main(["--dry-run"])
+            report = json.loads(output.getvalue())
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(report["stop_breaches"]), 1)
+            self.assertTrue(report["stop_breaches"][0]["policy_forced_exit"])
+            self.assertEqual(report["stop_breaches"][0]["action"], "exit")
+        finally:
+            conn.close()
+            os.unlink(path)
+
+    def test_capital_efficiency_uses_gross_exposure_and_deployable_cash(self) -> None:
+        snapshot = capital_efficiency_audit._deployment_snapshot(
+            1_200,
+            [
+                {"qty": 10, "current_price": 10, "cost_basis": 9},
+                {"qty": -5, "current_price": 20, "cost_basis": 18},
+            ],
+        )
+        self.assertEqual(snapshot["gross_exposure"], 200)
+        self.assertEqual(snapshot["short_collateral"], 100)
+        self.assertEqual(snapshot["deployable_cash"], 1_100)
+
     def test_simulator_mark_atomically_updates_canonical_position_view(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.execute(
@@ -806,7 +1093,7 @@ class SignalSafetyTests(unittest.TestCase):
         risk_source = (
             ROOT / "workspaces/risk/scripts/gate_risk_intents.py"
         ).read_text()
-        self.assertIn("migrations:** through 0025", architecture)
+        self.assertIn("migrations:** through 0027", architecture)
         self.assertIn("Concurrent names:** ≤ 48", architecture)
         self.assertIn("MAX_POSITIONS = 48", risk_source)
         self.assertIn("These are **not one unified graph**", architecture)

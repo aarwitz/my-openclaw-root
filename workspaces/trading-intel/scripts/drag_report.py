@@ -780,6 +780,11 @@ def build_objective(cur: sqlite3.Cursor) -> dict:
             "pct_deployed": cap["pct_deployed"],
             "pct_idle": cap["pct_idle"],
             "usd_idle": cap["usd_idle"],
+            "usd_cash_no_validated_edge": (
+                cap["usd_cash_no_edge"]
+                if "usd_cash_no_edge" in cap.keys()
+                else None
+            ),
             "dollar_bottlenecks": dict(sorted(loss.items(), key=lambda kv: -(kv[1] or 0))),
         }
 
@@ -796,7 +801,11 @@ def build_objective(cur: sqlite3.Cursor) -> dict:
             f"(desk {trailing['portfolio_return_pct']:+.2f}% vs SPY {trailing['spy_return_pct']:+.2f}%)"
         )
     if obj.get("deployment"):
-        notes.append(f"{obj['deployment']['pct_idle']:.0f}% idle cash")
+        notes.append(f"{obj['deployment']['pct_idle']:.0f}% unqualified-idea idle cash")
+        if obj["deployment"].get("usd_cash_no_validated_edge"):
+            notes.append(
+                f"${obj['deployment']['usd_cash_no_validated_edge']:,.0f} cash held for no validated edge"
+            )
     if attr:
         notes.append(f"deployed sleeve trading P&L {attr['trading_pl']:+.0f} vs cash-yield {attr['cash_yield_pl']:+.0f} over {attr['days']}d")
     obj["read"] = "; ".join(notes) if notes else "no benchmark/attribution rows yet"

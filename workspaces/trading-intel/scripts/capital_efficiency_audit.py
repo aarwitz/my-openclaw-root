@@ -20,8 +20,12 @@ import math
 import os
 import sqlite3
 import statistics
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+import trading_policy  # noqa: E402
 
 DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
@@ -128,12 +132,58 @@ def _classify_idle_cash(residual_cash: float, active_edge_count: int) -> tuple[f
     return max(0.0, residual_cash), 0.0
 
 
+def _deployment_snapshot(
+    ledger_cash: float,
+    positions: list[dict[str, float]],
+) -> dict[str, float]:
+    """Separate gross ledger cash from cash that can actually be deployed.
+
+    Short-sale proceeds remain in ledger cash so accounting reconciles, but
+    they are restricted collateral until a complete borrow/margin model exists.
+    Deployed capital is gross market exposure, never equity minus cash (net).
+    """
+    normalized = []
+    gross = 0.0
+    for position in positions:
+        qty = float(position.get("qty") or 0.0)
+        mark = float(
+            position.get("current_price")
+            or position.get("cost_basis")
+            or 0.0
+        )
+        normalized.append({**position, "qty": qty, "current_price": mark})
+        gross += abs(qty) * max(0.0, mark)
+    collateral = trading_policy.short_collateral(normalized)
+    return {
+        "ledger_cash": max(0.0, float(ledger_cash)),
+        "short_collateral": collateral,
+        "deployable_cash": trading_policy.deployable_cash(
+            ledger_cash,
+            collateral,
+        ),
+        "gross_exposure": gross,
+    }
+
+
 def main() -> int:
     conn = sqlite3.connect(DB)
 
     equity = _q(conn, "SELECT equity FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1")
-    cash = _q(conn, "SELECT cash FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1")
-    deployed = max(0.0, equity - cash)
+    ledger_cash = _q(conn, "SELECT cash FROM book_equity WHERE book='desk' ORDER BY date DESC LIMIT 1")
+    position_rows = [
+        {
+            "qty": float(row[0] or 0.0),
+            "current_price": None if row[1] is None else float(row[1]),
+            "cost_basis": float(row[2] or 0.0),
+        }
+        for row in conn.execute(
+            "SELECT qty,current_price,cost_basis FROM sim_positions "
+            "WHERE book='desk' AND state='open' AND qty!=0"
+        )
+    ]
+    deployment = _deployment_snapshot(ledger_cash, position_rows)
+    cash = deployment["deployable_cash"]
+    deployed = deployment["gross_exposure"]
 
     blocked_notional = _q(
         conn,
@@ -147,7 +197,7 @@ def main() -> int:
 
     # Residual cash after explicit bottlenecks. With no robust forward edge it
     # is a deliberate benchmark position, not an origination failure.
-    residual_cash = max(0.0, cash - min(cash, blocked_notional) - min(cash, stale_value))
+    residual_cash = max(0.0, cash - min(cash, blocked_notional))
     edge, edge_source, active_edge_count = _prospective_edge_rate(conn)
     idle_unqualified, cash_no_edge = _classify_idle_cash(
         residual_cash, active_edge_count
@@ -176,6 +226,8 @@ def main() -> int:
     out = {
         "as_of": as_of,
         "equity": round(equity, 2),
+        "ledger_cash": round(deployment["ledger_cash"], 2),
+        "short_collateral": round(deployment["short_collateral"], 2),
         "cash": round(cash, 2),
         "deployed": round(deployed, 2),
         "percentages": {
@@ -203,6 +255,8 @@ def main() -> int:
         "notes": [
             "Expected-dollar impact uses only robust integrated forward mechanisms; realized desk alpha is not a forecast.",
             "Cash is classified as cash_no_validated_edge when no robust active mechanism exists.",
+            "cash is deployable cash; ledger_cash is gross accounting cash and restricted short collateral is excluded.",
+            "deployed is gross marked exposure, not net exposure inferred from equity minus cash.",
             "Percentages are independent bottlenecks and may overlap.",
         ],
     }
@@ -214,23 +268,30 @@ def main() -> int:
         "as_of TEXT PRIMARY KEY, equity REAL NOT NULL, cash REAL NOT NULL, "
         "deployed REAL NOT NULL, pct_deployed REAL, pct_blocked REAL, pct_idle REAL, "
         "pct_stale REAL, pct_waiting REAL, usd_blocked REAL, usd_idle REAL, "
-        "usd_stale REAL, usd_waiting REAL, edge_rate REAL, loss_json TEXT)"
+        "usd_stale REAL, usd_waiting REAL, edge_rate REAL, loss_json TEXT, "
+        "method TEXT NOT NULL DEFAULT 'gross_restricted_v2', ledger_cash REAL, "
+        "short_collateral REAL, gross_exposure REAL, pct_cash_no_edge REAL, "
+        "usd_cash_no_edge REAL)"
     )
     p = out["percentages"]
     c = out["capital_usd"]
     conn.execute(
         "INSERT OR REPLACE INTO capital_efficiency_snapshots (as_of, equity, cash, deployed, "
         "pct_deployed, pct_blocked, pct_idle, pct_stale, pct_waiting, "
-        "usd_blocked, usd_idle, usd_stale, usd_waiting, edge_rate, loss_json) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "usd_blocked, usd_idle, usd_stale, usd_waiting, edge_rate, loss_json, method, "
+        "ledger_cash, short_collateral, gross_exposure, pct_cash_no_edge, usd_cash_no_edge) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (as_of, out["equity"], out["cash"], out["deployed"],
          p["deployed"], p["blocked_by_risk_gates"],
-         round(_pct(residual_cash, equity), 2),
+         p["idle_no_qualified_ideas"],
          p["trapped_in_stale_theses"], p["waiting_unresolved_predictions"],
-         c["blocked_by_risk_gates"], round(residual_cash, 2),
+         c["blocked_by_risk_gates"], c["idle_no_qualified_ideas"],
          c["trapped_in_stale_theses"], c["waiting_unresolved_predictions"],
          out["expected_return_loss"]["assumed_alpha_rate_period"],
-         json.dumps(out["expected_return_loss"]["by_bottleneck_usd"])),
+         json.dumps(out["expected_return_loss"]["by_bottleneck_usd"]),
+         "gross_restricted_v2", out["ledger_cash"], out["short_collateral"],
+         out["deployed"], p["cash_no_validated_edge"],
+         c["cash_no_validated_edge"]),
     )
     conn.commit()
 

@@ -157,7 +157,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 
 ## #9 Institutional memory — *what the humans + LLMs remember*
 
-- **DECISION_LOG.md** (through D112): every architectural decision, why, approver. **FINDINGS.md**:
+- **DECISION_LOG.md** (through D113): every architectural decision, why, approver. **FINDINGS.md**:
   the lab notebook — dated claims with `revalidate-by` expiry so quantitative beliefs can't
   silently rot into canon. **Market debriefs:** the daily what-moved-and-why narrative.
   **Evidence graph** (historical table name `causal_edges`, rebuilt nightly):

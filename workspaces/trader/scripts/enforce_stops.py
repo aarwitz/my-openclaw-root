@@ -6,15 +6,17 @@ nothing ever enforced it: on 2026-07-07 the book held ORCL -22.6%, CRM -9.9%,
 CEG -8.2% against that stated stop while continuing to open new names. A rule
 that is written but not executed is a lie the desk tells itself.
 
-Each pass: for every OPEN long position whose mark is <= entry basis × (1 - STOP_PCT),
-author ONE risk-reducing intent.
+Each pass: force every legacy short into a normal-gated cover while runtime
+shorting is quarantined, and for every OPEN long position whose mark is <=
+entry basis × (1 - STOP_PCT), author ONE risk-reducing intent.
 
 Default is a full `exit`, but a near-threshold breach can route to a deterministic
 "soft stop" `trim` when momentum remains constructive. This cuts risk while
 preserving upside participation and reduces one-bar stop-outs right before a
 rebound.
 
-Shorts: mark >= basis × (1 + STOP_PCT). The exit then flows the normal non-bypassable path —
+When a complete short model is eventually approved, its normal stop would be
+mark >= basis × (1 + STOP_PCT). Every exit flows the non-bypassable path —
 gate_evaluator (exits are sanity-gated only, D47) → risk gate (auto-approves
 risk-reducing) → executor. This script only AUTHORS; it never touches the broker.
 
@@ -29,6 +31,7 @@ from __future__ import annotations
 import sys
 sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 from require_wrapper import require_wrapper
+import trading_policy
 
 require_wrapper()
 
@@ -253,6 +256,7 @@ def main(argv=None) -> int:
     ]
     quotes = latest_trades([p["ticker"].upper() for p in candidates])
     quote_unavailable = []
+    short_quarantine_waiting_quote = []
     results = []
     for p in candidates:
         tick = p["ticker"].upper()
@@ -261,10 +265,17 @@ def main(argv=None) -> int:
         lt = quotes.get(tick)
         if not lt or not lt.get("price"):
             quote_unavailable.append(tick)
+            if qty < 0 and not trading_policy.SHORT_OPEN_ENABLED:
+                short_quarantine_waiting_quote.append(tick)
             continue  # no quote — check again next pass; never act blind
         px = float(lt["price"])
-        breach = (px <= basis * (1 - STOP_PCT)) if qty > 0 else (px >= basis * (1 + STOP_PCT))
-        if not breach:
+        policy_forced_exit = qty < 0 and not trading_policy.SHORT_OPEN_ENABLED
+        breach = (
+            (px <= basis * (1 - STOP_PCT))
+            if qty > 0
+            else (px >= basis * (1 + STOP_PCT))
+        )
+        if not breach and not policy_forced_exit:
             continue
         dd = (px / basis - 1) * 100
         abs_qty = abs(qty)
@@ -275,6 +286,8 @@ def main(argv=None) -> int:
         action = "exit"
         trigger = "stop_rule_enforcer_v1"
         intent_qty = abs_qty
+        if policy_forced_exit:
+            trigger = "short_runtime_quarantine_v1"
         if qty > 0 and abs_qty >= 2:
             soft_floor = basis * (1 - (STOP_PCT + SOFT_STOP_BUFFER_PCT))
             near_threshold = px > soft_floor
@@ -295,6 +308,7 @@ def main(argv=None) -> int:
             "action": action,
             "intent_qty": intent_qty,
             "soft_stop": soft_stop,
+            "policy_forced_exit": policy_forced_exit,
         })
         if a.dry_run:
             continue
@@ -316,6 +330,9 @@ def main(argv=None) -> int:
             "'position_1_4w', ?, 8.0, 'proposed', ?)",
             (iid, p["hypothesis_id"], ec[0], _now_iso(), action, tick, intent_qty, px,
              (
+                 "SHORT QUARANTINE: runtime has no complete borrow/collateral model; "
+                 "covering legacy short exposure"
+                 if policy_forced_exit else
                  f"SOFT STOP HIT: {dd:+.1f}% vs -{STOP_PCT*100:.0f}% rule; "
                  f"trimmed {intent_qty:.4g} to reduce risk while momentum stayed constructive"
                  if soft_stop else
@@ -330,6 +347,10 @@ def main(argv=None) -> int:
             "'trade_intent', ?, 'author_stop_exit', NULL, 'proposed', ?)",
             (aid, _now_iso(), iid,
              (
+                 f"runtime short quarantine: {tick} legacy short qty={abs_qty:g} must be covered; "
+                 "new short risk is disabled until borrow availability, fees, collateral, rebates, "
+                 "recalls, and margin are modeled. Exit authored through normal gates."
+                 if policy_forced_exit else
                  f"soft-stop enforcement: {tick} {dd:+.1f}% from basis {basis:.2f} (mark {px:.2f}) "
                  f"is within {SOFT_STOP_BUFFER_PCT*100:.1f}% of the hard stop and trend is constructive; "
                  f"trim intent ({intent_qty:.4g}) authored to de-risk without full liquidation."
@@ -343,6 +364,7 @@ def main(argv=None) -> int:
               "postmortems_written": postmortems_written,
               "authored": 0 if a.dry_run else len(results),
               "quote_unavailable": sorted(quote_unavailable),
+              "short_quarantine_waiting_quote": sorted(short_quarantine_waiting_quote),
               "quotes_received": len(quotes),
               "dry_run": a.dry_run, "stop_pct": STOP_PCT}
     print(json.dumps(report, indent=2))

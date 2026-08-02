@@ -44,6 +44,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
+import trading_policy  # noqa: E402
+
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
@@ -585,13 +588,27 @@ def gate(conn, intent, equity, day_pl, regime) -> dict:
     req_notional = req_qty * price
     action = (intent["action"] or "open").lower()
 
-    # EXITS / TRIMS reduce risk: approve the full requested qty and skip every buy-side exposure cap AND
-    # halt (a risk-reducing sell is always allowed, even risk_off / drawdown). This is what lets a ranked
-    # SWAP close a weak holding to free a concurrent-name slot for a higher-conviction replacement.
+    # EXITS / TRIMS reduce risk: approve the full requested qty and skip every
+    # new-risk exposure cap and halt. This includes long sells and short covers.
     if action in ("exit", "trim") and req_qty >= 1:
         return {"verdict": "approved", "approved_qty": req_qty,
                 "limits": {"action": action, "requested_qty": req_qty, "equity": round(equity, 2)},
-                "breaches": [], "reason": f"{action} (risk-reducing sell) approved at full size"}
+                "breaches": [], "reason": f"{action} (risk-reducing order) approved at full size"}
+
+    direction = intent["direction"] if "direction" in intent.keys() else "long"
+    if trading_policy.blocks_new_short(action, direction):
+        return {
+            "verdict": "blocked",
+            "approved_qty": 0,
+            "limits": {
+                "action": action,
+                "direction": direction,
+                "requested_qty": req_qty,
+                "equity": round(equity, 2),
+            },
+            "breaches": ["short_borrow_model_missing"],
+            "reason": trading_policy.SHORT_OPEN_BLOCK_REASON,
+        }
 
     opposition = _same_day_opposition_block(conn, intent)
     if opposition is not None:

@@ -27,10 +27,12 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 
 from _db import audit, connect, now_iso  # noqa: E402
 from connectors import fmp, massive  # noqa: E402
-from connectors.marketdata import market_clock  # noqa: E402
+from connectors.marketdata import is_trading_day, market_clock  # noqa: E402
+import trading_policy  # noqa: E402
 
 # Fill model for the quarantined P2 ``model`` experiment. Historical ``shadow``
 # rows are retained only as audit evidence and are not an operational book.
@@ -140,8 +142,23 @@ def _sgov_proxy_apy() -> float:
     return max(0.0, min(CASH_YIELD_MAX_APY, CASH_YIELD_FALLBACK_APY))
 
 
-def _apply_cash_yield_once_per_day(conn, book: str) -> dict:
+def _apply_cash_yield_once_per_day(
+    conn,
+    book: str,
+    *,
+    restricted_short_collateral: float = 0.0,
+) -> dict:
     today = _iso_today()
+    if not is_trading_day(today):
+        return {
+            "applied": False,
+            "non_trading_day": True,
+            "annual_yield": 0.0,
+            "cash_start": 0.0,
+            "gross_cash": get_cash(conn, book),
+            "short_collateral": round(float(restricted_short_collateral), 6),
+            "credit": 0.0,
+        }
     row = conn.execute(
         "SELECT annual_yield, cash_start, credit FROM sim_cash_yield_events "
         "WHERE book=? AND as_of_date=?",
@@ -156,7 +173,11 @@ def _apply_cash_yield_once_per_day(conn, book: str) -> dict:
             "credit": float(row["credit"]),
         }
 
-    cash_start = get_cash(conn, book)
+    gross_cash = get_cash(conn, book)
+    cash_start = trading_policy.deployable_cash(
+        gross_cash,
+        restricted_short_collateral,
+    )
     annual_yield = _sgov_proxy_apy()
     credit = round(cash_start * annual_yield / 252.0, 6)
     if credit != 0:
@@ -173,13 +194,18 @@ def _apply_cash_yield_once_per_day(conn, book: str) -> dict:
         entity_type="sim_account",
         entity_id=book,
         action="cash_yield_credit",
-        rationale=f"{book}: SGOV-proxy APY {annual_yield:.4%} on ${cash_start:.2f} -> +${credit:.2f}",
+        rationale=(
+            f"{book}: SGOV-proxy APY {annual_yield:.4%} on deployable ${cash_start:.2f} "
+            f"after ${restricted_short_collateral:.2f} short collateral -> +${credit:.2f}"
+        ),
     )
     return {
         "applied": True,
         "already_applied": False,
         "annual_yield": annual_yield,
         "cash_start": cash_start,
+        "gross_cash": gross_cash,
+        "short_collateral": float(restricted_short_collateral),
         "credit": credit,
     }
 
@@ -263,12 +289,16 @@ def positions(conn, book: str) -> dict[str, dict]:
 def apply_fill(conn, book: str, symbol: str, side: str, qty: float, price: float,
                *, order_id: str | None = None, source: str = "sim") -> str:
     """The single ledger mutation point: updates cash + position, writes orders
-    row + audit. side in buy/sell; sell may open a short (negative qty)."""
+    row + audit. Runtime fills may reduce/cover shorts but cannot create or
+    enlarge one until borrow and collateral economics are implemented."""
     symbol = symbol.upper()
+    pos = positions(conn, book).get(symbol)
+    existing_qty = float(pos["qty"]) if pos else 0.0
+    if trading_policy.would_increase_short(existing_qty, side, qty):
+        raise ValueError(trading_policy.SHORT_OPEN_BLOCK_REASON)
     signed = qty if side == "buy" else -qty
     cash = get_cash(conn, book)
     cash -= signed * price
-    pos = positions(conn, book).get(symbol)
     ts = now_iso()
     if pos:
         new_qty = pos["qty"] + signed
@@ -489,9 +519,6 @@ def mark_book(conn, book: str) -> dict:
         )
     ensure_book(conn, book)
     _ensure_cash_yield_tables(conn)
-    cy = _apply_cash_yield_once_per_day(conn, book)
-    cash = get_cash(conn, book)
-    equity = cash
     held = positions(conn, book)
     quotes = massive.latest_trades(list(held))
     stored_fallbacks = []
@@ -526,9 +553,22 @@ def mark_book(conn, book: str) -> dict:
         px = marks[sym]
         if px is None:
             raise RuntimeError(f"no mark for {sym} — refusing to write a wrong equity row")
-        equity += pos["qty"] * px
         conn.execute("UPDATE sim_positions SET current_price=?, current_value=? WHERE id=?",
                      (px, pos["qty"] * px, pos["id"]))
+    collateral = trading_policy.short_collateral(
+        {
+            **pos,
+            "current_price": marks[sym],
+        }
+        for sym, pos in held.items()
+    )
+    cy = _apply_cash_yield_once_per_day(
+        conn,
+        book,
+        restricted_short_collateral=collateral,
+    )
+    cash = get_cash(conn, book)
+    equity = cash + sum(pos["qty"] * marks[sym] for sym, pos in held.items())
     canonical_marks_synced = _sync_canonical_marks(conn, book, marks)
     conn.execute("INSERT OR REPLACE INTO book_equity (book, date, equity, cash) VALUES (?,?,?,?)",
                  (book, _iso_today(), equity, cash))

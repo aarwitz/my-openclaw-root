@@ -7,7 +7,7 @@
 > `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
 > to `archive/docs-retired-20260702/`.
 >
-> **Topology:** v5 · **DB schema/migrations:** through 0025 · **Last reconciled:** 2026-08-02
+> **Topology:** v5 · **DB schema/migrations:** through 0027 · **Last reconciled:** 2026-08-02
 
 ---
 
@@ -136,9 +136,8 @@ decision) are separate and individually visible.
 > *product and sprint* only — the intraday pipeline stays overseer-orchestrated and
 > dwight never touches trading logic (rule_proposals only).
 >
-> `jerry` and `resi` also exist in `openclaw.json` but are **not** part of the AutoTrade
-> desk (`jerry` = default assistant, containerized with a `/home/aaron/repos:rw` bind mount;
-> `resi`/AutoTap untouched).
+> `jerry` also exists in `openclaw.json` but is **not** part of the AutoTrade desk
+> (`jerry` = default assistant, containerized with a `/home/aaron/repos:rw` bind mount).
 
 ---
 
@@ -147,7 +146,7 @@ decision) are separate and individually visible.
 Single SQLite database: `~/.openclaw/state/trading-intel.sqlite` (WAL mode).
 `sql/schema.sql` contains the baseline schema (its world-model block originated
 as schema v8); the live contract is that baseline plus numbered migrations
-through **0025** under `workspaces/trading-intel/sql/migrations/`.
+through **0027** under `workspaces/trading-intel/sql/migrations/`.
 
 Core pipeline tables: `hypotheses`, `hypothesis_evidence`, `regime`,
 `critic_reviews`, `expression_candidates`, `trade_intents`, `risk_reviews`,
@@ -201,8 +200,9 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
                                                                price/time), intents (actuals), positions
                                                                (real hypothesis lineage; added 2026-07-06)
   → reconcile            executor/scripts/reconcile.py          fills vs DB (placeholder repair = last resort)
-  → sim_mark             executor/scripts/sim_broker.py mark   → book_equity + SGOV-proxy cash-yield accrual
-                                                               + book_return_attribution (trading vs yield, D55)
+  → sim_mark             executor/scripts/sim_broker.py mark   → book_equity + trading-session-only
+                                                               SGOV-proxy yield on deployable cash after
+                                                               restricted short collateral + return attribution
   → scoreboard           trading-intel/scripts/benchmark_scoreboard.py → benchmarks rows (vs SPY, all horizons)
   → macro_seed/actuals   trading-intel/scripts/macro_calendar.py → macro_releases (+ surprise → market_event)
   → capital_efficiency   trading-intel/scripts/capital_efficiency_audit.py → capital_efficiency_snapshots
@@ -228,9 +228,12 @@ consistency) routes a passing intent to **`risk_review`** — never straight to
 Two 2026-07-02 refinements (schema v13, D47/D48 in `DECISION_LOG.md`):
 - **Risk-reducing intents (`exit`/`trim`) face only sanity gates** — never
   idea-quality gates (an exit blocked on stale evidence traps a loser).
-- **Shorts execute end-to-end**: `trade_intents.direction` (`long`|`short`,
-  migration 0013) → executor submits sell-to-open / buy-to-cover; on exits the
-  actual held-position sign wins. All risk caps apply to abs exposure.
+- **Runtime is fail-closed for new shorts.** Research and offline backtests may
+  study short signals, but Trader, Risk, Executor, and the simulator independently
+  reject sell-to-open/add until borrow availability, borrow fees, collateral,
+  rebates, recalls, and margin are modeled. Existing legacy shorts are forced into
+  normal-gated buy-to-cover exits; reductions/exits can never be blocked by this
+  quarantine. All exposure accounting remains absolute/gross.
 
 ---
 
