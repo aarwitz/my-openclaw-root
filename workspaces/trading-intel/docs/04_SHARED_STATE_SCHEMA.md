@@ -251,6 +251,11 @@ Core fields: decision/entry/exit dates, raw and SPY returns, directional excess,
 outcome status (`pending`, `matured`, `data_blocked`), stage flags for quant,
 substantive Critic, prediction, intent, risk, and fill, plus the complete frozen
 `stage_snapshot_json`. Matured price outcomes are never silently revised.
+Reports preserve those point-in-time flags, then use current lineage only to
+split zero flags into `reached_after_cutoff` (latency) and
+`not_reached_as_of_report`. That retrospective process split never changes the
+frozen row or authorizes a trade. Stage rankings require five independent entry
+dates in both selected and not-reached arms.
 
 ### 3.17 `predictions`
 

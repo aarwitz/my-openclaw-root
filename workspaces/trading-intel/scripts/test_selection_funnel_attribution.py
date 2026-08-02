@@ -171,6 +171,7 @@ class SelectionFunnelTests(unittest.TestCase):
             "critic_substantive_passed INTEGER,predicted INTEGER,intent_authored INTEGER,"
             "risk_approved INTEGER,filled INTEGER,stage_snapshot_json TEXT)"
         )
+        conn.execute("CREATE TABLE hypotheses(id TEXT,quant_score REAL,scored_at TEXT)")
         for index in range(20):
             selected = index < 10
             conn.execute(
@@ -178,18 +179,59 @@ class SelectionFunnelTests(unittest.TestCase):
                 "('5d','matured',?,?,?,?,?,?,?,?,?,?)",
                 (
                     f"2026-07-{index % 10 + 1:02d}", f"h{index}",
-                    -1.0 if selected else 1.0, int(selected), int(selected),
+                    -1.0 if selected else (1.0 if index < 15 else 2.0),
+                    int(selected), int(selected),
                     int(selected), int(selected), int(selected), int(selected),
                     '{"created_by":"researcher"}',
                 ),
             )
+            if selected or index < 15:
+                conn.execute(
+                    "INSERT INTO hypotheses VALUES(?,?,?)",
+                    (f"h{index}", 70.0, "2026-07-20T00:00:00Z"),
+                )
+            else:
+                conn.execute("INSERT INTO hypotheses VALUES(?,NULL,NULL)", (f"h{index}",))
         report = sfa.funnel_report(conn, "5d")
         quant = next(stage for stage in report["stages"] if stage["stage"] == "quant_scored")
         self.assertIn("not_selected_at_cutoff", quant)
         self.assertNotIn("rejected", quant)
-        self.assertEqual(quant["selection_or_latency_spread_bps"], -200.0)
+        self.assertEqual(quant["reached_after_cutoff"]["n"], 5)
+        self.assertEqual(quant["not_reached_as_of_report"]["n"], 5)
+        self.assertEqual(quant["latency_spread_bps"], -200.0)
+        self.assertEqual(quant["selection_spread_bps"], -300.0)
+        self.assertTrue(quant["selection_inference_eligible"])
         self.assertEqual(report["most_harmful_measured_stage"]["stage"], "quant_scored")
         self.assertIsNone(report["most_helpful_measured_stage"])
+
+    def test_single_entry_date_cannot_rank_a_stage(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE selection_funnel_outcomes("
+            "evaluation_horizon TEXT,outcome_status TEXT,entry_date TEXT,"
+            "hypothesis_id TEXT,directional_excess_pct REAL,quant_scored INTEGER,"
+            "critic_substantive_passed INTEGER,predicted INTEGER,intent_authored INTEGER,"
+            "risk_approved INTEGER,filled INTEGER,stage_snapshot_json TEXT)"
+        )
+        conn.execute("CREATE TABLE hypotheses(id TEXT,quant_score REAL,scored_at TEXT)")
+        for index in range(12):
+            selected = index < 6
+            conn.execute(
+                "INSERT INTO selection_funnel_outcomes VALUES"
+                "('21d','matured','2026-07-01',?,?,?,?,?,?,?,?,?)",
+                (
+                    f"h{index}", -5.0 if selected else 5.0, int(selected), int(selected),
+                    int(selected), int(selected), int(selected), int(selected),
+                    '{"created_by":"researcher"}',
+                ),
+            )
+            conn.execute("INSERT INTO hypotheses VALUES(?,NULL,NULL)", (f"h{index}",))
+        report = sfa.funnel_report(conn, "21d")
+        quant = next(stage for stage in report["stages"] if stage["stage"] == "quant_scored")
+        self.assertEqual(quant["selection_spread_bps"], -1000.0)
+        self.assertFalse(quant["selection_inference_eligible"])
+        self.assertIsNone(report["most_harmful_measured_stage"])
 
 
 if __name__ == "__main__":

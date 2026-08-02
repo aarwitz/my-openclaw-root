@@ -669,12 +669,22 @@ def _build_retail_insights(
 
 
 def _build_system_health(
+    conn: sqlite3.Connection,
     regime: dict[str, Any],
     counts: dict[str, Any],
     last_pass: dict[str, str | None],
     cron: dict[str, Any],
 ) -> dict[str, Any]:
-    issues: list[dict[str, Any]] = []
+    try:
+        from audit_pipeline_health import run_checks
+
+        issues: list[dict[str, Any]] = run_checks(conn)
+    except Exception as exc:  # a broken health evaluator must never render green
+        issues = [{
+            "severity": "red",
+            "area": "health_contract",
+            "detail": f"pipeline health evaluation failed: {type(exc).__name__}: {exc}",
+        }]
     if regime.get("degraded"):
         notes = regime.get("signals", {}).get("notes", {}) or {}
         missing = regime.get("signals", {}).get("missing_signals", [])
@@ -698,7 +708,7 @@ def _build_system_health(
         color = "red"
     elif issues:
         color = "yellow"
-    return {"color": color, "issues": issues[:3]}
+    return {"color": color, "issues": issues}
 
 
 # ---------------------------------------------------------------------------
@@ -929,7 +939,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison
         ),
-        "system_health": _build_system_health(regime, counts, last_pass, cron),
+        "system_health": _build_system_health(conn, regime, counts, last_pass, cron),
     }
     return snapshot
 

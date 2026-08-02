@@ -51,6 +51,7 @@ STAGES = (
     ("risk_approved", "risk_approved"),
     ("filled", "filled"),
 )
+MIN_STAGE_ARM_DATES = 5
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -509,6 +510,54 @@ def _pearson(pairs: list[tuple[float, float]]) -> float | None:
     return None if den == 0 else num / den
 
 
+def _eventual_stage_members(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Retrospective process status used only to separate selection from latency.
+
+    Point-in-time flags remain frozen and authoritative. These sets answer a
+    different question: did a zero-flag candidate reach the stage later? They
+    never alter an outcome row or trading decision.
+    """
+    queries = {
+        "quant_scored": (
+            "SELECT id FROM hypotheses WHERE quant_score IS NOT NULL AND scored_at IS NOT NULL"
+        ),
+        "critic_substantive_passed": (
+            "SELECT DISTINCT target_id FROM critic_reviews WHERE target_type='hypothesis' "
+            "AND reviewed_by!='critic_baseline' AND all_challenges_addressed=1"
+        ),
+        "predicted": "SELECT DISTINCT hypothesis_id FROM predictions",
+        "intent_authored": (
+            "SELECT DISTINCT hypothesis_id FROM trade_intents WHERE action IN ('open','add')"
+        ),
+        "risk_approved": (
+            "SELECT DISTINCT ti.hypothesis_id FROM risk_reviews rr JOIN trade_intents ti "
+            "ON ti.id=rr.target_id WHERE rr.target_type='trade_intent' "
+            "AND rr.verdict IN ('approved','resized') AND ti.action IN ('open','add')"
+        ),
+        "filled": (
+            "SELECT DISTINCT ti.hypothesis_id FROM orders o JOIN trade_intents ti "
+            "ON ti.id=o.trade_intent_id WHERE o.status='filled' AND ti.action IN ('open','add')"
+        ),
+    }
+    result: dict[str, set[str]] = {}
+    for stage, query in queries.items():
+        try:
+            result[stage] = {str(row[0]) for row in conn.execute(query) if row[0] is not None}
+        except sqlite3.Error:
+            # Hermetic/report consumers may expose only the frozen outcome
+            # table. Unknown eventual status stays "not reached as of report".
+            result[stage] = set()
+    return result
+
+
+def _spread_bps(left: dict, right: dict) -> float | None:
+    left_mean = left["mean_directional_excess_pct"]
+    right_mean = right["mean_directional_excess_pct"]
+    if left_mean is None or right_mean is None:
+        return None
+    return round((left_mean - right_mean) * 100.0, 1)
+
+
 def funnel_report(conn: sqlite3.Connection, horizon: str) -> dict:
     if horizon not in HORIZONS:
         raise ValueError(f"unknown horizon {horizon!r}")
@@ -517,22 +566,31 @@ def funnel_report(conn: sqlite3.Connection, horizon: str) -> dict:
         "AND outcome_status='matured' ORDER BY entry_date,hypothesis_id",
         (horizon,),
     ).fetchall()
+    eventual = _eventual_stage_members(conn)
     current = rows
     stages = []
     for name, flag in STAGES:
         incoming = current
         if flag is None:
-            kept, rejected = incoming, []
+            kept, rejected, late, not_reached = incoming, [], [], []
         else:
             kept = [row for row in incoming if int(row[flag] or 0) == 1]
             rejected = [row for row in incoming if int(row[flag] or 0) == 0]
+            late = [row for row in rejected if str(row["hypothesis_id"]) in eventual.get(flag, set())]
+            not_reached = [
+                row for row in rejected if str(row["hypothesis_id"]) not in eventual.get(flag, set())
+            ]
         kept_metrics = _metrics(kept)
         rejected_metrics = _metrics(rejected)
-        kept_mean = kept_metrics["mean_directional_excess_pct"]
-        rejected_mean = rejected_metrics["mean_directional_excess_pct"]
-        spread_bps = None
-        if kept_mean is not None and rejected_mean is not None:
-            spread_bps = round((kept_mean - rejected_mean) * 100.0, 1)
+        late_metrics = _metrics(late)
+        not_reached_metrics = _metrics(not_reached)
+        aggregate_spread = _spread_bps(kept_metrics, rejected_metrics)
+        selection_spread = _spread_bps(kept_metrics, not_reached_metrics)
+        latency_spread = _spread_bps(kept_metrics, late_metrics)
+        inference_eligible = bool(
+            kept_metrics["independent_entry_dates"] >= MIN_STAGE_ARM_DATES
+            and not_reached_metrics["independent_entry_dates"] >= MIN_STAGE_ARM_DATES
+        )
         stages.append({
             "stage": name,
             "input_n": len(incoming),
@@ -540,7 +598,13 @@ def funnel_report(conn: sqlite3.Connection, horizon: str) -> dict:
             # A zero flag can mean explicit rejection or merely that the stage
             # had not run by this point-in-time cutoff. Keep the label honest.
             "not_selected_at_cutoff": rejected_metrics,
-            "selection_or_latency_spread_bps": spread_bps,
+            "reached_after_cutoff": late_metrics,
+            "not_reached_as_of_report": not_reached_metrics,
+            "selection_spread_bps": selection_spread,
+            "latency_spread_bps": latency_spread,
+            "selection_inference_eligible": inference_eligible,
+            # Retained for GUI compatibility; never used to rank stages.
+            "selection_or_latency_spread_bps": aggregate_spread,
         })
         current = kept
 
@@ -566,13 +630,12 @@ def funnel_report(conn: sqlite3.Connection, horizon: str) -> dict:
 
     eligible = [
         stage for stage in stages[1:]
-        if stage["kept"]["n"] >= 5 and stage["not_selected_at_cutoff"]["n"] >= 5
-        and stage["selection_or_latency_spread_bps"] is not None
+        if stage["selection_inference_eligible"] and stage["selection_spread_bps"] is not None
     ]
-    harmful = [stage for stage in eligible if stage["selection_or_latency_spread_bps"] < 0]
-    helpful = [stage for stage in eligible if stage["selection_or_latency_spread_bps"] > 0]
-    worst = min(harmful, key=lambda stage: stage["selection_or_latency_spread_bps"], default=None)
-    best = max(helpful, key=lambda stage: stage["selection_or_latency_spread_bps"], default=None)
+    harmful = [stage for stage in eligible if stage["selection_spread_bps"] < 0]
+    helpful = [stage for stage in eligible if stage["selection_spread_bps"] > 0]
+    worst = min(harmful, key=lambda stage: stage["selection_spread_bps"], default=None)
+    best = max(helpful, key=lambda stage: stage["selection_spread_bps"], default=None)
     return {
         "generated_at": now_iso(),
         "horizon": horizon,
@@ -582,16 +645,17 @@ def funnel_report(conn: sqlite3.Connection, horizon: str) -> dict:
         "diagnostics": diagnostics,
         "most_harmful_measured_stage": None if worst is None else {
             "stage": worst["stage"],
-            "selection_or_latency_spread_bps": worst["selection_or_latency_spread_bps"],
+            "selection_spread_bps": worst["selection_spread_bps"],
         },
         "most_helpful_measured_stage": None if best is None else {
             "stage": best["stage"],
-            "selection_or_latency_spread_bps": best["selection_or_latency_spread_bps"],
+            "selection_spread_bps": best["selection_spread_bps"],
         },
         "inference_warning": (
-            "Zero stage flags combine explicit rejection with process latency. Entry-date "
-            "clustering is reported, but overlapping names/horizons and the short system era "
-            "still preclude production-edge claims."
+            "Point-in-time zero flags are split into later-reached latency and not-reached-as-of-report. "
+            f"Stage rankings require at least {MIN_STAGE_ARM_DATES} independent entry dates in both "
+            "selected and not-reached arms. Overlapping names/horizons and the short system era still "
+            "preclude production-edge claims."
         ),
     }
 

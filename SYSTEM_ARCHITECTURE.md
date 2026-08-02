@@ -516,6 +516,13 @@ cron→SQLite migration in this build). The overseer drives the desk:
   - The browser never calls OpenClaw, a broker, or a market-data provider.
   - Missing/malformed snapshot data returns a fail-closed error; there is no
     external-broker fallback or broker credential in the Pages runtime.
+- **Snapshot contract audit:** `audit_app_snapshot.py` validates the current v2
+  roster/list topology, internal-paper source and label, desk cash/equity/
+  position arithmetic, selection coverage, prediction-replay count, capital
+  equity, and the exact deterministic pipeline-health color. Retired
+  `risk_gate`, `calibration`, or `world_model` top-level blocks are not part of
+  the contract. `snapshot_builder.py` embeds the full pipeline health result;
+  it may not render a shallow green while the production-edge gate is yellow.
 - **Telegram** narration goes out on the `druck` bot (cron handles routing to
   the group topic / DM). Narration is action-first, source-backed, no tables.
 - Any bot that should stay visibly responsive in Telegram needs the
@@ -623,9 +630,11 @@ Three loops now close around it:
 - **Selection-funnel loop:** `developer/scripts/selection_funnel_attribution.py`
   grades every genuine candidate at fixed 5/21/63-session horizons versus SPY,
   including ideas rejected before intent/fill. It freezes each stage at the
-  counterfactual entry close, reports entry-date-clustered inference, and labels
-  zero stage flags as selection-or-latency—not causal rejection—until explicit
-  decision reasons are available. A newest ticker close that arrives before the
+  counterfactual entry close and reports entry-date-clustered inference. For
+  each zero flag, current process lineage now separates candidates that reached
+  the stage later (measured latency) from candidates still not reached; stage
+  rankings use only the latter comparison and require at least five independent
+  entry dates in each arm. A newest ticker close that arrives before the
   bounded SPY cache is `pending`, not a data hole; historical missing benchmark
   dates remain `data_blocked`. Matured outcomes are immutable.
 - **Deterministic activation:** `signal_scan.py` fires the calibrated mechanisms from each ticker's
