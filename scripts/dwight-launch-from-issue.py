@@ -240,7 +240,6 @@ def normalize_owner(owner: str) -> str:
     aliases = {
         "jerry": "jerry",
         "main": "jerry",
-        "resi": "resi",
         "druck": "druck",
         "dwight": "dwight",
         # Trading-stack lanes route directly to their OpenClaw agent ids.

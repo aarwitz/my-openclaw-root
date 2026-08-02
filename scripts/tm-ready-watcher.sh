@@ -115,7 +115,7 @@ EXECUTE_MODE = os.environ["EXECUTE_MODE"] == "true"
 ISSUE_ID_FILTER = os.environ.get("ISSUE_ID_FILTER", "").strip()
 MAX_LAUNCHES_PER_RUN = int(os.environ["MAX_LAUNCHES_PER_RUN"])
 
-EXECUTING_AGENTS = {"Jerry", "Resi", "Druck", "Dwight"}
+EXECUTING_AGENTS = {"Jerry", "Druck", "Dwight"}
 READY_STATES = {"ready", "queued"}
 APPROVAL_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)

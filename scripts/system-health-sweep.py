@@ -2,6 +2,12 @@
 import sys
 sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 from require_wrapper import require_wrapper
+from config_contract import (
+    validate_bootstrap_policy,
+    validate_model_policy,
+    validate_operator_policy,
+    validate_reference_policy,
+)
 require_wrapper()
 
 """Deterministic system health sweep for the OpenClaw gateway + AutoTrade desk.
@@ -29,6 +35,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = "/home/aaron/.openclaw"
 SEV = {"ok": 0, "warn": 1, "crit": 2}
@@ -106,13 +113,50 @@ def check_gateway():
 def check_telegram():
     try:
         cfg = _load_json(f"{ROOT}/openclaw.json")
-        accts = list(cfg["channels"]["telegram"]["accounts"].keys())
+        configured = cfg["channels"]["telegram"]["accounts"]
+        accts = [
+            account_id
+            for account_id, account in configured.items()
+            if account.get("enabled", True)
+        ]
     except Exception as e:
         return finding("telegram", "warn", f"could not read telegram accounts: {e}")
+    ocl = _resolve_openclaw()
+    if not ocl:
+        return finding("telegram", "warn", "openclaw CLI not found; cannot inspect channel state")
+    rc, out = _run([ocl, "health", "--json"], timeout=25)
+    if rc != 0:
+        return finding("telegram", "crit", f"channel health unavailable (exit={rc}): {out[:160]}")
+    try:
+        live_accounts = (
+            _first_json_object(out)
+            .get("channels", {})
+            .get("telegram", {})
+            .get("accounts", {})
+        )
+    except Exception as exc:
+        return finding("telegram", "crit", f"channel health unreadable: {exc}")
     details = []
     problems = []
     worst = "ok"
     for a in accts:
+        state = live_accounts.get(a)
+        if not isinstance(state, dict):
+            problems.append(a)
+            details.append(f"{a}: enabled account missing from live gateway health")
+            worst = "crit"
+            continue
+        token_status = state.get("tokenStatus")
+        running = state.get("running") is True
+        connected = state.get("connected") is True
+        if token_status != "available" or not running or not connected:
+            problems.append(a)
+            reason = state.get("lastError") or "no lastError reported"
+            details.append(
+                f"{a}: token={token_status}, running={running}, connected={connected}; {reason}"
+            )
+            worst = "crit"
+            continue
         files = glob.glob(f"{ROOT}/telegram/ingress-spool-{a}/*.json")
         if not files:
             continue
@@ -129,7 +173,12 @@ def check_telegram():
             if SEV[sev] > SEV[worst]:
                 worst = sev
     if worst == "ok":
-        return finding("telegram", "ok", f"all {len(accts)} bot channels draining ({', '.join(accts)})")
+        return finding(
+            "telegram",
+            "ok",
+            f"all {len(accts)} enabled bot channels running, connected, and draining "
+            f"({', '.join(accts)})",
+        )
     return finding("telegram", worst, "; ".join(details), accounts=problems)
 
 
@@ -203,6 +252,27 @@ def check_config_drift():
     )
 
 
+def check_model_policy():
+    """Reject model/runtime overrides that silently disable fleet fallbacks."""
+    try:
+        config = _load_json(f"{ROOT}/openclaw.json")
+        errors = [
+            *validate_model_policy(config, Path(ROOT)),
+            *validate_bootstrap_policy(config),
+            *validate_operator_policy(config),
+            *validate_reference_policy(config, Path(ROOT)),
+        ]
+    except Exception as exc:
+        return finding("model_policy", "crit", f"model policy unreadable: {exc}")
+    if errors:
+        return finding("model_policy", "crit", "; ".join(errors[:6]))
+    return finding(
+        "model_policy",
+        "ok",
+        "agents inherit fallbacks; bootstrap, owner, channel, workspace, and skill references are complete",
+    )
+
+
 def check_internal_paper_only():
     """The internal simulator is the only permitted execution/account backend."""
     checker = f"{ROOT}/scripts/check-internal-paper-only.py"
@@ -259,6 +329,9 @@ def check_tokens():
     oauth_providers = data.get("auth", {}).get("oauth", {}).get("providers", [])
     codex_provider = next((p for p in oauth_providers if p.get("provider") == "openai-codex"), None)
     if not codex_provider:
+        effective = openai_route.get("effective", {})
+        if effective.get("kind") == "synthetic" and effective.get("detail") == "codex-app-server":
+            return finding("tokens", "ok", "fleet auth healthy via plugin-owned codex-app-server")
         return finding("tokens", "crit", "openai-codex auth provider missing from oauth status")
     status = codex_provider.get("status")
     if status == "expired":
@@ -750,7 +823,8 @@ def check_provenance():
 
 
 CHECKS = [
-    check_gateway, check_telegram, check_cron, check_config_drift, check_internal_paper_only, check_tokens,
+    check_gateway, check_telegram, check_cron, check_config_drift, check_model_policy,
+    check_internal_paper_only, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,

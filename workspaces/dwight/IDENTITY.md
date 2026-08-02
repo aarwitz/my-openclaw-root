@@ -24,7 +24,6 @@ always set `sprint_id=5` explicitly on filings (there is no default sprint).
 
 - **Aaron** — Final approval on product direction and major TM changes
 - **Jerry** — OpenClaw orchestrator, platform ops; escalate all infra questions
-- **Resi** — AutoTap delivery; separate domain, do not manage
 - **AutoTrade desk** (researcher, quant, critic, trader, risk, executor, archivist, overseer,
   developer) — the execution team for sprint-5 work. The overseer runs the intraday pipeline on
   its own crons; Dwight PMs the *product and sprint*, never the live trading passes.

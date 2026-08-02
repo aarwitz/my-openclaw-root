@@ -6,7 +6,7 @@ retired in `~/.openclaw`. Every agent and every human should follow it.
 ## Container model (why this matters)
 
 - `~/.openclaw/scripts/` is **shared** across every OpenClaw agent. All agents
-  (main, druck, dwight, resi, trader, …) run inside the **single
+  (main, druck, dwight, trader, …) run inside the **single
   `openclaw-gateway` container**, which bind-mounts the entire `~/.openclaw`
   tree. There is **no per-agent copy**.
 - Other containers (`lidi-task-manager-autotap-agent-*`) do

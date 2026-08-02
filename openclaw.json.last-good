@@ -113,8 +113,8 @@
       "sandbox": {
         "mode": "off"
       },
-      "bootstrapMaxChars": 4000,
-      "bootstrapTotalMaxChars": 12000,
+      "bootstrapMaxChars": 12000,
+      "bootstrapTotalMaxChars": 32000,
       "bootstrapPromptTruncationWarning": "once",
       "contextLimits": {
         "memoryGetMaxChars": 8000,
@@ -143,7 +143,6 @@
       {
         "id": "jerry",
         "workspace": "/home/aaron/.openclaw/workspace",
-        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -157,30 +156,8 @@
         }
       },
       {
-        "id": "resi",
-        "workspace": "/home/aaron/.openclaw/workspaces/resi",
-        "model": "openai/gpt-5.5",
-        "tools": {
-          "profile": "full",
-          "allow": [
-            "message",
-            "group:messaging"
-          ]
-        },
-        "groupChat": {
-          "mentionPatterns": [
-            "@resi_rsl_bot\\b"
-          ]
-        },
-        "identity": {
-          "name": "Resi",
-          "emoji": "🏗️"
-        }
-      },
-      {
         "id": "researcher",
         "workspace": "/home/aaron/.openclaw/workspaces/researcher",
-        "model": "openai/gpt-5.5",
         "skills": [
           "newsapi-ai",
           "finnhub",
@@ -196,7 +173,6 @@
       {
         "id": "quant",
         "workspace": "/home/aaron/.openclaw/workspaces/quant",
-        "model": "openai/gpt-5.5",
         "skills": [
           "massive",
           "finnhub",
@@ -211,7 +187,6 @@
       {
         "id": "executor",
         "workspace": "/home/aaron/.openclaw/workspaces/executor",
-        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [],
@@ -227,7 +202,6 @@
       {
         "id": "trader",
         "workspace": "/home/aaron/.openclaw/workspaces/trader",
-        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [
@@ -257,7 +231,6 @@
       {
         "id": "critic",
         "workspace": "/home/aaron/.openclaw/workspaces/critic",
-        "model": "openai/gpt-5.5",
         "skills": [
           "newsapi-ai",
           "finnhub",
@@ -273,7 +246,6 @@
       {
         "id": "risk",
         "workspace": "/home/aaron/.openclaw/workspaces/risk",
-        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
         "skills": [
@@ -290,7 +262,6 @@
       {
         "id": "archivist",
         "workspace": "/home/aaron/.openclaw/workspaces/archivist",
-        "model": "openai/gpt-5.5",
         "skills": [
           "finnhub",
           "massive",
@@ -305,12 +276,8 @@
       {
         "id": "developer",
         "workspace": "/home/aaron/.openclaw/workspaces/developer",
-        "model": "openai/gpt-5.5",
         "verboseDefault": "full",
         "toolProgressDetail": "raw",
-        "agentRuntime": {
-          "id": "codex"
-        },
         "tools": {
           "exec": {
             "security": "full",
@@ -336,7 +303,6 @@
       {
         "id": "dwight",
         "workspace": "/home/aaron/.openclaw/workspaces/dwight",
-        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -356,12 +322,6 @@
         },
         "skills": [
           "task-manager-maintainer",
-          "resilife-product",
-          "ewag-visual-qa",
-          "ewag_build",
-          "ewag_capture",
-          "ewag_test",
-          "ewag_testing_menu",
           "newsapi-ai",
           "cloudflare"
         ],
@@ -373,7 +333,6 @@
       {
         "id": "overseer",
         "workspace": "/home/aaron/.openclaw/workspaces/overseer",
-        "model": "openai/gpt-5.5",
         "tools": {
           "profile": "full",
           "allow": [
@@ -446,13 +405,6 @@
         "accountId": "druck"
       },
       "agentId": "overseer"
-    },
-    {
-      "match": {
-        "channel": "telegram",
-        "accountId": "resi"
-      },
-      "agentId": "resi"
     },
     {
       "match": {
@@ -541,6 +493,9 @@
     "bashForegroundMs": 15000,
     "restart": true,
     "ownerDisplay": "raw",
+    "ownerAllowFrom": [
+      "telegram:6043080629"
+    ],
     "allowFrom": {
       "telegram": [
         "6043080629",
@@ -601,48 +556,37 @@
             "github-ssh",
             "task-manager"
           ],
-          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions. For EWAG iOS validation, never treat missing local Swift as a blocker — route through ~/.openclaw/scripts/ewag-build.sh and ewag-test.sh per EWAG_INFRA.md."
+          "systemPrompt": "You are in the GitHub Admin group. Focus: repo ops, issue/PR workflows, and release hygiene. Be concise and action-first. Confirm before destructive or external-impact actions."
         },
         "-1003910955362": {
           "requireMention": true,
           "skills": [
             "task-manager",
-            "resilife-product",
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are Dwight for project management and Task Manager execution at http://127.0.0.1:8000.\n\nRules:\n- Apply task-manager quality gates and update existing issues before opening new ones.\n- For code stories, set branch field: issue-<id>-<short-slug>.\n- Assign first blocking owner (Jerry, Resi, Druck, Dwight, Aaron).\n\nRun contract:\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute:\n  /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute\n- Auto-launch actionable coding issues when repo path is known; if missing, ask one follow-up for absolute path.\n- Return lane, ownerAgent, taskId, metadata path, and terminal summary.\n\nSafety:\n- Route EWAG iOS validation through ios-build-node scripts.\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Prefer hot reload for config edits.\n\nRefs: EWAG_INFRA.md, AGENTS.md, HEARTBEAT.md"
+          "systemPrompt": "You are Dwight for project management and Task Manager execution at https://tm.lidisolutions.ai.\n\nRules:\n- Apply Task Manager quality gates and update existing issues before opening new ones.\n- For code stories, set branch field: issue-<id>-<short-slug>.\n- Assign the first blocking owner (Jerry, Druck, Dwight, or Aaron).\n- If Aaron sends run issue <id> --repo <abs-path> [flags], execute /home/aaron/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --repo <abs-path> [same flags] --execute.\n- Never use systemctl restart; use ~/.openclaw/scripts/safe-restart.sh only when required.\n- Return the lane, ownerAgent, taskId, metadata path, and terminal summary."
         },
         "-1003643056525": {
           "requireMention": true,
           "skills": [
-            "resilife-product",
-            "ewag-visual-qa",
-            "ewag_build",
-            "ewag_capture",
-            "ewag_test",
-            "ewag_testing_menu",
             "task-manager",
             "gog",
             "github-ssh"
           ],
-          "systemPrompt": "You are in the EWAG group for Elite Wellness Amenity Group work. Focus: iOS app product execution — requirements, sprint planning, UX decisions, status. Practical, outcome-focused, concise.\n\nExecution host: Linux gateway by default for non-iOS work (Task Manager, ops, GitHub, docs). Taylor's Mac runs only iOS build/test/screenshot via the `ewag-*` scripts. Never report iOS validation blocked because Linux lacks Swift — route through ios-build-node and only escalate node-reachability/path/auth failures. Reference: EWAG_INFRA.md.",
+          "systemPrompt": "You are in the EWAG group. Dwight owns planning, Task Manager updates, GitHub coordination, and status. The Mac node is execution-only for iOS build/test work and may be offline; do not report that as a platform outage.",
           "topics": {
             "1": {
-              "agentId": "resi",
-              "systemPrompt": "You are Resi in EWAG topic 1. Focus: ResiLife iOS product execution updates, build/test state, blockers, and milestone clarity.\n\n## Cross-bot relay protocol (Dwight in EWAG)\n- Internal relay is the source of truth for bot-to-bot handoff.\n- `@dwight_rsl_bot ...` means Dwight expects a reply.\n- `FYI @dwight_rsl_bot ...` or `cc @dwight_rsl_bot ...` means listen-only: Dwight should absorb silently.\n- When replying to any Dwight-directed request, end your final line with exactly one directive token:\n  - `RESPOND_EXPECTED` or\n  - `LISTEN_ONLY`\n- Keep that directive explicit so Dwight can decide whether to continue dialog or just store context.\n\n## Update format for Dwight\n- build_health: <green|yellow|red + 1 line>\n- top_blocker: <1 line>\n- next_milestone: <1 line + ETA>\n- directive: <RESPOND_EXPECTED|LISTEN_ONLY>\n\nBe concise, factual, and action-oriented."
+              "agentId": "dwight",
+              "systemPrompt": "Focus on EWAG product planning, Task Manager state, blockers, and milestones. Be concise, factual, and action-oriented."
             },
             "975": {
-              "agentId": "resi",
+              "agentId": "dwight",
               "skills": [
-                "ewag_build",
-                "ewag_capture",
-                "ewag_test",
-                "ewag_testing_menu",
                 "gog",
                 "github-ssh"
               ],
-              "systemPrompt": "EWAG Manual Testing topic: execute capture/build/test commands directly on gateway and return Drive links plus pass/fail.\n\nImmediate command dispatch:\n- /ewag_capture <view> [opts] -> ~/.openclaw/scripts/ewag-capture.sh <view> [opts]\n- /ewag_capture <view> record [opts] or /ewag_record -> same script in recording mode\n- /ewag_build [args] -> ~/.openclaw/scripts/ewag-build.sh [args]\n- /ewag_test [args] -> ~/.openclaw/scripts/ewag-test.sh [args]\n- /bash <cmd> -> raw shell\n\nPipeline for capture requests:\n1. ~/.openclaw/scripts/credential-preflight.sh\n2. ~/.openclaw/scripts/ewag-capture.sh <view>\n3. Return Drive links + pass/fail summary\n\nHard rules:\n- Do not load ewag-visual-qa and do not perform screenshot analysis in this topic.\n- Upload media through scripts to Drive; do not send raw image attachments.\n- Prefer execution over analysis.\n- Keep responses concise and outcome-first."
+              "systemPrompt": "EWAG manual-testing coordination. Dwight records requested checks and reports whether the iOS build node is available. Do not invent local build capability or reference deleted ewag-* scripts."
             }
           }
         },
@@ -719,20 +663,6 @@
           "enabled": true,
           "dmPolicy": "pairing",
           "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-druck",
-          "allowFrom": [
-            "6043080629",
-            "8337717908"
-          ],
-          "groupAllowFrom": [
-            "6043080629",
-            "8337717908"
-          ],
-          "groupPolicy": "allowlist"
-        },
-        "resi": {
-          "enabled": true,
-          "dmPolicy": "pairing",
-          "tokenFile": "/home/aaron/.openclaw/credentials/telegram-bot-token-resi",
           "allowFrom": [
             "6043080629",
             "8337717908"

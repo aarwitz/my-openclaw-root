@@ -832,6 +832,122 @@ class SignalSafetyTests(unittest.TestCase):
             {"matured": 0, "scanned": 7},
         )
 
+    def test_telegram_health_rejects_enabled_account_with_missing_token(self) -> None:
+        config = {
+            "channels": {
+                "telegram": {
+                    "accounts": {"resi": {"enabled": True}},
+                }
+            }
+        }
+        live = {
+            "channels": {
+                "telegram": {
+                    "accounts": {
+                        "resi": {
+                            "tokenStatus": "configured_unavailable",
+                            "running": False,
+                            "connected": False,
+                            "lastError": "token file unavailable",
+                        }
+                    }
+                }
+            }
+        }
+        with (
+            mock.patch.object(system_health_sweep, "_load_json", return_value=config),
+            mock.patch.object(system_health_sweep, "_resolve_openclaw", return_value="openclaw"),
+            mock.patch.object(
+                system_health_sweep,
+                "_run",
+                return_value=(0, json.dumps(live)),
+            ),
+        ):
+            result = system_health_sweep.check_telegram()
+        self.assertEqual(result["severity"], "crit")
+        self.assertIn("configured_unavailable", result["detail"])
+
+    def test_model_policy_rejects_agent_override_that_drops_fallbacks(self) -> None:
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        config["agents"]["list"][0]["model"] = "openai/gpt-5.5"
+        errors = system_health_sweep.validate_model_policy(config, ROOT)
+        self.assertTrue(any("overrides model" in error for error in errors))
+
+    def test_live_model_policy_has_fleet_fallbacks_and_provider_runtime(self) -> None:
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        self.assertEqual(
+            system_health_sweep.validate_model_policy(config, ROOT),
+            [],
+        )
+        defaults = config["agents"]["defaults"]["model"]
+        self.assertEqual(defaults["primary"], "openai/gpt-5.5")
+        self.assertEqual(defaults["fallbacks"], ["openai/gpt-5.4"])
+        self.assertEqual(
+            system_health_sweep.validate_bootstrap_policy(config),
+            [],
+        )
+        self.assertEqual(
+            system_health_sweep.validate_operator_policy(config),
+            [],
+        )
+        self.assertEqual(
+            system_health_sweep.validate_reference_policy(config, ROOT),
+            [],
+        )
+
+    def test_bootstrap_policy_rejects_context_truncation(self) -> None:
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        config["agents"]["defaults"]["bootstrapTotalMaxChars"] = 100
+        errors = system_health_sweep.validate_bootstrap_policy(config)
+        self.assertTrue(any("bootstrap needs" in error for error in errors))
+
+    def test_reference_policy_rejects_legacy_agent_resurrection(self) -> None:
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        config["bindings"].append(
+            {
+                "match": {"channel": "telegram", "accountId": "resi"},
+                "agentId": "resi",
+            }
+        )
+        errors = system_health_sweep.validate_reference_policy(config, ROOT)
+        self.assertTrue(any("unknown agent 'resi'" in error for error in errors))
+        self.assertTrue(any("unknown Telegram account 'resi'" in error for error in errors))
+
+    def test_reference_policy_rejects_deleted_skill(self) -> None:
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        config["agents"]["list"][0]["skills"] = ["deleted-skill"]
+        errors = system_health_sweep.validate_reference_policy(config, ROOT)
+        self.assertTrue(any("deleted-skill" in error for error in errors))
+
+    def test_token_health_accepts_plugin_owned_codex_runtime(self) -> None:
+        status = {
+            "auth": {
+                "runtimeAuthRoutes": [
+                    {
+                        "provider": "openai",
+                        "authProvider": "openai-codex",
+                        "status": "usable",
+                        "effective": {
+                            "kind": "synthetic",
+                            "detail": "codex-app-server",
+                        },
+                    }
+                ],
+                "oauth": {"providers": []},
+            }
+        }
+        with (
+            mock.patch.object(system_health_sweep, "_resolve_openclaw", return_value="openclaw"),
+            mock.patch.object(
+                system_health_sweep,
+                "_run",
+                return_value=(0, json.dumps(status)),
+            ),
+        ):
+            result = system_health_sweep.check_tokens()
+        self.assertEqual(result["severity"], "ok")
+        self.assertIn("plugin-owned", result["detail"])
+
     def test_integrity_freshness_counts_sessions_not_weekend_hours(self) -> None:
         friday_mark = "2026-07-31T20:00:00Z"
         sunday = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)

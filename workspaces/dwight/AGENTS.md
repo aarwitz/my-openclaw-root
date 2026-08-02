@@ -61,7 +61,6 @@ pause button. Stop the pass immediately and report; never retry around it.
 | **Researcher** 🔎 | `"Researcher"` | AutoTrade research | Hypotheses, evidence, data-source auditions (sprint-5 research issues) |
 | **Quant** 📐 | `"Quant"` | AutoTrade quant | Scoring, sizing, regime, calibration analysis |
 | **Dwight** 📋 | `"Dwight"` | Sprint-5 PM + Task Manager source code | Sprint planning, backlog grooming, TM schema/API/frontend maintenance |
-| **Resi** 🏗️ | `"Resi"` | AutoTap iOS delivery (NOT Dwight's sprint) | Builds, tests, QA captures |
 
 The rest of the AutoTrade desk (critic, trader, risk, executor, archivist, overseer) runs the
 live pipeline on its own crons — they are not coding-lane assignees.
@@ -119,7 +118,7 @@ When in doubt, assign and add a comment explaining why.
 
 ## Escalation
 
-- Product feature decisions → **Resi**
+- Product feature decisions → **Aaron**
 - OpenClaw config, gateway, platform → **Jerry**
 - Market or news research → **Druck**
 

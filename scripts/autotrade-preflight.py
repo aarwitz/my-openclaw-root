@@ -18,6 +18,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from require_wrapper import require_wrapper
+from config_contract import (
+    validate_bootstrap_policy,
+    validate_model_policy,
+    validate_operator_policy,
+    validate_reference_policy,
+)
 
 require_wrapper()
 
@@ -69,6 +75,10 @@ def _config_contract() -> dict:
         last_good = json.loads((ROOT / "openclaw.json.last-good").read_text())
         if live != last_good:
             errors.append("openclaw.json differs from .last-good")
+        errors.extend(validate_model_policy(live, ROOT))
+        errors.extend(validate_bootstrap_policy(live))
+        errors.extend(validate_operator_policy(live))
+        errors.extend(validate_reference_policy(live, ROOT))
         jobs = json.loads((ROOT / "cron/jobs.json").read_text())
         if not isinstance(jobs.get("jobs"), list):
             errors.append("cron/jobs.json has no jobs list")
