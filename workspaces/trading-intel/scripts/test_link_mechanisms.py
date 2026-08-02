@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -171,6 +172,7 @@ class LinkMechanismsTests(unittest.TestCase):
 
     def test_relink_resolved_dry_run_reports_replay_cohort_without_writes(self) -> None:
         db_path = self._make_relink_db()
+        self.addCleanup(os.unlink, db_path)
 
         result = link_mechanisms.relink_resolved(dry_run=True, execute=False, db_path=db_path)
 
@@ -194,6 +196,7 @@ class LinkMechanismsTests(unittest.TestCase):
 
     def test_relink_resolved_execute_rewrites_links_observations_and_audits(self) -> None:
         db_path = self._make_relink_db()
+        self.addCleanup(os.unlink, db_path)
 
         with patch.object(
             link_mechanisms,
