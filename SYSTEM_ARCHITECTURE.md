@@ -146,7 +146,7 @@ decision) are separate and individually visible.
 Single SQLite database: `~/.openclaw/state/trading-intel.sqlite` (WAL mode).
 `sql/schema.sql` contains the baseline schema (its world-model block originated
 as schema v8); the live contract is that baseline plus numbered migrations
-through **0027** under `workspaces/trading-intel/sql/migrations/`.
+through **0028** under `workspaces/trading-intel/sql/migrations/`.
 
 Core pipeline tables: `hypotheses`, `hypothesis_evidence`, `regime`,
 `critic_reviews`, `expression_candidates`, `trade_intents`, `risk_reviews`,
@@ -224,6 +224,17 @@ freshness, factor overlap, provenance, counter-argument quality,
 explainability, size sanity, slippage modelled, stop-rule present, tranche
 consistency) routes a passing intent to **`risk_review`** — never straight to
 `approved`. Only the **Risk** agent promotes to `approved`.
+
+**Open-inventory lineage:** `developer/scripts/inventory_lineage.py` audits every
+current desk position against the exact filled opening order and every later
+post-cutover add. Modern lineage
+requires a prediction and substantive Critic pass no later than intent creation,
+plus an approved/resized Risk review no later than fill. Missing history is never
+backfilled with invented provenance. Positions demonstrably opened before the
+`_prediction_lineage_cutover` remain `legacy_pre_cutover` and may only be reduced
+or freshly re-underwritten through the current gates; any incomplete post-cutover
+opening is a red integrity failure. The runtime snapshot exposes counts, gross
+value, per-position gaps, and the cutover under `inventoryLineage`.
 
 Two 2026-07-02 refinements (schema v13, D47/D48 in `DECISION_LOG.md`):
 - **Risk-reducing intents (`exit`/`trim`) face only sanity gates** — never
@@ -518,8 +529,9 @@ cron→SQLite migration in this build). The overseer drives the desk:
     external-broker fallback or broker credential in the Pages runtime.
 - **Snapshot contract audit:** `audit_app_snapshot.py` validates the current v2
   roster/list topology, internal-paper source and label, desk cash/equity/
-  position arithmetic, selection coverage, prediction-replay count, capital
-  equity, and the exact deterministic pipeline-health color. Retired
+  position arithmetic, open-inventory lineage counts, selection coverage,
+  prediction-replay count, capital equity, and the exact deterministic
+  pipeline-health color. Retired
   `risk_gate`, `calibration`, or `world_model` top-level blocks are not part of
   the contract. `snapshot_builder.py` embeds the full pipeline health result;
   it may not render a shallow green while the production-edge gate is yellow.

@@ -174,6 +174,15 @@ Owned simulator order/fill records relevant to this system.
 
 Add P&L realism fields on `positions`: `pnl_ideal`, `pnl_slippage_adjusted`.
 
+Position rows do not prove their own decision provenance. For each open desk
+position, the canonical lineage audit joins the earliest filled `open`/`add`
+order back to its `trade_intent`, then requires a prediction and substantive
+Critic pass at or before intent creation and Risk approval at or before fill.
+Every later post-cutover add is checked against the same temporal contract.
+`opened_at` may classify an orphaned row as pre-cutover legacy, but may never
+satisfy modern lineage. Pre-cutover gaps remain visible and risk-reducing/fresh-
+re-underwriting-only; incomplete post-cutover lineage is an integrity failure.
+
 `tranches` columns: `id`, `position_id`, `trade_intent_id`, `tranche_type`, `qty`, `entry_price`, `entry_at`, `exit_price`, `exit_at`, `exit_reason`, `return_pct`.
 
 ### 3.10 `system_pauses`

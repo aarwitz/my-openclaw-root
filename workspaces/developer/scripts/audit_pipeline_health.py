@@ -41,6 +41,7 @@ from validation_corpus import (  # noqa: E402
     MIN_POST_CUTOFF as MIN_POST_CUTOFF_CASES,
     audit_corpus,
 )
+from inventory_lineage import build_report as inventory_lineage_report  # noqa: E402
 
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
 from broker import backend  # noqa: E402  (adapter, D52)
@@ -192,6 +193,36 @@ def run_checks(conn) -> list[dict]:
     if bypass:
         issues.append({"severity": "red", "area": "prediction_lineage",
                        "detail": f"{bypass} pending new-risk intents lack a pre-author prediction"})
+
+    try:
+        inventory = inventory_lineage_report(conn)
+    except Exception as exc:
+        issues.append({
+            "severity": "red", "area": "inventory_lineage",
+            "detail": f"open-inventory lineage audit failed: {type(exc).__name__}: {exc}",
+        })
+    else:
+        violations = inventory["status_counts"]["post_cutover_violation"]
+        legacy = inventory["status_counts"]["legacy_pre_cutover"]
+        if not inventory["cutover_present"]:
+            issues.append({
+                "severity": "red", "area": "inventory_lineage",
+                "detail": "prediction-lineage cutover marker is missing",
+            })
+        if violations:
+            issues.append({
+                "severity": "red", "area": "inventory_lineage",
+                "detail": f"{violations} post-cutover open position(s) bypassed modern lineage gates",
+            })
+        if legacy:
+            gross = inventory["gross_value_by_status"]["legacy_pre_cutover"]
+            issues.append({
+                "severity": "yellow", "area": "legacy_inventory",
+                "detail": (
+                    f"{legacy} pre-cutover position(s), gross=${gross:.2f}, lack full modern "
+                    "prediction/Critic/Risk opening lineage; risk-reducing or fresh re-underwriting only"
+                ),
+            })
 
     baseline_ready = conn.execute(
         "SELECT COUNT(*) AS n FROM hypotheses h WHERE h.state='ready' "

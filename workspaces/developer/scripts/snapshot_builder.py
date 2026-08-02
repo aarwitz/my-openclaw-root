@@ -890,6 +890,15 @@ def _load_prediction_replay(conn: sqlite3.Connection) -> dict[str, Any]:
         return {"available": False, "note": f"prediction_replay_unavailable:{type(exc).__name__}"}
 
 
+def _load_inventory_lineage(conn: sqlite3.Connection) -> dict[str, Any]:
+    try:
+        from inventory_lineage import build_report
+
+        return {"available": True, **build_report(conn)}
+    except Exception as exc:
+        return {"available": False, "note": f"inventory_lineage_unavailable:{type(exc).__name__}"}
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -935,6 +944,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "selectionFunnel": _load_selection_funnel(conn),
         "predictionChallenger": _load_prediction_challenger(conn),
         "predictionReplay": _load_prediction_replay(conn),
+        "inventoryLineage": _load_inventory_lineage(conn),
         "capital_attribution": _load_capital_attribution(conn, spy_comparison),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison

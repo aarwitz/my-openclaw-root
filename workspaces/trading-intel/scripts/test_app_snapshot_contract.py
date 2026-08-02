@@ -53,11 +53,25 @@ def _snapshot() -> dict:
         "brokerPositions": [{"symbol": "ABC", "qty": "2", "market_value": "100"}],
         "selectionFunnel": {"coverage": {"matured": 1}},
         "predictionReplay": {"cohort": {"n": 1}},
+        "inventoryLineage": {"available": True, "gross_value_by_status": {
+            "modern_lineage": 100.0, "legacy_pre_cutover": 0, "post_cutover_violation": 0,
+        }, "status_counts": {
+            "modern_lineage": 1, "legacy_pre_cutover": 0, "post_cutover_violation": 0,
+        }},
         "capital_attribution": {"daily": {"equity": 1000.0}},
     }
 
 
 class AppSnapshotContractTests(unittest.TestCase):
+    INVENTORY = lambda self, _conn: {  # noqa: E731
+        "gross_value_by_status": {
+            "modern_lineage": 100.0, "legacy_pre_cutover": 0, "post_cutover_violation": 0,
+        },
+        "status_counts": {
+            "modern_lineage": 1, "legacy_pre_cutover": 0, "post_cutover_violation": 0,
+        },
+    }
+
     def _path(self, payload: dict) -> Path:
         handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
         with handle:
@@ -67,14 +81,20 @@ class AppSnapshotContractTests(unittest.TestCase):
         return path
 
     def test_current_v2_contract_reconciles_without_retired_blocks(self) -> None:
-        report = auditor.check(_conn(), self._path(_snapshot()), health_checker=lambda _conn: [])
+        report = auditor.check(
+            _conn(), self._path(_snapshot()), health_checker=lambda _conn: [],
+            inventory_checker=self.INVENTORY,
+        )
         self.assertEqual(report["color"], "green")
         self.assertEqual(report["issues"], [])
 
     def test_legacy_topology_object_is_red_not_a_crash(self) -> None:
         payload = _snapshot()
         payload["topology"] = {"broker": "Internal paper"}
-        report = auditor.check(_conn(), self._path(payload), health_checker=lambda _conn: [])
+        report = auditor.check(
+            _conn(), self._path(payload), health_checker=lambda _conn: [],
+            inventory_checker=self.INVENTORY,
+        )
         self.assertEqual(report["color"], "red")
         self.assertTrue(any(issue["area"] == "topology" for issue in report["issues"]))
 
@@ -82,9 +102,20 @@ class AppSnapshotContractTests(unittest.TestCase):
         report = auditor.check(
             _conn(), self._path(_snapshot()),
             health_checker=lambda _conn: [{"severity": "yellow", "area": "validation_corpus"}],
+            inventory_checker=self.INVENTORY,
         )
         self.assertEqual(report["color"], "red")
         self.assertTrue(any(issue["area"] == "health_drift" for issue in report["issues"]))
+
+    def test_inventory_gross_drift_is_red(self) -> None:
+        payload = _snapshot()
+        payload["inventoryLineage"]["gross_value_by_status"]["modern_lineage"] = 99.0
+        report = auditor.check(
+            _conn(), self._path(payload), health_checker=lambda _conn: [],
+            inventory_checker=self.INVENTORY,
+        )
+        self.assertEqual(report["color"], "red")
+        self.assertTrue(any(issue["area"] == "inventory_lineage" for issue in report["issues"]))
 
 
 if __name__ == "__main__":

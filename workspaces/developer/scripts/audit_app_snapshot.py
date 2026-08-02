@@ -7,8 +7,8 @@ Verify the deployed `data.json` consumed by the lidisolutions.ai dashboard:
   - agents includes executor + developer + overseer
   - regime block matches latest DB regime row
   - topology and internal-paper broker labels match the current v2 contract
-  - paper cash/equity/positions, prediction replay, selection coverage, and
-    deterministic pipeline health reconcile to canonical state
+  - paper cash/equity/positions, inventory lineage, prediction replay,
+    selection coverage, and deterministic pipeline health reconcile to state
 
 Emits JSON + audit row.
 """
@@ -47,7 +47,7 @@ def _health_color(issues: list[dict]) -> str:
     return "yellow" if issues else "green"
 
 
-def check(conn, path: Path, health_checker=None) -> dict:
+def check(conn, path: Path, health_checker=None, inventory_checker=None) -> dict:
     issues: list[dict] = []
     if not path.exists():
         return {"checked_at": now_iso(), "color": "red",
@@ -68,7 +68,7 @@ def check(conn, path: Path, health_checker=None) -> dict:
     for key in (
         "retail_insights", "system_health", "agents", "topology", "regime", "counts",
         "broker", "brokerPositions", "selectionFunnel", "predictionReplay",
-        "capital_attribution",
+        "inventoryLineage", "capital_attribution",
     ):
         if key not in d:
             issues.append({"severity": "red", "area": "shape",
@@ -163,6 +163,30 @@ def check(conn, path: Path, health_checker=None) -> dict:
     if ((d.get("selectionFunnel") or {}).get("coverage") or {}) != selection_counts:
         issues.append({"severity": "yellow", "area": "selection_funnel",
                        "detail": "selection-funnel coverage differs from canonical DB"})
+
+    snapshot_inventory = d.get("inventoryLineage") or {}
+    if snapshot_inventory.get("available") is not True:
+        issues.append({"severity": "red", "area": "inventory_lineage",
+                       "detail": "snapshot inventory-lineage report is unavailable"})
+    try:
+        if inventory_checker is None:
+            from inventory_lineage import build_report as inventory_checker
+        expected_inventory = inventory_checker(conn)
+        comparable_keys = (
+            "prediction_lineage_cutover", "cutover_present", "open_positions",
+            "status_counts", "gross_value_by_status", "positions",
+        )
+        drift = [
+            key for key in comparable_keys
+            if key in expected_inventory
+            and snapshot_inventory.get(key) != expected_inventory.get(key)
+        ]
+        if drift:
+            issues.append({"severity": "red", "area": "inventory_lineage",
+                           "detail": "snapshot inventory-lineage drift: " + ",".join(drift)})
+    except Exception as exc:
+        issues.append({"severity": "red", "area": "inventory_lineage",
+                       "detail": f"canonical inventory-lineage audit failed: {type(exc).__name__}: {exc}"})
 
     daily_equity = float(
         (((d.get("capital_attribution") or {}).get("daily") or {}).get("equity")) or 0.0
