@@ -71,6 +71,21 @@ def _run(args, timeout=25):
         return 127, f"exec error: {e}"
 
 
+def _first_json_object(output: str):
+    """Decode one JSON value while tolerating surrounding subprocess diagnostics.
+
+    Many market-data connectors correctly write fallback notices to stderr.
+    ``_run`` preserves both streams for diagnosis, so JSON-producing commands
+    can have text before or after their payload.  Parsing from the first ``{``
+    to end made valid reports look corrupt whenever stderr followed stdout.
+    """
+    start = output.find("{")
+    if start < 0:
+        raise ValueError("no JSON object in output")
+    value, _end = json.JSONDecoder().raw_decode(output[start:])
+    return value
+
+
 # --- checks -----------------------------------------------------------------
 
 def check_gateway():
@@ -193,7 +208,7 @@ def check_internal_paper_only():
     checker = f"{ROOT}/scripts/check-internal-paper-only.py"
     rc, out = _run(["python3", checker], timeout=30)
     try:
-        report = json.loads(out[out.index("{"):])
+        report = _first_json_object(out)
     except Exception:
         return finding(
             "internal_paper_only",
@@ -226,7 +241,7 @@ def check_tokens():
     if rc != 0:
         return finding("tokens", "warn", f"model auth status json failed (exit={rc}): {out.strip()[:160]}")
     try:
-        data = json.loads(out)
+        data = _first_json_object(out)
     except Exception as e:
         return finding("tokens", "warn", f"model auth status json parse failed: {e}")
 
@@ -587,7 +602,7 @@ def check_learning_loop():
             f"prediction resolver dry-run failed (rc={rc}): {out[:180]}",
         )
     try:
-        report = json.loads(out[out.index("{"):])
+        report = _first_json_object(out)
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=30)
         resolved = c.execute("SELECT COUNT(*) FROM predictions WHERE resolved_at IS NOT NULL").fetchone()[0]
         c.close()
@@ -627,7 +642,7 @@ def check_integrity():
     behind 'be patient', but not a machine failure that should page."""
     rc, out = _run(["python3", f"{ROOT}/workspaces/trading-intel/scripts/integrity_check.py"], timeout=90)
     try:
-        rep = json.loads(out[out.index("{"):])
+        rep = _first_json_object(out)
     except Exception:
         return finding("integrity", "warn", f"integrity_check unreadable (rc={rc}): {out[:160]}")
     integ = rep.get("integrity", {})
@@ -721,8 +736,7 @@ def check_provenance():
         r = sp.run([f"{ROOT}/scripts/run-with-trace.sh", "--tag", "verify",
                     f"{ROOT}/scripts/provenance-check.py", "--json"],
                    capture_output=True, text=True, timeout=180)
-        out = r.stdout[r.stdout.index("{"):r.stdout.rindex("}") + 1]
-        rep = json.loads(out)
+        rep = _first_json_object((r.stdout or "") + (r.stderr or ""))
     except Exception as e:
         return finding("provenance", "crit", f"provenance-check unrunnable: {e}")
     bad = [c["check"] + ": " + c["detail"][:90] for c in rep["checks"] if c["status"] == "FAIL"]

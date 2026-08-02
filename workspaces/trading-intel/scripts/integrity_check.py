@@ -22,7 +22,10 @@ import json
 import sqlite3
 import statistics
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from connectors.marketdata import daily_bar_complete, is_trading_day
 
 DB_PATH = "/home/aaron/.openclaw/state/trading-intel.sqlite"
 OPEN_STATES = ("opening", "open", "scaling", "trimming", "closing")
@@ -36,19 +39,54 @@ NULL_HOLE_CHECKS = [
     ("portfolio_snapshots", "cash", "1=1", 0.5, "portfolio snapshots have no cash figure"),
 ]
 
-# (table, ts_column, max_age_hours, label) — is the learning/telemetry output fresh?
+# (table, ts_column, max_missed_sessions, label) — is the daily output fresh?
+# Wall-clock hours are invalid across weekends and exchange holidays.
 FRESHNESS_CHECKS = [
-    ("benchmarks", "captured_at", 30, "SPY scoreboard"),
-    ("capital_efficiency_snapshots", "as_of", 30, "capital-efficiency telemetry"),
-    ("portfolio_risk", "as_of", 30, "portfolio risk snapshot"),
+    ("benchmarks", "captured_at", 0, "SPY scoreboard"),
+    ("capital_efficiency_snapshots", "as_of", 0, "capital-efficiency telemetry"),
+    ("portfolio_risk", "as_of", 0, "portfolio risk snapshot"),
 ]
+
+ET = ZoneInfo("America/New_York")
+
+
+def _current_time(now: datetime | None = None) -> datetime:
+    current = now or datetime.now(timezone.utc)
+    return current if current.tzinfo is not None else current.replace(tzinfo=timezone.utc)
+
+
+def _timestamp(value: str) -> datetime:
+    text = str(value or "").strip().replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def completed_sessions_since(timestamp: str, now: datetime | None = None) -> int:
+    """Count completed NYSE sessions strictly after an artifact's ET date.
+
+    A Friday artifact is fresh on Sunday and Monday before the close.  It
+    becomes one session stale only after Monday's close.  This makes health
+    deterministic across weekends, holidays, and early closes.
+    """
+    current = _current_time(now)
+    current_et = current.astimezone(ET)
+    cursor = _timestamp(timestamp).astimezone(ET).date() + timedelta(days=1)
+    missed = 0
+    while cursor <= current_et.date():
+        day = cursor.isoformat()
+        if is_trading_day(day) and daily_bar_complete(day, now=current):
+            missed += 1
+        cursor += timedelta(days=1)
+    return missed
 
 
 def _rows(conn, q, *a):
     return conn.execute(q, a).fetchall()
 
 
-def data_reality(conn) -> list[dict]:
+def data_reality(conn, now: datetime | None = None) -> list[dict]:
     out = []
     # SQLite does not enforce foreign keys unless every writer opts in. A
     # clean table count can therefore hide learning records whose mechanism or
@@ -257,18 +295,20 @@ def data_reality(conn) -> list[dict]:
         else:
             with open(p) as fh:
                 sk = _json.load(fh)
-            age_h = ( _dt.now(_tz.utc)
+            current = _current_time(now)
+            age_h = ( current
                       - _dt.fromisoformat(str(sk.get("generated_at","1970-01-01T00:00:00Z")).replace("Z","+00:00"))
                     ).total_seconds() / 3600.0
             names = sorted({s.get("ticker","?") for s in sk.get("skipped", [])})
-            if age_h > 24:
+            missed = completed_sessions_since(sk.get("generated_at", "1970-01-01T00:00:00Z"), now=current)
+            if missed > 0:
                 out.append({"family": "data", "id": "data:unmarkable_positions", "status": "RED",
-                            "detail": f"mark telemetry is {age_h:.0f}h old — mark_positions is not running"})
+                            "detail": f"mark telemetry is {age_h:.0f}h old and {missed} completed session(s) stale — mark_positions is not running"})
             else:
                 out.append({"family": "data", "id": "data:unmarkable_positions",
                             "status": "RED" if names else "OK",
                             "detail": (f"open positions NO provider can price (unprotected — rename/delisting?): {', '.join(names)}"
-                                       if names else "all open positions priced on the last mark pass")})
+                                       if names else f"all open positions priced; {age_h:.0f}h wall-clock age, 0 completed sessions missed")})
     except Exception:
         pass
 
@@ -303,9 +343,10 @@ def data_reality(conn) -> list[dict]:
     return out
 
 
-def loop_closure(conn) -> list[dict]:
+def loop_closure(conn, now: datetime | None = None) -> list[dict]:
     out = []
-    for tbl, tsc, max_h, label in FRESHNESS_CHECKS:
+    current = _current_time(now)
+    for tbl, tsc, max_missed, label in FRESHNESS_CHECKS:
         try:
             last = conn.execute(f"SELECT MAX({tsc}) FROM {tbl}").fetchone()[0]
         except sqlite3.Error:
@@ -313,9 +354,16 @@ def loop_closure(conn) -> list[dict]:
         if not last:
             out.append({"family": "loop", "id": f"fresh:{tbl}", "status": "RED", "detail": f"{label}: never written"})
             continue
-        age_h = conn.execute("SELECT (julianday('now') - julianday(?)) * 24", (last,)).fetchone()[0]
-        out.append({"family": "loop", "id": f"fresh:{tbl}", "status": "RED" if age_h > max_h else "OK",
-                    "detail": f"{label}: last update {age_h:.1f}h ago"})
+        try:
+            age_h = (current - _timestamp(last)).total_seconds() / 3600.0
+            missed = completed_sessions_since(last, now=current)
+        except (TypeError, ValueError) as exc:
+            out.append({"family": "loop", "id": f"fresh:{tbl}", "status": "RED",
+                        "detail": f"{label}: invalid timestamp {last!r} ({exc})"})
+            continue
+        out.append({"family": "loop", "id": f"fresh:{tbl}",
+                    "status": "RED" if missed > max_missed else "OK",
+                    "detail": f"{label}: last update {age_h:.1f}h ago, {missed} completed session(s) missed"})
 
     # Contract: closed positions must produce an attribution row WITH a realized edge (pnl->attribution loop).
     try:

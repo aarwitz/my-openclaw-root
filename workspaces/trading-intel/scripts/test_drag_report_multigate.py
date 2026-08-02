@@ -12,6 +12,7 @@ import drag_report  # noqa: E402
 import gate_evaluator  # noqa: E402
 import signals_to_hypotheses  # noqa: E402
 import cleanup_legacy_blocked_intents  # noqa: E402
+import factor_regime  # noqa: E402
 
 
 LEGACY_REASON = (
@@ -77,6 +78,16 @@ def _make_sizing_conn() -> sqlite3.Connection:
 
 
 class GateAttributionTests(unittest.TestCase):
+    def setUp(self):
+        # collect_signals includes a live factor-regime diagnostic. Unit tests
+        # exercise attribution, not market-data availability; keep the suite
+        # offline and deterministic instead of waiting on provider DNS/timeouts.
+        self._factor_snapshot = factor_regime.snapshot
+        factor_regime.snapshot = lambda _conn: {}
+
+    def tearDown(self):
+        factor_regime.snapshot = self._factor_snapshot
+
     def test_format_blocked_reason_includes_gate_inputs(self):
         result = {
             "failed_gates": ["evidence_freshness", "counterargument_quality"],

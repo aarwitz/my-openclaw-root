@@ -59,7 +59,7 @@ log "===== learning chain start (pid $$) ====="
 # D54: the internal ledger IS the brokerage — back it up before anything else.
 step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
 # D57: money-path CI — the ledger IS the brokerage; its math gets tested nightly.
-step "money-path-tests"    bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/money-path-tests.py"
+step "autotrade-preflight" bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/autotrade-preflight.py"
 step "exec-edgecases"      "$PY" "$TI/test_pipeline_edgecases.py"
 step "risk-opposition"     "$PY" "$TI/test_risk_opposition_sweep.py"
 step "sync-symbol-aliases" "$PY" "$TI/sync_symbol_aliases.py"

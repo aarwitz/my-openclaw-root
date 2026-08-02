@@ -75,6 +75,13 @@ assert _pq_groom_spec and _pq_groom_spec.loader
 pq_groom = importlib.util.module_from_spec(_pq_groom_spec)
 _pq_groom_spec.loader.exec_module(pq_groom)
 
+_health_spec = importlib.util.spec_from_file_location(
+    "system_health_sweep", ROOT / "scripts/system-health-sweep.py"
+)
+assert _health_spec and _health_spec.loader
+system_health_sweep = importlib.util.module_from_spec(_health_spec)
+_health_spec.loader.exec_module(system_health_sweep)
+
 
 def _iso(minutes: int = 0) -> str:
     return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -710,6 +717,23 @@ class SignalSafetyTests(unittest.TestCase):
                 msg=f"{relative} can race another ledger/feature writer",
             )
 
+    def test_merge_and_nightly_paths_run_the_offline_preflight(self) -> None:
+        policy = json.loads((ROOT / "scripts/merge-policy.json").read_text())
+        checks = policy["repo_checks"][str(ROOT)]
+        self.assertTrue(any("scripts/autotrade-preflight.py" in c for c in checks))
+        learning = (ROOT / "scripts/learning-chain.sh").read_text()
+        self.assertIn('step "autotrade-preflight"', learning)
+        preflight = (ROOT / "scripts/autotrade-preflight.py").read_text()
+        for required in (
+            "config-json-contract",
+            "doc-contract",
+            "internal-paper-only",
+            "trading-unit-suite",
+            "quant-unit-suite",
+            "money-path",
+        ):
+            self.assertIn(required, preflight)
+
     def test_telegram_authoring_crons_cannot_emit_completion_receipts(self) -> None:
         jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
         telegram_jobs = [
@@ -798,6 +822,28 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertNotIn(
             "researcher -> quant -> critic -> trader -> risk -> executor",
             topic_prompt,
+        )
+
+    def test_health_json_parser_tolerates_stderr_after_stdout(self) -> None:
+        output = 'connector note\n{"matured": 0, "scanned": 7}\nSPY fallback notice\n'
+        self.assertEqual(
+            system_health_sweep._first_json_object(output),
+            {"matured": 0, "scanned": 7},
+        )
+
+    def test_integrity_freshness_counts_sessions_not_weekend_hours(self) -> None:
+        friday_mark = "2026-07-31T20:00:00Z"
+        sunday = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+        monday_preclose = datetime(2026, 8, 3, 18, 0, tzinfo=timezone.utc)
+        monday_postclose = datetime(2026, 8, 3, 21, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            integrity_check.completed_sessions_since(friday_mark, sunday), 0
+        )
+        self.assertEqual(
+            integrity_check.completed_sessions_since(friday_mark, monday_preclose), 0
+        )
+        self.assertEqual(
+            integrity_check.completed_sessions_since(friday_mark, monday_postclose), 1
         )
 
     def test_canonical_connection_and_health_enforce_foreign_keys(self) -> None:

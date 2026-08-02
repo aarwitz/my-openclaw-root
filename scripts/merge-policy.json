@@ -24,7 +24,7 @@
   "repo_checks": {
     "/home/aaron/.openclaw": [
       "bash scripts/scripts-policy-lint.sh",
-      "bash scripts/run-with-trace.sh --tag test scripts/money-path-tests.py"
+      "bash scripts/run-with-trace.sh --tag test scripts/autotrade-preflight.py"
     ]
   }
 }

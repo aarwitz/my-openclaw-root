@@ -668,4 +668,8 @@ deprecated, and link-count growth is never treated as learning quality.
 9. Baseline Critic triage cannot promote. A substantive `reviewed_by=critic`
    review with two developed counterarguments must precede ready state and any
    new prediction.
+10. Code changes do not wait for a trading day to reveal regressions. The merge
+    gate and nightly learning chain run `scripts/autotrade-preflight.py`: config,
+    syntax, doc/architecture semantics, internal-paper exclusivity, all unit
+    tests, and money-path conservation on offline fixtures.
 ```
