@@ -82,6 +82,7 @@ def _stage_order(report: dict, first: str, second: str) -> bool:
 
 def main() -> int:
     before = (LEDGER.stat().st_size, LEDGER.stat().st_mtime_ns) if LEDGER.exists() else None
+    temporary_before = set(Path("/tmp").glob("autotrade-internal-paper-check.*.json"))
     cases = [
         _run("regular-session", trading_day=True),
         _run("exchange-closed", trading_day=False),
@@ -128,6 +129,11 @@ def main() -> int:
     _assert(advisory, "ml_evidence_track:42" in r.get("pipeline_result", {}).get("failures", []), "advisory failure missing from final report")
 
     after = (LEDGER.stat().st_size, LEDGER.stat().st_mtime_ns) if LEDGER.exists() else None
+    leaked_temporary = sorted(
+        str(path)
+        for path in set(Path("/tmp").glob("autotrade-internal-paper-check.*.json"))
+        - temporary_before
+    )
     no_write = before == after
     failures = [
         {"case": case["name"], "failures": case["failures"], "output_tail": case["output_tail"]}
@@ -135,6 +141,11 @@ def main() -> int:
     ]
     if not no_write:
         failures.append({"case": "no-write-contract", "failures": ["live ledger metadata changed during replay"]})
+    if leaked_temporary:
+        failures.append({
+            "case": "temporary-artifact-contract",
+            "failures": ["scenario replay leaked temporary report(s): " + ",".join(leaked_temporary)],
+        })
 
     report = {
         "ok": not failures,
@@ -150,6 +161,7 @@ def main() -> int:
             for case in cases
         ],
         "ledger_unchanged": no_write,
+        "temporary_artifacts_leaked": leaked_temporary,
         "failures": failures,
     }
     print(json.dumps(report, indent=2))

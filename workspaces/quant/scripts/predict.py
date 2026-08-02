@@ -25,6 +25,7 @@ Idempotent: skips a hypothesis that already has an unresolved prediction unless
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -32,6 +33,7 @@ import sqlite3
 import sys
 import uuid
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
@@ -69,10 +71,21 @@ BASE_RATE = {"long": 0.466, "short": 0.534}
 MAX_SHIFT_UNPROVEN = 0.15
 PROVEN_FAMILY_N = 30.0
 EXIT_OK = 0
+PREDICTION_POLICY_VERSION = "world_model_probability_v2"
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@lru_cache(maxsize=1)
+def prediction_policy_hash() -> str:
+    """Fingerprint the exact predictor/world-model source that authored a row."""
+    digest = hashlib.sha256()
+    digest.update(PREDICTION_POLICY_VERSION.encode())
+    for path in (Path(__file__).resolve(), Path(wm.__file__).resolve()):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _hours_old(iso: str | None) -> float | None:
@@ -145,10 +158,7 @@ def keyword_match(thesis: str, mech: dict) -> bool:
 
 def thesis_direction(thesis: str) -> str:
     """Infer long/short stance from the thesis summary prose."""
-    t = thesis.lower()
-    if t.startswith("short") or "bearish" in t[:40] or t.startswith("short/"):
-        return "short"
-    return "long"
+    return wm.thesis_direction(thesis)
 
 
 def mechanism_alignment(thesis_dir: str, mech_dir: str) -> int:
@@ -295,6 +305,8 @@ def build_prediction(
         "predicted_at": _now(),
         "horizon": horizon,
         "thesis_direction": tdir,
+        "prediction_policy_version": PREDICTION_POLICY_VERSION,
+        "prediction_policy_hash": prediction_policy_hash(),
         "p_correct": round(p_correct, 4),
         "return_p10": round(p10, 3),
         "return_p50": round(p50, 3),
@@ -352,13 +364,15 @@ def predict_one(
     conn.execute(
         "INSERT INTO predictions (id, hypothesis_id, predicted_at, predicted_by, "
         "horizon, p_correct, return_p10, return_p50, return_p90, mechanism_ids_json, "
-        "regime_at_prediction, evidence_quality, prior_log_odds, experiment_id) "
-        "VALUES (?, ?, ?, 'quant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "regime_at_prediction, evidence_quality, prior_log_odds, thesis_direction, "
+        "prediction_policy_version, prediction_policy_hash, experiment_id) "
+        "VALUES (?, ?, ?, 'quant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             pred["id"], pred["hypothesis_id"], pred["predicted_at"], pred["horizon"], pred["p_correct"],
             pred["return_p10"], pred["return_p50"], pred["return_p90"],
             json.dumps(pred["mechanism_detail"]), pred["regime"], pred["evidence_quality"],
-            pred["prior_log_odds"], experiment_id,
+            pred["prior_log_odds"], pred["thesis_direction"],
+            pred["prediction_policy_version"], pred["prediction_policy_hash"], experiment_id,
         ),
     )
     conn.execute(

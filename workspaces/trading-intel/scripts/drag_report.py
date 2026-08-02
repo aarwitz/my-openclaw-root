@@ -1114,10 +1114,10 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                 relinked_delta = report.get("replay", {}).get("current_linker_delta_vs_actual")
                 if relinked_mean is not None and relinked_delta is not None:
                     evidence.append(
-                        "TM-263 current-linker replay: "
+                        "TM-263 retrospective current-policy counterfactual: "
                         f"before_actual={report.get('actual_mean_brier')} after_replay={relinked_mean} "
                         f"delta={relinked_delta} changed_links={relinked.get('changed_links')}; "
-                        "historical resolved rows are not retro-mutated"
+                        "not point-in-time evidence; historical resolved rows must not be retro-mutated"
                     )
                 selected_relinked = report.get("replay", {}).get("selected_contributor_current_linker") or {}
                 if selected_relinked:

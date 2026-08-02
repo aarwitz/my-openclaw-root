@@ -208,6 +208,7 @@ def diagnose_next_blocker(report: dict) -> dict:
     current = replay.get("current_linker_replay") or {}
     current_mean = current.get("mean_brier")
     changed_links = int(current.get("changed_links") or 0)
+    active_mechanisms = int(report.get("active_mechanism_count") or 0)
     target = 0.25
 
     if actual is None or current_mean is None:
@@ -217,22 +218,29 @@ def diagnose_next_blocker(report: dict) -> dict:
             "rationale": "Insufficient resolved/replay data to separate linker behavior from calibration decay.",
         }
     if changed_links > 0 and current_mean < actual:
-        if current_mean < target <= actual:
+        if active_mechanisms == 0:
+            kind = "forward_discriminative_signal"
             rationale = (
-                "Current-linker replay beats the coin-flip threshold, but stored resolved rows still carry "
-                "historical links. Recomputing resolved-history links/posteriors is a gated data/model change."
+                "Today's policy has zero active mechanisms, so the apparent replay improvement is the "
+                "NO_EDGE quarantine collapsing old forecasts to direction base rates. It is not a "
+                "point-in-time linker improvement: never rewrite resolved history from this result. "
+                "The next blocker is a forward-tested discriminative signal."
             )
         else:
+            kind = "forward_policy_validation"
             rationale = (
-                "Current-linker replay improves Brier, but not enough to beat the coin-flip threshold; relink "
-                "history first, then measure residual mechanism-specific calibration decay."
+                "This is a retrospective current-policy counterfactual using today's mechanism set, "
+                "not a point-in-time reconstruction. Preserve resolved history and validate the current "
+                "policy forward before any model promotion."
             )
         return {
-            "kind": "resolved_history_relinking",
+            "kind": kind,
             "target_mean_brier": target,
             "actual_mean_brier": actual,
             "current_linker_replay_mean_brier": current_mean,
             "changed_links": changed_links,
+            "active_mechanism_count": active_mechanisms,
+            "resolved_history_mutation_allowed": False,
             "rationale": rationale,
         }
     if current_mean >= actual:
@@ -291,6 +299,7 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
         "window_days": days,
         "resolved_predictions": len(rows),
         "actual_mean_brier": actual_mean,
+        "active_mechanism_count": len(mechs),
         "contributors": ranked,
         "breakdown": breakdown,
         "worst_overall": worst_overall,
@@ -298,6 +307,10 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
         "selected_contributor": selected,
         "selection_reason": selection_reason,
         "replay": {
+            "semantics": (
+                "retrospective_current_policy_counterfactual; uses today's active "
+                "mechanism set and must not rewrite resolved history or promote a model"
+            ),
             "baseline_class_family_most_observed": baseline,
             "fixed_root_family_horizon_preferred": fixed,
             "delta_mean_brier": (

@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from connectors import marketdata  # noqa: E402
 from developer_db import audit, connect, now_iso  # noqa: E402
+import worldmodel as wm  # noqa: E402
 
 BASE_RATE = {"long": 0.466, "short": 0.534}
 
@@ -67,11 +68,6 @@ def register(conn: sqlite3.Connection, cfg: dict) -> dict:
     return {"registered": True, "experiment_id": cfg["experiment_id"]}
 
 
-def _direction(thesis: str | None) -> str:
-    text = str(thesis or "").strip().lower()
-    return "short" if text.startswith("short") or text.startswith("bearish") else "long"
-
-
 def _entry_date(predicted_at: str) -> str:
     parsed = datetime.fromisoformat(predicted_at.replace("Z", "+00:00")).astimezone(marketdata._et())
     day = parsed.date()
@@ -90,13 +86,22 @@ def _stable_id(experiment_id: str, prediction_id: str, variant: str) -> str:
 
 def record(conn: sqlite3.Connection, cfg: dict) -> dict:
     registered = conn.execute(
-        "SELECT started_at,scope FROM experiments WHERE id=?",
+        "SELECT started_at,scope,hypothesis FROM experiments WHERE id=?",
         (cfg["experiment_id"],),
     ).fetchone()
-    if not registered or registered["started_at"] != cfg["start_at"]:
+    try:
+        registered_protocol = json.loads(registered["hypothesis"]) if registered else None
+    except (TypeError, json.JSONDecodeError):
+        registered_protocol = None
+    if (
+        not registered
+        or registered["started_at"] != cfg["start_at"]
+        or registered["scope"] != "prediction_calibration_shadow"
+        or registered_protocol != cfg
+    ):
         raise RuntimeError("prediction challenger protocol is not preregistered exactly")
     rows = conn.execute(
-        "SELECT p.id,p.hypothesis_id,p.predicted_at,p.p_correct,h.thesis_summary "
+        "SELECT p.id,p.hypothesis_id,p.predicted_at,p.p_correct,p.thesis_direction,h.thesis_summary "
         "FROM predictions p JOIN hypotheses h ON h.id=p.hypothesis_id "
         "WHERE p.predicted_at>=? ORDER BY p.predicted_at,p.id",
         (cfg["start_at"],),
@@ -104,7 +109,9 @@ def record(conn: sqlite3.Connection, cfg: dict) -> dict:
     written = 0
     for row in rows:
         champion = min(max(float(row["p_correct"]), 1e-6), 1 - 1e-6)
-        base = BASE_RATE[_direction(row["thesis_summary"])]
+        base = BASE_RATE[
+            row["thesis_direction"] or wm.thesis_direction(row["thesis_summary"])
+        ]
         variants = {
             "champion_v1": champion,
             "base_rate": base,
@@ -189,9 +196,13 @@ def _trading_sessions_since(start_at: str) -> int:
 
 def report(conn: sqlite3.Connection, cfg: dict) -> dict:
     rows = conn.execute(
-        "SELECT prediction_id,variant,p_correct,entry_date,brier_score,log_loss,"
-        "realized_excess_pct FROM prediction_challengers "
-        "WHERE experiment_id=? AND resolved_at IS NOT NULL ORDER BY prediction_id,variant",
+        "SELECT pc.prediction_id,pc.variant,pc.p_correct,pc.entry_date,"
+        "pc.brier_score,pc.log_loss,pc.realized_excess_pct,p.thesis_direction,h.thesis_summary "
+        "FROM prediction_challengers pc "
+        "JOIN predictions p ON p.id=pc.prediction_id "
+        "JOIN hypotheses h ON h.id=p.hypothesis_id "
+        "WHERE pc.experiment_id=? AND pc.resolved_at IS NOT NULL "
+        "ORDER BY pc.prediction_id,pc.variant",
         (cfg["experiment_id"],),
     ).fetchall()
     by_prediction: dict[str, dict[str, sqlite3.Row]] = defaultdict(dict)
@@ -204,13 +215,25 @@ def report(conn: sqlite3.Connection, cfg: dict) -> dict:
         briers = [float(row["brier_score"]) for row in variant_rows]
         losses = [float(row["log_loss"]) for row in variant_rows]
         correlations = [
-            (float(row["p_correct"]), float(row["realized_excess_pct"]))
+            (
+                float(row["p_correct"]),
+                wm.directional_excess_pct(
+                    row["realized_excess_pct"],
+                    row["thesis_direction"] or wm.thesis_direction(row["thesis_summary"]),
+                ),
+            )
             for row in variant_rows if row["realized_excess_pct"] is not None
         ]
         differences: list[tuple[str, float]] = []
+        distinct_probability_n = 0
         if variant != champion:
             for group in by_prediction.values():
                 if variant in group and champion in group:
+                    if abs(
+                        float(group[variant]["p_correct"])
+                        - float(group[champion]["p_correct"])
+                    ) > 1e-12:
+                        distinct_probability_n += 1
                     differences.append((
                         str(group[variant]["entry_date"]),
                         float(group[variant]["brier_score"]) - float(group[champion]["brier_score"]),
@@ -219,9 +242,10 @@ def report(conn: sqlite3.Connection, cfg: dict) -> dict:
             "n": len(variant_rows),
             "mean_brier": None if not briers else round(statistics.fmean(briers), 6),
             "mean_log_loss": None if not losses else round(statistics.fmean(losses), 6),
-            "corr_p_excess": None if not correlations else (
+            "corr_p_directional_excess": None if not correlations else (
                 None if _pearson(correlations) is None else round(_pearson(correlations), 4)
             ),
+            "paired_distinct_probability_n": distinct_probability_n,
             "paired_brier_delta_vs_champion": (
                 None if not differences else round(statistics.fmean(value for _, value in differences), 6)
             ),
@@ -231,6 +255,10 @@ def report(conn: sqlite3.Connection, cfg: dict) -> dict:
         }
     sessions = _trading_sessions_since(cfg["start_at"])
     champion_n = variants[champion]["n"]
+    informative = max(
+        (item["paired_distinct_probability_n"] for item in variants.values()),
+        default=0,
+    )
     return {
         "experiment_id": cfg["experiment_id"],
         "start_at": cfg["start_at"],
@@ -238,6 +266,7 @@ def report(conn: sqlite3.Connection, cfg: dict) -> dict:
         "minimum_trading_sessions": cfg["minimum_trading_sessions"],
         "resolved_predictions": champion_n,
         "minimum_resolved_predictions": cfg["minimum_resolved_predictions"],
+        "informative_paired_predictions": informative,
         "eligible_for_decision": (
             sessions >= int(cfg["minimum_trading_sessions"])
             and champion_n >= int(cfg["minimum_resolved_predictions"])

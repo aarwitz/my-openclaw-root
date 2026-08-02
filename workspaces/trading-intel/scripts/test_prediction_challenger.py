@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
+import json
 import sqlite3
 import unittest
 from pathlib import Path
@@ -40,7 +42,8 @@ class PredictionChallengerTests(unittest.TestCase):
         self.conn.execute(
             "INSERT INTO experiments(id,started_at,scope,hypothesis,decided_by) "
             "VALUES('test-forward','2026-08-03T00:00:00Z','prediction_calibration_shadow',"
-            "'test protocol','developer')"
+            "?,'developer')",
+            (json.dumps(self.cfg, sort_keys=True),),
         )
         self.conn.execute(
             "INSERT INTO predictions(id,hypothesis_id,predicted_at,predicted_by,horizon,p_correct) "
@@ -67,6 +70,48 @@ class PredictionChallengerTests(unittest.TestCase):
         self.assertAlmostEqual(report["variants"]["champion_v1"]["mean_brier"], 0.09)
         # The shadow experiment must not alter the canonical prediction.
         self.assertAlmostEqual(self.conn.execute("SELECT p_correct FROM predictions").fetchone()[0], 0.70)
+
+    def test_record_rejects_protocol_drift_after_registration(self) -> None:
+        drifted = copy.deepcopy(self.cfg)
+        drifted["promotion_rule"] = "changed after registration"
+        with self.assertRaisesRegex(RuntimeError, "preregistered exactly"):
+            challenger.record(self.conn, drifted)
+
+    def test_report_correlates_probability_with_directional_excess(self) -> None:
+        self.conn.executemany(
+            "INSERT INTO hypotheses(id,created_at,created_by,tickers,thesis_summary,state) "
+            "VALUES(?,?,?,?,?,'ready')",
+            [
+                ("h2", "2026-08-03T12:00:00Z", "researcher", '["DEF"]', "Short DEF"),
+                ("h3", "2026-08-03T12:00:00Z", "researcher", '["GHI"]', "Bearish GHI"),
+            ],
+        )
+        self.conn.executemany(
+            "INSERT INTO predictions(id,hypothesis_id,predicted_at,predicted_by,horizon,p_correct) "
+            "VALUES(?,?,?,?,?,?)",
+            [
+                ("p2", "h2", "2026-08-03T14:01:00Z", "quant", "swing_1_5d", 0.60),
+                ("p3", "h3", "2026-08-03T14:02:00Z", "quant", "swing_1_5d", 0.80),
+            ],
+        )
+        self.assertEqual(challenger.record(self.conn, self.cfg)["written"], 9)
+        self.conn.execute(
+            "UPDATE predictions SET realized_outcome='correct',realized_excess_pct=2.5,"
+            "resolved_at='2026-08-10T00:00:00Z' WHERE id='p'"
+        )
+        self.conn.execute(
+            "UPDATE predictions SET realized_outcome='correct',realized_excess_pct=-1.0,"
+            "resolved_at='2026-08-10T00:00:00Z' WHERE id='p2'"
+        )
+        self.conn.execute(
+            "UPDATE predictions SET realized_outcome='correct',realized_excess_pct=-3.0,"
+            "resolved_at='2026-08-10T00:00:00Z' WHERE id='p3'"
+        )
+        self.assertEqual(challenger.grade(self.conn, self.cfg)["graded"], 9)
+        report = challenger.report(self.conn, self.cfg)
+        champion = report["variants"]["champion_v1"]
+        self.assertGreater(champion["corr_p_directional_excess"], 0)
+        self.assertEqual(report["informative_paired_predictions"], 3)
 
 
 if __name__ == "__main__":

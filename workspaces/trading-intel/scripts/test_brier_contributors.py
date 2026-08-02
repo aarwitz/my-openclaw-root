@@ -94,9 +94,10 @@ class BrierContributorTests(unittest.TestCase):
         self.assertEqual(report["mean_brier"], 0.25)
         self.assertEqual(report["mechanism_counts"], {"(none)": 1})
 
-    def test_diagnose_next_blocker_resolved_history_relinking(self) -> None:
+    def test_diagnose_next_blocker_never_rewrites_history_from_quarantine(self) -> None:
         report = {
             "actual_mean_brier": 0.253884,
+            "active_mechanism_count": 0,
             "replay": {
                 "current_linker_replay": {
                     "mean_brier": 0.242734,
@@ -107,10 +108,12 @@ class BrierContributorTests(unittest.TestCase):
 
         blocker = brier_contributors.diagnose_next_blocker(report)
 
-        self.assertEqual(blocker["kind"], "resolved_history_relinking")
+        self.assertEqual(blocker["kind"], "forward_discriminative_signal")
         self.assertEqual(blocker["actual_mean_brier"], 0.253884)
         self.assertEqual(blocker["current_linker_replay_mean_brier"], 0.242734)
         self.assertEqual(blocker["changed_links"], 88)
+        self.assertFalse(blocker["resolved_history_mutation_allowed"])
+        self.assertIn("never rewrite resolved history", blocker["rationale"])
 
     def test_diagnose_next_blocker_current_linker_behavior(self) -> None:
         report = {

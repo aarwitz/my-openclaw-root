@@ -172,7 +172,7 @@ def resolve_prediction_backlog(
     now = now or _utc_now()
     rows = conn.execute(
         "SELECT p.id, p.hypothesis_id, p.predicted_at, p.horizon, p.p_correct, p.mechanism_ids_json, "
-        "p.regime_at_prediction, p.experiment_id, h.tickers, h.thesis_summary "
+        "p.regime_at_prediction, p.experiment_id, p.thesis_direction, h.tickers, h.thesis_summary "
         "FROM predictions p JOIN hypotheses h ON h.id = p.hypothesis_id "
         "WHERE p.resolved_at IS NULL AND p.realized_outcome IS NULL "
         "ORDER BY p.predicted_at ASC, p.id ASC"
@@ -227,7 +227,7 @@ def resolve_prediction_backlog(
             summary["data_blocked"] += 1
             continue
 
-        direction = predict.thesis_direction(row["thesis_summary"] or "")
+        direction = row["thesis_direction"] or predict.thesis_direction(row["thesis_summary"] or "")
         excess_pct = round(ticker_window.return_pct - spy_window.return_pct, 3)
         realized_return_pct = round(ticker_window.return_pct, 3)
         resolved_at = _resolved_at_for(ticker_window.exit_date)

@@ -94,7 +94,9 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 - **`predict.py`**: every hypothesis gets p_correct built from an empirical base rate,
   mechanism posteriors combined
   in log-odds (family-deduped, shift capped ±0.15 until a family has n≥30 — D63), and a
-  valuation-aware return band.
+  valuation-aware return band. Direction and the exact predictor/world-model
+  source fingerprint are frozen on the prediction row; later thesis edits
+  cannot change old grading semantics.
 - **`resolve_prediction_backlog.py` is the resolution owner**:
   each prediction is graded from its own `predicted_at` and horizon against
   SPY-relative excess. Missing data stays unresolved/data-blocked and pages
@@ -104,6 +106,11 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 - **`calibrate.py` is calibration-only**: it consumes resolved forecasts and
   recomputes mechanism posteriors; it does not resolve predictions.
 - **Exam report** (`exam_report.py`, nightly): the report card telegram.
+- **Offline probability replay** (`prediction_replay.py`, every preflight):
+  read-only fixed-variant Brier/log-loss and direction-adjusted-return checks on
+  frozen rows, also exposed as `predictionReplay` in the runtime GUI snapshot.
+  It detects regressions before Telegram but has no promotion authority; only
+  the preregistered forward challenger can earn trust.
 
 ## #5 Trade-experience learning — *lessons from every position*
 
@@ -157,7 +164,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 
 ## #9 Institutional memory — *what the humans + LLMs remember*
 
-- **DECISION_LOG.md** (through D113): every architectural decision, why, approver. **FINDINGS.md**:
+- **DECISION_LOG.md** (through D114): every architectural decision, why, approver. **FINDINGS.md**:
   the lab notebook — dated claims with `revalidate-by` expiry so quantitative beliefs can't
   silently rot into canon. **Market debriefs:** the daily what-moved-and-why narrative.
   **Evidence graph** (historical table name `causal_edges`, rebuilt nightly):

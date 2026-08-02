@@ -73,8 +73,14 @@ cd "$OPENCLAW" || { echo '{"ok":false,"error":"cd failed"}'; exit 2; }
 # Architecture invariant before any write or order path. This aborts the pass if
 # a legacy provider credential, connector, backend switch, prompt, or active-code
 # reference is reintroduced.
-if ! python3 "$OPENCLAW/scripts/check-internal-paper-only.py" >/tmp/autotrade-internal-paper-check.json; then
-  python3 -c 'import json; print(json.dumps({"ok": False, "error": "internal-paper-only architecture violation", "report": json.load(open("/tmp/autotrade-internal-paper-check.json"))}))'
+INTERNAL_PAPER_REPORT="$(mktemp /tmp/autotrade-internal-paper-check.XXXXXX.json)" || {
+  echo '{"ok":false,"error":"cannot allocate architecture-check report"}'
+  exit 2
+}
+cleanup_internal_paper_report() { rm -f "$INTERNAL_PAPER_REPORT"; }
+trap cleanup_internal_paper_report EXIT
+if ! python3 "$OPENCLAW/scripts/check-internal-paper-only.py" >"$INTERNAL_PAPER_REPORT"; then
+  python3 -c 'import json,sys; print(json.dumps({"ok": False, "error": "internal-paper-only architecture violation", "report": json.load(open(sys.argv[1]))}))' "$INTERNAL_PAPER_REPORT"
   exit 2
 fi
 

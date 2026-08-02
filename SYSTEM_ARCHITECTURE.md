@@ -7,7 +7,7 @@
 > `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
 > to `archive/docs-retired-20260702/`.
 >
-> **Topology:** v5 · **DB schema/migrations:** through 0027 · **Last reconciled:** 2026-08-02
+> **Topology:** v5 · **DB schema/migrations:** through 0028 · **Last reconciled:** 2026-08-02
 
 ---
 
@@ -348,6 +348,14 @@ nudged toward fair value by the bounded, confidence-scaled margin of safety.
 Predictions are emitted only for `ready` hypotheses after a substantive Critic
 review. The deterministic baseline is triage and can challenge, but cannot
 promote or stand in for adversarial review.
+
+Each row freezes `thesis_direction`, `prediction_policy_version`, and a SHA-256
+fingerprint of the exact predictor/world-model source. Resolution and replay use
+that frozen direction, never mutable thesis prose. Legacy rows are explicitly
+`legacy_unversioned`; their missing historical code hash is not fabricated.
+`prediction_replay.py` recomputes fixed probability variants from frozen rows in
+offline preflight, but is retrospective diagnostic evidence with no promotion
+authority.
 
 Probability changes use a forward shadow champion/challenger lane
 (`prediction_challenger.py`, migration 0025). Paired variants are recorded

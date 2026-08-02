@@ -1093,7 +1093,7 @@ class SignalSafetyTests(unittest.TestCase):
         risk_source = (
             ROOT / "workspaces/risk/scripts/gate_risk_intents.py"
         ).read_text()
-        self.assertIn("migrations:** through 0027", architecture)
+        self.assertIn("migrations:** through 0028", architecture)
         self.assertIn("Concurrent names:** ≤ 48", architecture)
         self.assertIn("MAX_POSITIONS = 48", risk_source)
         self.assertIn("These are **not one unified graph**", architecture)

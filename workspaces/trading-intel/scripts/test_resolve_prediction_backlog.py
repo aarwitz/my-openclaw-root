@@ -14,7 +14,8 @@ def _conn() -> sqlite3.Connection:
     conn.execute(
         "CREATE TABLE predictions (id TEXT PRIMARY KEY, hypothesis_id TEXT, predicted_at TEXT, horizon TEXT, "
         "p_correct REAL, mechanism_ids_json TEXT, regime_at_prediction TEXT, experiment_id TEXT, "
-        "realized_outcome TEXT, realized_return_pct REAL, realized_excess_pct REAL, brier_component REAL, resolved_at TEXT)"
+        "realized_outcome TEXT, realized_return_pct REAL, realized_excess_pct REAL, brier_component REAL, "
+        "resolved_at TEXT, thesis_direction TEXT)"
     )
     conn.execute(
         "CREATE TABLE hypotheses (id TEXT PRIMARY KEY, tickers TEXT, thesis_summary TEXT)"
@@ -41,7 +42,7 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         )
         conn.execute(
             "INSERT INTO predictions VALUES ('p1', 'h1', '2026-06-01T12:00:00Z', 'intraday', 0.8, "
-            "'[{\"id\":\"mech-1\",\"align\":1},{\"id\":\"mech-2\",\"align\":-1}]', 'neutral', 'exp-1', NULL, NULL, NULL, NULL, NULL)"
+            "'[{\"id\":\"mech-1\",\"align\":1},{\"id\":\"mech-2\",\"align\":-1}]', 'neutral', 'exp-1', NULL, NULL, NULL, NULL, NULL, 'long')"
         )
 
         def prices(symbol: str) -> list[dict]:
@@ -76,7 +77,7 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         )
         conn.execute(
             "INSERT INTO predictions VALUES ('p2', 'h2', '2026-06-01T12:00:00Z', 'intraday', 0.6, "
-            "'[\"mech-1\"]', 'neutral', 'exp-2', NULL, NULL, NULL, NULL, NULL)"
+            "'[\"mech-1\"]', 'neutral', 'exp-2', NULL, NULL, NULL, NULL, NULL, 'long')"
         )
 
         def prices(symbol: str) -> list[dict]:
@@ -94,6 +95,31 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         self.assertIsNone(row["brier_component"])
         self.assertEqual(obs_count, 0)
 
+    def test_frozen_prediction_direction_survives_later_hypothesis_edit(self) -> None:
+        conn = _conn()
+        conn.execute(
+            "INSERT INTO hypotheses VALUES ('h-direction', '[\"ABC\"]', 'Long ABC after later edit')"
+        )
+        conn.execute(
+            "INSERT INTO predictions VALUES ('p-direction', 'h-direction', "
+            "'2026-06-01T12:00:00Z', 'intraday', 0.7, '[]', 'neutral', 'exp', "
+            "NULL, NULL, NULL, NULL, NULL, 'short')"
+        )
+
+        def prices(symbol: str) -> list[dict]:
+            data = {
+                "ABC": [{"t": "2026-06-01", "c": 100.0}, {"t": "2026-06-02", "c": 94.0}],
+                "SPY": [{"t": "2026-06-01", "c": 100.0}, {"t": "2026-06-02", "c": 100.0}],
+            }
+            return data[symbol]
+
+        resolver.resolve_prediction_backlog(conn, now=self.now, price_loader=prices)
+        row = conn.execute(
+            "SELECT realized_outcome,realized_excess_pct FROM predictions WHERE id='p-direction'"
+        ).fetchone()
+        self.assertEqual(row["realized_outcome"], "correct")
+        self.assertEqual(row["realized_excess_pct"], -6.0)
+
     def test_missing_price_window_stays_open_and_visible(self) -> None:
         conn = _conn()
         conn.execute(
@@ -101,7 +127,7 @@ class ResolvePredictionBacklogTests(unittest.TestCase):
         )
         conn.execute(
             "INSERT INTO predictions VALUES ('p3', 'h3', '2026-06-01T12:00:00Z', 'intraday', 0.7, "
-            "'[\"mech-1\"]', 'neutral', 'exp-3', NULL, NULL, NULL, NULL, NULL)"
+            "'[\"mech-1\"]', 'neutral', 'exp-3', NULL, NULL, NULL, NULL, NULL, 'long')"
         )
 
         def prices(symbol: str) -> list[dict]:

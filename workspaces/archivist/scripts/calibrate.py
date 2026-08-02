@@ -379,7 +379,7 @@ def compute_calibration(conn) -> dict:
 
 
 def mechanism_expectancy(conn) -> list[dict]:
-    """Per-mechanism EXPECTANCY (mean SPY-relative excess of its supporting
+    """Per-mechanism EXPECTANCY (mean thesis-aligned excess of its supporting
     observations) alongside the hit-rate the Beta posterior sees. A mechanism
     that wins +8% and loses -2% at a 45% hit rate is profitable — hit-rate-only
     learning marks it down; this column is where that shows up
@@ -388,10 +388,14 @@ def mechanism_expectancy(conn) -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT o.mechanism_id, m.name, COUNT(*) n, "
-            "AVG(p.realized_excess_pct) mean_excess_pct, "
+            "AVG(CASE WHEN p.thesis_direction='short' "
+            "OR (p.thesis_direction IS NULL AND (lower(trim(h.thesis_summary)) LIKE 'short%' "
+            "OR lower(substr(trim(h.thesis_summary),1,40)) LIKE '%bearish%')) "
+            "THEN -p.realized_excess_pct ELSE p.realized_excess_pct END) mean_excess_pct, "
             "AVG(CASE WHEN o.outcome='hit' THEN 1.0 ELSE 0.0 END) hit_rate "
             "FROM mechanism_observations o "
             "JOIN predictions p ON p.id = o.source_id "
+            "JOIN hypotheses h ON h.id = p.hypothesis_id "
             "JOIN mechanisms m ON m.id = o.mechanism_id "
             "WHERE o.source_type='prediction' AND p.realized_excess_pct IS NOT NULL "
             "AND o.notes NOT LIKE '%align=-1%' "

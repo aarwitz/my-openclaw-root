@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '12');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_prediction_lineage_cutover', '2026-08-02T10:13:58Z');
 
 -- ----------------------------------------------------------------------------
 -- Hypotheses
@@ -621,6 +622,9 @@ CREATE TABLE IF NOT EXISTS predictions (
   regime_at_prediction  TEXT,
   evidence_quality      REAL,
   prior_log_odds        REAL,
+  thesis_direction      TEXT CHECK (thesis_direction IN ('long','short') OR thesis_direction IS NULL),
+  prediction_policy_version TEXT,
+  prediction_policy_hash TEXT,
   realized_outcome      TEXT CHECK (realized_outcome IN ('correct','incorrect','inconclusive') OR realized_outcome IS NULL),
   realized_return_pct   REAL,
   realized_excess_pct   REAL,  -- SPY-relative excess (%), migration 0019

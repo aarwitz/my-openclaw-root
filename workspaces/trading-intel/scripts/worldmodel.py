@@ -21,6 +21,26 @@ from __future__ import annotations
 import math
 from typing import Any
 
+
+def thesis_direction(thesis: str | None) -> str:
+    """Return the forecast stance encoded by canonical thesis prose.
+
+    Direction is part of outcome semantics, not merely presentation: a correct
+    short forecast has negative raw name-minus-SPY excess.  Keep the parser in
+    the shared math module so prediction, grading, health, and replay cannot
+    silently disagree about that sign.
+    """
+    text = str(thesis or "").strip().lower()
+    if text.startswith("short") or text.startswith("bearish") or "bearish" in text[:40]:
+        return "short"
+    return "long"
+
+
+def directional_excess_pct(raw_excess_pct: float, direction: str) -> float:
+    """Convert raw name-minus-benchmark excess into thesis-aligned excess."""
+    value = float(raw_excess_pct)
+    return -value if str(direction).lower() == "short" else value
+
 # ---------------------------------------------------------------------------
 # Beta distribution (regularized incomplete beta, continued-fraction form)
 # ---------------------------------------------------------------------------

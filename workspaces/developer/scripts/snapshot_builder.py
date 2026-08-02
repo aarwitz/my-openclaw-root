@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/trading-intel/scripts")
 from connectors.marketdata import ConnectorError  # noqa: E402
 sys.path.insert(0, "/home/aaron/.openclaw/workspaces/executor/scripts")
@@ -869,6 +870,16 @@ def _load_prediction_challenger(conn: sqlite3.Connection) -> dict[str, Any]:
         return {"available": False, "note": f"prediction_challenger_unavailable:{type(exc).__name__}"}
 
 
+def _load_prediction_replay(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Frozen-row retrospective diagnostic; read-only and never trade authority."""
+    try:
+        from prediction_replay import build_report
+
+        return {"available": True, **build_report(conn)}
+    except (sqlite3.Error, ImportError, ValueError, OSError) as exc:
+        return {"available": False, "note": f"prediction_replay_unavailable:{type(exc).__name__}"}
+
+
 def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     regime = _load_regime(conn)
     counts = _load_counts(conn)
@@ -913,6 +924,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "rotation": _load_rotation(conn),
         "selectionFunnel": _load_selection_funnel(conn),
         "predictionChallenger": _load_prediction_challenger(conn),
+        "predictionReplay": _load_prediction_replay(conn),
         "capital_attribution": _load_capital_attribution(conn, spy_comparison),
         "retail_insights": _build_retail_insights(
             regime, hypotheses, positions, intents, counts, last_pass, spy_comparison

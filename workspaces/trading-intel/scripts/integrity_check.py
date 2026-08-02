@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from connectors.marketdata import daily_bar_complete, is_trading_day
+import worldmodel as wm
 
 DB_PATH = "/home/aaron/.openclaw/state/trading-intel.sqlite"
 OPEN_STATES = ("opening", "open", "scaling", "trimming", "closing")
@@ -86,6 +87,41 @@ def _rows(conn, q, *a):
     return conn.execute(q, a).fetchall()
 
 
+def prediction_lineage(conn: sqlite3.Connection) -> dict:
+    """Pure forecast-provenance seam check, isolated for hermetic tests."""
+    try:
+        missing_direction = conn.execute(
+            "SELECT COUNT(*) FROM predictions WHERE thesis_direction IS NULL"
+        ).fetchone()[0]
+        cutover_row = conn.execute(
+            "SELECT value FROM meta WHERE key='_prediction_lineage_cutover'"
+        ).fetchone()
+        if not cutover_row:
+            raise sqlite3.IntegrityError("prediction lineage cutover is missing")
+        missing_policy = conn.execute(
+            "SELECT COUNT(*) FROM predictions WHERE prediction_policy_version IS NULL "
+            "OR (prediction_policy_version='legacy_unversioned' AND predicted_at>=?) "
+            "OR (prediction_policy_version!='legacy_unversioned' AND prediction_policy_hash IS NULL)",
+            (cutover_row[0],),
+        ).fetchone()[0]
+        return {
+            "family": "data",
+            "id": "integrity:prediction_lineage",
+            "status": "RED" if missing_direction or missing_policy else "OK",
+            "detail": (
+                f"prediction lineage gaps: direction={missing_direction}, "
+                f"post-cutover policy fingerprint={missing_policy}"
+            ),
+        }
+    except sqlite3.Error as exc:
+        return {
+            "family": "data",
+            "id": "integrity:prediction_lineage",
+            "status": "RED",
+            "detail": f"cannot verify prediction lineage: {exc}",
+        }
+
+
 def data_reality(conn, now: datetime | None = None) -> list[dict]:
     out = []
     # SQLite does not enforce foreign keys unless every writer opts in. A
@@ -112,6 +148,11 @@ def data_reality(conn, now: datetime | None = None) -> list[dict]:
             "status": "RED",
             "detail": f"cannot run foreign_key_check: {exc}",
         })
+
+    # A forecast must freeze the stance and exact math implementation that
+    # authored it. Otherwise a later thesis edit or code deploy can silently
+    # rewrite the meaning of historical calibration evidence.
+    out.append(prediction_lineage(conn))
 
     # One ticker cannot have several simultaneously live theses. That made the
     # same name look like repeated independent evidence and left 242 "active"
@@ -440,20 +481,37 @@ def loop_closure(conn, now: datetime | None = None) -> list[dict]:
 def edge(conn) -> list[dict]:
     """Honest 'do we have alpha?' — RED here is truth, not a bug."""
     out = []
-    rows = _rows(conn, "SELECT p_correct pc, realized_excess_pct rex FROM predictions "
-                       "WHERE resolved_at IS NOT NULL AND p_correct IS NOT NULL AND realized_excess_pct IS NOT NULL")
+    rows = _rows(
+        conn,
+        "SELECT p.p_correct pc,p.realized_excess_pct rex,p.thesis_direction direction,"
+        "h.thesis_summary thesis "
+        "FROM predictions p JOIN hypotheses h ON h.id=p.hypothesis_id "
+        "WHERE p.resolved_at IS NOT NULL AND p.p_correct IS NOT NULL "
+        "AND p.realized_excess_pct IS NOT NULL",
+    )
     if len(rows) >= 20:
         a = [r["pc"] for r in rows]
-        b = [r["rex"] for r in rows]
+        b = [
+            wm.directional_excess_pct(
+                r["rex"], r["direction"] or wm.thesis_direction(r["thesis"])
+            )
+            for r in rows
+        ]
         ma, mb = statistics.mean(a), statistics.mean(b)
         num = sum((x - ma) * (y - mb) for x, y in zip(a, b))
         da = sum((x - ma) ** 2 for x in a) ** 0.5
         dbb = sum((y - mb) ** 2 for y in b) ** 0.5
         corr = num / (da * dbb) if da and dbb else 0.0
+        neutral = sum(abs(float(value) - 0.5) < 1e-9 for value in a)
+        levels = len({round(float(value), 9) for value in a})
         out.append({"family": "edge", "id": "edge:conviction_predicts",
                     "status": "RED" if corr <= 0.05 else "OK",
-                    "detail": f"corr(p_correct, realized_excess) = {corr:+.2f} over n={len(rows)} "
-                              "— the sizing conviction signal does not predict returns"})
+                    "detail": (
+                        "corr(p_correct, realized directional excess) = "
+                        f"{corr:+.2f} over n={len(rows)} ({levels} probability levels; "
+                        f"{neutral} exactly 0.50) — the sizing conviction signal "
+                        "does not predict thesis-aligned returns"
+                    )})
     row = conn.execute(
         "SELECT COUNT(*) n, AVG(realized_edge_vs_spy_bps) avg FROM attribution "
         "WHERE realized_edge_vs_spy_bps IS NOT NULL AND closed_at >= datetime('now','-90 days')"

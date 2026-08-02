@@ -156,6 +156,11 @@ def main() -> int:
         _run("shell-syntax", ["bash", "-n", *shell_files]),
         _run("doc-contract", [py, "scripts/doc-lint.py"], json_ok=True),
         _run("internal-paper-only", [py, "scripts/check-internal-paper-only.py"], json_ok=True),
+        _run(
+            "prediction-retrospective-replay",
+            [py, "workspaces/developer/scripts/prediction_replay.py"],
+            json_ok=True,
+        ),
     ]
 
     if args.quick:

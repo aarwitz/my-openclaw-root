@@ -247,7 +247,17 @@ outcome status (`pending`, `matured`, `data_blocked`), stage flags for quant,
 substantive Critic, prediction, intent, risk, and fill, plus the complete frozen
 `stage_snapshot_json`. Matured price outcomes are never silently revised.
 
-### 3.17 `prediction_challengers`
+### 3.17 `predictions`
+
+Canonical point-in-time probability forecasts. In addition to `p_correct`, the
+P10/P50/P90 return band, mechanism links, evidence quality, regime, outcome, and
+Brier fields, every new row freezes `thesis_direction`,
+`prediction_policy_version`, and `prediction_policy_hash`. Resolution must use
+the frozen direction rather than later hypothesis prose. `legacy_unversioned`
+identifies rows created before source fingerprints existed; their hash remains
+null rather than inventing lineage.
+
+### 3.18 `prediction_challengers`
 
 Paired forward-only shadow probabilities for calibration experiments. Each row
 links one canonical prediction to one preregistered variant and stores its
