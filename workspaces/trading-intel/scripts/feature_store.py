@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import fmp, massive  # noqa: E402
 import symbol_lifecycle as symbols  # noqa: E402
+from feature_contract import validated_feature_rows  # noqa: E402
 
 OUT = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 TRADING_DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
@@ -379,7 +380,13 @@ def _fundamental(symbol):
         if i >= 7:                                  # YoY needs 8 quarters
             prev = sum((s.get("revenue") or 0) for s in stmts[i - 7:i - 3])
             f["revenue_growth_yoy"] = (rev_ttm / prev - 1) if prev else None
-        knowable = stmts[i].get("filingDate") or stmts[i].get("acceptedDate") or stmts[i]["date"]
+        # The fiscal-period date is not a publication timestamp. Falling back
+        # to it makes the finished quarter appear knowable before the filing
+        # and introduces classical look-ahead. Missing provider provenance is
+        # therefore a skipped observation, not an invitation to guess.
+        knowable = stmts[i].get("filingDate") or stmts[i].get("acceptedDate")
+        if not knowable:
+            continue
         out.append((knowable[:10], f))
     return out
 
@@ -434,7 +441,10 @@ def _build_one(conn, sym, days, *, fresh_prices=False):
                 _emit(rows, sym, d, d, src, f)
         except Exception as e:
             print(f"  {sym} {src}/{fn.__name__} SKIP {type(e).__name__}: {str(e)[:60]}", file=sys.stderr)
-    conn.executemany("INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)", rows)
+    conn.executemany(
+        "INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)",
+        validated_feature_rows(rows),
+    )
     conn.commit()
     return len(rows)
 
@@ -454,7 +464,10 @@ def augment_news(top_n):
         except Exception as e:
             print(f"  {s} news FAIL {str(e)[:60]}", file=sys.stderr)
         if rows:
-            conn.executemany("INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)", rows)
+            conn.executemany(
+                "INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)",
+                validated_feature_rows(rows),
+            )
             conn.commit()
             ok += 1
         if (i + 1) % 25 == 0:
@@ -479,7 +492,10 @@ def augment(days):
             except Exception:
                 pass
         if rows:
-            conn.executemany("INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)", rows)
+            conn.executemany(
+                "INSERT OR REPLACE INTO features VALUES(?,?,?,?,?,?)",
+                validated_feature_rows(rows),
+            )
             conn.commit()
             ok += 1
         if (i + 1) % 100 == 0:

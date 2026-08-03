@@ -57,7 +57,10 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 ## #2 The ML ranker + its live trial — *cross-sectional pattern learning*
 
 - **Walk-forward GBM** (`ml_ranker.py`): 43 features, per-date rank normalization, quarterly
-  retrain, nightly scoring of the top-600 (`ml_scores`).
+  retrain, nightly scoring of the current top-600 (`ml_scores`). Its historical
+  metrics use today's active top-cap universe and are development diagnostics,
+  not survivorship-safe edge proof. Live ranks are research-advisory and feed a
+  separate monthly internal shadow model book; they never authorize desk risk.
   Promotion bar to influence sizing: **t > 3** on live track record — not yet met, so it is
   QUARANTINED: advisory only.
 - **Model book** (`sim_broker.py`, D51.2): pre-registered live portfolio (long-only top
@@ -85,7 +88,15 @@ can see** — that's why the observability organs (#8) exist alongside the learn
   ticker returns become one equal-weight portfolio observation; Newey-West/HAC
   inference operates across entry dates; promotion eligibility requires at
   least 30 entry-date clusters and 20 distinct names under one FDR umbrella.
-  The 2020-06-18 holdout is labelled reused/development-only. The locked
+  Training outcomes that cross a test boundary are purged and bounded test
+  outcomes must mature before the exclusive fold end. The 2020-06-18 holdout
+  is labelled reused/development-only.
+- **Historical time-machine lane** (`historical_walkforward.py`): four
+  preregistered, non-overlapping 2018–2025 folds recompute thresholds using
+  training data only and apply a second cross-fold Bonferroni stability gate.
+  The report is offline, resumable, and has `promotion_authority=none`; it can
+  reject fragile ideas quickly but cannot certify production edge because the
+  system's feature families have already been informed by those years. The locked
   2026-08-03 through 2026-10-30 forward shadow window may not be tuned against
   and must complete before production-edge claims.
 

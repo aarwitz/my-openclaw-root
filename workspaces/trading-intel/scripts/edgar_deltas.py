@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import edgar  # noqa: E402  (cik_for, _UA)
+from feature_contract import validated_feature_rows  # noqa: E402
 
 FEAT_DB = os.path.expanduser("~/.openclaw/state/features.sqlite")
 SIG_DIR = os.path.expanduser("~/.openclaw/state/edgar-minhash")
@@ -142,7 +143,8 @@ def process_ticker(conn, ticker: str, since: str) -> int:
         rows.append((ticker, f["date"], "filing_delta", round(1.0 - sim, 4), f["date"], "edgar"))
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)",
+            validated_feature_rows(rows))
         conn.commit()
     return len(rows)
 

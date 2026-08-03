@@ -13,6 +13,7 @@ import argparse, math, os, sqlite3, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from connectors import x  # noqa: E402
+from feature_contract import validated_feature_rows  # noqa: E402
 
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
 
@@ -38,7 +39,8 @@ def build(names, start, end, win=30):
             rows.append((sym, d, "x_mention_vol_z", round(z, 4), d, "x"))
             rows.append((sym, d, "x_mention_vol_log", round(math.log1p(vals[i]), 4), d, "x"))
         conn.executemany(
-            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)",
+            validated_feature_rows(rows))
         conn.commit()
         total += len(rows)
         print(f"  {sym}: {len(series)} days -> {len(rows)} feature rows", flush=True)

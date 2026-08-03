@@ -157,6 +157,12 @@ def main() -> int:
         _run("doc-contract", [py, "scripts/doc-lint.py"], json_ok=True),
         _run("internal-paper-only", [py, "scripts/check-internal-paper-only.py"], json_ok=True),
         _run(
+            "feature-store-point-in-time-contract",
+            [py, "workspaces/trading-intel/scripts/feature_contract.py", "audit"],
+            timeout=60,
+            json_ok=True,
+        ),
+        _run(
             "prediction-retrospective-replay",
             [py, "workspaces/developer/scripts/prediction_replay.py"],
             json_ok=True,

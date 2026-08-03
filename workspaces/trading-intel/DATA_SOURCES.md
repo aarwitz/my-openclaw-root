@@ -3,24 +3,38 @@
 **Discipline:** a source only feeds *sized trading* after its features pass the FDR-corrected,
 cost-net backtest gate (`mechanism_backtest.py`). Free live-only sources (no history) can be
 **advisory** (shown in UI) or **forward-collected** (build history → validate later), never
-sized un-validated. Active-path status was re-audited **2026-07-30**. The monthly
-`data-scout-monthly` cron keeps the candidate list honest; scout entries append
-to the Scout log at the bottom.
+sized un-validated. Active-path status was re-audited **2026-08-02**. The monthly
+`data-scout-monthly` cron is read-only and may report candidates, but it cannot
+mutate this catalog or create a proposal.
 
 > **Operator action wanted:** fill in the *Cost/yr* column below so add/remove decisions can
 > be made on ROI. FMP is known-expensive; whether it stays depends on what only-FMP data
 > actually earns.
 
-## Tier 1 — wired & trading (the current brain)
+## Tier 1 — wired data backbone (not evidence of active edge)
 
 | Source | Cost/yr (fill in) | What we use | Features fed | Only-from-this-source? |
 |---|---|---|---|---|
-| **FMP** | $___ (expensive) | fundamentals ttm, insider tx, analyst grades, EOD prices (20yr incl. delisted), profiles, S&P constituents, stock-peers, screener | 8 fundamentals + insider_net_180d, rating_net_90d, sector_rel_63d, peer_mom_21d, valuation, KG edges | **peers, grades, insider, delisted-history are FMP-only today.** Prices/fundamentals have other substitutes at engineering cost |
+| **FMP** | $___ (expensive) | fundamentals ttm, insider tx, analyst grades, EOD prices (20yr incl. delisted), profiles, S&P constituents, stock-peers, screener | 8 fundamentals + insider_net_180d, rating_net_90d, sector_rel_63d, peer_mom_21d, valuation, KG edges | **peers, grades, insider, delisted-history are FMP-only today.** Fundamentals are accepted only with `filingDate`/`acceptedDate`; fiscal dates never substitute. Prices/fundamentals have other substitutes at engineering cost |
 | **Massive (formerly Polygon)** | $___ (expensive) | daily bars, bounded bulk live snapshots, biweekly short interest, ticker news + article text | live marks, spy_trend, news_sent_7d/30d, news_vol_z, days_to_cover, short_int_chg_2m, LLM news features | **article text is the LLM-feature fuel — only source we hold.** The bulk snapshot is the primary intraday mark path; failure degrades quickly and loudly |
 | **X (Twitter)** | $___ (paid, confirmed working) | full-archive cashtag mention counts | x_mention_vol_z — top single feature 2024-26 (IC 0.056 mega-caps / 0.034 broad) | yes — no substitute archive |
 | **FRED/Treasury/Cboe** | free | rates curve, credit spreads, VIX term, macro series | 17 macro features; 16 validated macro mechanisms; regime signals | irreplaceable & free |
 | **SEC EDGAR** | free | company facts (XBRL), 10-K/Q full text | valuation cross-check, filing_delta (Lazy-Prices MinHash) | free forever; underused (8-K event timing still open) |
 | **Event Registry** | free tier | entity-tagged recent news + sentiment | catalyst_scan brief (advisory) | replaceable |
+
+FMP fundamental rows are publication-timestamped but are not treated as a
+statement-vintage archive: provider restatements may alter old values. The
+canonical historical fold test therefore excludes `pe_ttm`, margin/growth,
+and EPS-surprise features pending reconstruction from original filing
+accessions. They remain research inputs, not historical edge evidence.
+
+All writers share one executable availability contract: `as_of` is the first
+usable date and must equal `knowable_at`; ticker, feature name, finite value,
+and source are mandatory. The live 48,952,713-row store passed the 2026-08-03
+audit with zero violations, and SQLite insert/update triggers prevent direct
+writer bypass. Canonical historical research never reads the mutable live
+cache tree: `historical_snapshot.py` copies one consistent feature DB plus only
+the exact usable Massive/FRED inputs and content-hashes every file.
 
 ## Tier 2 — decided candidates (my recommendation, pending operator cost check)
 
@@ -63,7 +77,7 @@ to the Scout log at the bottom.
 
 Note: FMP Ultimate's social-sentiment endpoints are dead for our account (v4 legacy-only, /stable empty — probed 2026-07-10).
 
-## Scout log (appended monthly by `data-scout-monthly`)
+## Historical scout log (source-controlled; runtime scouts do not append)
 
 **2026-07-04 (operator-session audition, pre-cron):** ThetaData free-tier options
 audition COMPLETE — 63 names × 1yr EOD aggregates, $0 spent. `opt_net_prem` pooled

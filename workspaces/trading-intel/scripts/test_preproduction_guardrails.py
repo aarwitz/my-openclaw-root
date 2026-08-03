@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "scripts/lib"))
 
 import gate_evaluator  # noqa: E402
 import promote_mechanisms  # noqa: E402
+import promotion_gate  # noqa: E402
 import signal_scan  # noqa: E402
 import author_intents  # noqa: E402
 import enforce_stops  # noqa: E402
@@ -45,10 +46,13 @@ import write_postmortems  # noqa: E402
 import worldmodel  # noqa: E402
 import symbol_lifecycle  # noqa: E402
 import mechanism_backtest  # noqa: E402
+import historical_walkforward  # noqa: E402
+import historical_snapshot  # noqa: E402
 import mechanism_correlation  # noqa: E402
 import integrate_calibrated  # noqa: E402
 import causal_graph  # noqa: E402
 import feature_store  # noqa: E402
+import feature_contract  # noqa: E402
 import valuation  # noqa: E402
 from connectors import edgar  # noqa: E402
 from connectors import _http as connector_http  # noqa: E402
@@ -329,6 +333,43 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertAlmostEqual(promote_mechanisms.posterior(0.50, 1000), 0.50, places=3)
         self.assertGreater(promote_mechanisms.posterior(0.60, 1000), 0.58)
 
+    def test_feature_writer_contract_rejects_unavailable_and_unprovenanced_rows(self) -> None:
+        valid = ("aapl", "2026-08-01", "ret_1d", 1.2, "2026-08-01", "price")
+        self.assertEqual(feature_contract.validate_feature_row(valid)[0], "AAPL")
+        with self.assertRaisesRegex(ValueError, "must equal knowable_at"):
+            feature_contract.validate_feature_row(
+                ("AAPL", "2026-07-01", "eps", 1.0, "2026-08-01", "fundamental")
+            )
+        with self.assertRaisesRegex(ValueError, "source are required"):
+            feature_contract.validate_feature_row(
+                ("AAPL", "2026-08-01", "eps", 1.0, "2026-08-01", "")
+            )
+
+    def test_feature_store_sql_guards_block_bypasses(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE features(ticker TEXT,as_of TEXT,name TEXT,value REAL,"
+            "knowable_at TEXT,source TEXT,PRIMARY KEY(ticker,as_of,name))"
+        )
+        report = feature_contract.install_guards(conn)
+        self.assertEqual(report["rows"], 0)
+        self.assertEqual(report["guard_count"], 2)
+        conn.execute(
+            "INSERT INTO features VALUES(?,?,?,?,?,?)",
+            ("AAPL", "2026-08-01", "ret_1d", 1.2, "2026-08-01", "price"),
+        )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "point-in-time contract"):
+            conn.execute(
+                "INSERT INTO features VALUES(?,?,?,?,?,?)",
+                ("MSFT", "2026-07-01", "eps", 1.0, "2026-08-01", "fmp"),
+            )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "point-in-time contract"):
+            conn.execute(
+                "INSERT INTO features VALUES(?,?,?,?,?,?)",
+                ("MSFT", "2026-08-01", "eps", 1.0, "2026-08-01", ""),
+            )
+        conn.close()
+
     def test_correlation_report_accepts_missing_probability_posterior(self) -> None:
         cells = [{
             "id": "xs_filing_delta_hi",
@@ -372,6 +413,113 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIn("development/reused holdout provenance", report["blockers"])
         conn.close()
 
+    def test_deprecate_all_never_preserves_calibrated_survivors(self) -> None:
+        eligibility = {"eligible_survivors": [{"id": "apparently-good"}]}
+        self.assertEqual(
+            integrate_calibrated.selected_survivors_for_mode(
+                eligibility, deprecate_all=True,
+            ),
+            [],
+        )
+        self.assertEqual(
+            integrate_calibrated.selected_survivors_for_mode(
+                eligibility, deprecate_all=False,
+            ),
+            eligibility["eligible_survivors"],
+        )
+
+    def test_promotion_candidate_digest_is_order_stable_and_value_sensitive(self) -> None:
+        one = {
+            "id": "m1", "horizon": "month_21d", "direction": "long",
+            "kind": "state", "source": "seed", "conds_json": '[["x",">",1]]',
+            "net_alpha_pct": 1.25, "test_p": 0.001, "bonf_sig": 1,
+            "hit_te": 0.55, "te_n": 120, "cluster_n": 60,
+            "posterior_mean": 0.54,
+        }
+        two = {**one, "id": "m2"}
+        self.assertEqual(
+            promotion_gate.candidate_set_sha256([one, two]),
+            promotion_gate.candidate_set_sha256([two, one]),
+        )
+        self.assertNotEqual(
+            promotion_gate.candidate_set_sha256([one]),
+            promotion_gate.candidate_set_sha256([{**one, "net_alpha_pct": 1.26}]),
+        )
+
+    def test_only_exact_completed_forward_artifact_can_cross_promotion_gate(self) -> None:
+        candidate = {
+            "id": "m1", "horizon": "month_21d", "direction": "long",
+            "kind": "state", "source": "seed", "conds_json": "[]",
+            "net_alpha_pct": 1.25, "test_p": 0.001, "bonf_sig": 1,
+            "hit_te": 0.55, "te_n": 120, "cluster_n": 60,
+            "posterior_mean": 0.54,
+        }
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            root = Path(td)
+            approval_root = root / "approvals"
+            artifact_root = root / "state/research-artifacts"
+            approval_root.mkdir()
+            artifact_root.mkdir(parents=True)
+            digest = promotion_gate.candidate_set_sha256([candidate])
+            report_path = artifact_root / "forward.json"
+            report = {
+                "status": "complete",
+                "evaluation_class": "locked_forward_shadow",
+                "development_only": False,
+                "minimum_sessions_met": True,
+                "promotion_authority": "human_manifest_only",
+                "candidate_set_sha256": digest,
+            }
+            report_path.write_text(json.dumps(report))
+            manifest_path = approval_root / "D999.json"
+            manifest = {
+                "schema_version": 1,
+                "artifact_type": "autotrade_strategy_promotion",
+                "status": "approved",
+                "approval_role": "operator",
+                "approved_by": "test-operator",
+                "decision_id": "D999",
+                "approved_at": "2026-08-01T00:00:00Z",
+                "expires_at": "2026-08-10T00:00:00Z",
+                "candidate_set_sha256": digest,
+                "candidate_ids": ["m1__month_21d"],
+                "source_artifact": {
+                    "path": "state/research-artifacts/forward.json",
+                    "sha256": promotion_gate.file_sha256(report_path),
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest))
+            validated = promotion_gate.validate_approval_manifest(
+                manifest_path, [candidate],
+                now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+                approval_root=approval_root, repo_root=root,
+                require_committed=False,
+            )
+            self.assertEqual(validated["decision_id"], "D999")
+
+            report["development_only"] = True
+            report_path.write_text(json.dumps(report))
+            manifest["source_artifact"]["sha256"] = promotion_gate.file_sha256(report_path)
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "development artifacts"):
+                promotion_gate.validate_approval_manifest(
+                    manifest_path, [candidate],
+                    now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+                    approval_root=approval_root, repo_root=root,
+                    require_committed=False,
+                )
+
+    def test_promotion_gate_rejects_candidate_drift_and_expired_approval(self) -> None:
+        source = (ROOT / "workspaces/trading-intel/scripts/promotion_gate.py").read_text()
+        integrator = (
+            ROOT / "workspaces/trading-intel/scripts/integrate_calibrated.py"
+        ).read_text()
+        self.assertIn("candidate set differs from the approved digest", source)
+        self.assertIn("strategy approval has expired", source)
+        self.assertIn("approval manifest differs from the committed HEAD version", source)
+        self.assertIn('"--approval-manifest"', integrator)
+        self.assertIn("refusing live integration", integrator)
+
     def test_backtest_inference_uses_date_clusters_and_hac(self) -> None:
         mean, p_value = mechanism_backtest._hac_mean_p(
             [0.01, 0.02, -0.01, 0.00, 0.01], 2
@@ -383,6 +531,411 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIn("test_date_clusters", source)
         self.assertIn("cluster_n >= 30", source)
         self.assertIn("ticker_n >= 20", source)
+        self.assertIn("m, p = _hac_mean_p(series, 1)", source)
+
+    def test_historical_fold_purges_labels_across_both_boundaries(self) -> None:
+        dates = [f"2020-01-{day:02d}" for day in range(1, 11)]
+        td = {
+            "dates": dates,
+            "close": {day: 100.0 + i for i, day in enumerate(dates)},
+            "dvol": {day: 10_000_000.0 for day in dates},
+            "feats": {},
+            "fkeys": {},
+        }
+        spy = {"dk": dates, "close": {day: 100.0 for day in dates}}
+
+        train = mechanism_backtest.samples_for(
+            td, spy, [], "state", 2,
+            entry_end="2020-01-08",
+            exit_before="2020-01-08",
+            include_exit=True,
+        )
+        self.assertEqual([(row[0], row[1]) for row in train], [
+            ("2020-01-02", "2020-01-04"),
+        ])
+
+        hidden = mechanism_backtest.samples_for(
+            td, spy, [], "state", 2,
+            entry_start="2020-01-06",
+            entry_end="2020-01-09",
+            exit_before="2020-01-09",
+            include_exit=True,
+        )
+        self.assertEqual(hidden, [])
+        visible = mechanism_backtest.samples_for(
+            td, spy, [], "state", 2,
+            entry_start="2020-01-06",
+            entry_end="2020-01-10",
+            exit_before="2020-01-10",
+            include_exit=True,
+        )
+        self.assertEqual([(row[0], row[1]) for row in visible], [
+            ("2020-01-07", "2020-01-09"),
+        ])
+        split_train, split_test = mechanism_backtest.split_samples_for(
+            td, spy, [], "state", 2, None,
+            train_start=None, test_start="2020-01-06", test_end="2020-01-10",
+        )
+        expected_train = mechanism_backtest.samples_for(
+            td, spy, [], "state", 2,
+            entry_end="2020-01-06", exit_before="2020-01-06",
+        )
+        self.assertEqual(split_train, expected_train)
+        self.assertEqual(split_test, [row[:1] + row[2:] for row in visible])
+
+    def test_historical_fold_rejects_overlapping_or_reversed_windows(self) -> None:
+        with self.assertRaises(ValueError):
+            mechanism_backtest._validate_window(
+                "2020-01-01", "2020-01-01", "2021-01-01"
+            )
+        with self.assertRaises(ValueError):
+            mechanism_backtest._validate_window(
+                None, "2021-01-01", "2020-01-01"
+            )
+
+    def test_historical_fold_excludes_unvintaged_feature_families_everywhere(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        excluded = {"eps_surprise_pct", "net_margin_ttm", "revenue_growth_yoy", "pe_ttm"}
+        hac_lags = []
+        try:
+            with mock.patch.object(mechanism_backtest, "FEAT_DB", Path(path)), \
+                    mock.patch.object(
+                        mechanism_backtest, "_hac_mean_p",
+                        side_effect=lambda series, lag: (hac_lags.append(lag) or (0.0, 1.0)),
+                    ):
+                results, _, mechanisms, _ = mechanism_backtest.run(
+                    [], {"dk": [], "close": {}}, "2020-01-01",
+                    test_end="2021-01-01", train_start="2015-01-02",
+                    excluded_features=excluded,
+                )
+            self.assertTrue(mechanisms)
+            self.assertTrue(results)
+            self.assertFalse(any(
+                condition[0] in excluded
+                for mechanism in mechanisms
+                for condition in mechanism[2]
+            ))
+            self.assertFalse(any(
+                row["kind"] == "cross" and row["conds"][0][0] in excluded
+                for row in results
+            ))
+            self.assertEqual(set(hac_lags), {5, 21, 63})
+        finally:
+            os.unlink(path)
+
+    def test_backtest_cached_name_count_excludes_empty_price_histories(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        empty = {"dates": [], "close": {}, "dvol": {}, "feats": {}, "fkeys": {}}
+        day = "2020-01-02"
+        populated = {
+            "dates": [day], "close": {day: 100.0},
+            "dvol": {day: 10_000_000.0}, "feats": {}, "fkeys": {},
+        }
+        try:
+            with mock.patch.object(mechanism_backtest, "FEAT_DB", Path(path)), \
+                    mock.patch.object(
+                        mechanism_backtest, "load_ticker",
+                        side_effect=lambda _conn, ticker: populated if ticker == "OK" else empty,
+                    ):
+                _results, _base, _mechanisms, names_seen = mechanism_backtest.run(
+                    ["EMPTY", "OK"], {"dk": [day], "close": {day: 100.0}},
+                    "2020-01-01", test_end="2021-01-01",
+                )
+            self.assertEqual(names_seen, 1)
+        finally:
+            os.unlink(path)
+
+    def test_multi_mechanism_trade_direction_is_explicit_not_inferred_from_prose(self) -> None:
+        features = {
+            feature: [float(value) for value in range(250)]
+            for pair in mechanism_backtest.MULTI_PAIRS
+            for feature in (pair[0], pair[2])
+        }
+        generated = {row[0]: row for row in mechanism_backtest.gen_multi(features)}
+        for first, first_side, second, second_side, direction, _label in (
+            mechanism_backtest.MULTI_PAIRS
+        ):
+            mid = f"multi_{first}_{first_side}_{second}_{second_side}"
+            self.assertEqual(generated[mid][3], direction)
+        self.assertEqual(
+            generated["multi_rate_10y_chg_63d_hi_pe_ttm_hi"][3], "short"
+        )
+        self.assertEqual(
+            generated["multi_credit_spread_chg_63d_hi_vol_20d_annual_hi"][3],
+            "short",
+        )
+
+    def test_bounded_fold_is_invariant_to_hidden_future_values(self) -> None:
+        start = datetime(2015, 1, 1).date()
+        dates = [(start + timedelta(days=i)).isoformat() for i in range(1500)]
+        test_start = "2018-01-01"
+        test_end = "2019-01-01"
+
+        def ticker_data(future_multiplier: float) -> dict:
+            close = {}
+            rsi = []
+            for i, day in enumerate(dates):
+                value = 100.0 + i * 0.02
+                if day >= test_end:
+                    value *= future_multiplier
+                close[day] = value
+                feature = float(i % 100)
+                if day >= test_start:
+                    feature += 1_000_000.0 * future_multiplier
+                rsi.append((day, feature))
+            return {
+                "dates": dates,
+                "close": close,
+                "dvol": {day: 20_000_000.0 for day in dates},
+                "feats": {"rsi14": rsi},
+                "fkeys": {"rsi14": dates},
+            }
+
+        spy = {"dk": dates, "close": {day: 100.0 for day in dates}}
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        try:
+            outputs = []
+            for multiplier in (1.0, 999.0):
+                td = ticker_data(multiplier)
+                with mock.patch.object(mechanism_backtest, "FEAT_DB", Path(path)), \
+                        mock.patch.object(mechanism_backtest, "load_ticker", return_value=td):
+                    outputs.append(mechanism_backtest.run(
+                        ["TEST"], spy, test_start,
+                        test_end=test_end, train_start="2015-01-02",
+                    ))
+            first_results, first_base, first_mechanisms, _ = outputs[0]
+            second_results, second_base, second_mechanisms, _ = outputs[1]
+            self.assertEqual(first_mechanisms, second_mechanisms)
+            self.assertEqual(first_base, second_base)
+            self.assertEqual(first_results, second_results)
+            generated_rsi = [
+                mechanism for mechanism in first_mechanisms
+                if mechanism[0].startswith("gen_rsi14_")
+            ]
+            self.assertEqual(len(generated_rsi), 4)
+            self.assertTrue(all(
+                abs(mechanism[2][0][2]) < 100.0 for mechanism in generated_rsi
+            ))
+        finally:
+            os.unlink(path)
+
+    def test_fundamentals_never_fall_back_to_fiscal_period_date(self) -> None:
+        statements = [
+            {
+                "date": f"2019-{quarter:02d}-30",
+                "revenue": 100.0,
+                "netIncome": 10.0,
+                "eps": 1.0,
+                "filingDate": f"2019-{quarter + 1:02d}-15",
+            }
+            for quarter in (1, 2, 3)
+        ]
+        statements.append({
+            "date": "2019-04-30",
+            "revenue": 100.0,
+            "netIncome": 10.0,
+            "eps": 1.0,
+        })
+        with mock.patch.object(
+            feature_store.fmp, "income_statement", return_value=statements
+        ):
+            self.assertEqual(feature_store._fundamental("TEST"), [])
+
+        statements[-1]["acceptedDate"] = "2019-05-15T20:01:02Z"
+        with mock.patch.object(
+            feature_store.fmp, "income_statement", return_value=statements
+        ):
+            rows = feature_store._fundamental("TEST")
+        self.assertEqual(rows[0][0], "2019-05-15")
+
+    def test_walkforward_aggregate_requires_repeated_broad_cost_net_alpha(self) -> None:
+        gate = {
+            "minimum_eligible_folds": 3,
+            "minimum_positive_alpha_folds": 3,
+            "minimum_entry_date_clusters_per_fold": 30,
+            "minimum_tickers_per_fold": 20,
+        }
+        folds = []
+        for i, alpha in enumerate((1.0, 0.8, 0.6), start=1):
+            folds.append({
+                "id": f"f{i}",
+                "results": [{
+                    "id": "candidate",
+                    "horizon": "month_21d",
+                    "direction": "long",
+                    "kind": "state",
+                    "alpha_te_pct": alpha,
+                    "test_p": 0.001,
+                    "test_p_raw": 0.001,
+                    "cluster_n": 40,
+                    "ticker_n": 30,
+                    "sig": {"fdr": True, "bonf": True},
+                }],
+            })
+        rows = historical_walkforward.aggregate(folds, gate)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["combined_bonferroni"])
+        self.assertTrue(rows[0]["stable_development_candidate"])
+
+        folds[2]["results"][0]["ticker_n"] = 2
+        rows = historical_walkforward.aggregate(folds, gate)
+        self.assertEqual(rows[0]["eligible_folds"], 2)
+        self.assertFalse(rows[0]["stable_development_candidate"])
+
+    def test_walkforward_data_snapshot_detects_midrun_input_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            (root / "cache").mkdir()
+            feature_db = root / "features.sqlite"
+            conn = sqlite3.connect(feature_db)
+            conn.execute("CREATE TABLE features(ticker TEXT)")
+            conn.commit()
+            conn.close()
+            price = root / "cache/massive_test_1d_2015-01-01_2026-01-01.json"
+            fred = root / "cache/fred_dgs10.json"
+            price.write_bytes(b"prices-v1")
+            fred.write_bytes(b"fred-v1")
+            historical_snapshot._write_manifest(root, missing_symbols=[])
+            before = historical_walkforward._data_snapshot_signature(root)
+
+            # A harmless SQLite read/open does not change content identity.
+            conn = sqlite3.connect(feature_db)
+            conn.execute("SELECT COUNT(*) FROM features").fetchone()
+            conn.close()
+            self.assertEqual(
+                before, historical_walkforward._data_snapshot_signature(root)
+            )
+
+            price.write_bytes(b"prices-version-two")
+            with self.assertRaisesRegex(RuntimeError, "snapshot file changed"):
+                historical_walkforward._data_snapshot_signature(root)
+
+    def test_canonical_walkforward_requires_immutable_snapshot(self) -> None:
+        source = (
+            ROOT / "workspaces/trading-intel/scripts/historical_walkforward.py"
+        ).read_text()
+        self.assertIn("canonical historical replay requires --snapshot-dir", source)
+        self.assertIn("canonical historical replay requires --workers 1", source)
+        self.assertIn("hs.validate_snapshot(snapshot_dir)", source)
+
+    def test_snapshot_manifest_excludes_sqlite_transient_files(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            (root / "features.sqlite").write_bytes(b"db")
+            (root / "features.sqlite-shm").write_bytes(b"transient")
+            (root / "features.sqlite-wal").write_bytes(b"transient")
+            manifest = historical_snapshot._write_manifest(root, missing_symbols=[])
+            self.assertEqual(
+                [row["path"] for row in manifest["files"]], ["features.sqlite"]
+            )
+
+    def test_snapshot_uses_same_corrupt_cache_fallback_as_engine(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            older = root / "massive_test_1d_2015-01-01_2026-07-30.json"
+            newer = root / "massive_test_1d_2015-01-01_2026-07-31.json"
+            older.write_text(json.dumps({"bars": [{"t": "2026-07-30", "c": 10.0}]}))
+            newer.write_text("not-json")
+            self.assertEqual(
+                historical_snapshot._cached_price_path(root, "TEST"), older
+            )
+
+    def test_snapshot_rejects_unmanifested_sqlite_wal(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            (root / "cache").mkdir()
+            (root / "features.sqlite").write_bytes(b"db")
+            (root / "cache/fred_test.json").write_bytes(b"fred")
+            historical_snapshot._write_manifest(root, missing_symbols=[])
+            (root / "features.sqlite-wal").write_bytes(b"untrusted")
+            with self.assertRaisesRegex(RuntimeError, "transient SQLite state"):
+                historical_snapshot.validate_snapshot(root)
+
+    def test_walkforward_report_fingerprints_code_policy_data_and_authority(self) -> None:
+        spec = json.loads(
+            (ROOT / "workspaces/trading-intel/config/evaluation_policy.json").read_text()
+        )["historical_walkforward_development"]
+        report = historical_walkforward._new_report(
+            spec, ["AAA"], "engine-hash", "runner-hash", "policy-hash",
+            {"sha256": "data-hash", "file_count": 3, "total_bytes": 10},
+        )
+        self.assertEqual(report["engine_sha256"], "engine-hash")
+        self.assertEqual(report["runner_sha256"], "runner-hash")
+        self.assertEqual(report["policy_sha256"], "policy-hash")
+        self.assertEqual(report["data_snapshot_signature"]["sha256"], "data-hash")
+        self.assertTrue(report["development_only"])
+        self.assertEqual(report["promotion_authority"], "none")
+
+    def test_historical_walkforward_has_no_promotion_authority(self) -> None:
+        policy = json.loads(
+            (ROOT / "workspaces/trading-intel/config/evaluation_policy.json").read_text()
+        )["historical_walkforward_development"]
+        self.assertEqual(policy["promotion_authority"], "none")
+        source = (
+            ROOT / "workspaces/trading-intel/scripts/historical_walkforward.py"
+        ).read_text()
+        self.assertNotIn("persist(", source)
+        self.assertNotIn("trading-intel.sqlite", source)
+        self.assertFalse(
+            (ROOT / "workspaces/trading-intel/scripts/backtest.py").exists(),
+            "the retired survivorship-biased same-close backtester must not return",
+        )
+        self.assertFalse(
+            (ROOT / "workspaces/trading-intel/scripts/validate_mechanism.py").exists(),
+            "the retired iid single-candidate p-value shortcut must not return",
+        )
+
+    def test_ml_ranker_is_labeled_as_a_separate_shadow_not_no_trading(self) -> None:
+        ranker = (ROOT / "workspaces/trading-intel/scripts/ml_ranker.py").read_text()
+        chain = (ROOT / "scripts/learning-chain.sh").read_text()
+        architecture = (ROOT / "SYSTEM_ARCHITECTURE.md").read_text()
+        self.assertIn("separate internal shadow model book", ranker)
+        self.assertIn("separate internal shadow model book", chain)
+        self.assertIn("GBM shadow lane", architecture)
+        self.assertNotIn("Nothing trades on this", chain)
+        self.assertNotIn("Nothing reads this table for trading", ranker)
+
+    def test_single_split_persistence_records_bounded_window_provenance(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        result = {
+            "id": "m",
+            "horizon": "month_21d",
+            "direction": "long",
+            "rationale": "test",
+            "conds": [["x", ">", 1.0]],
+            "kind": "state",
+            "base": 0.5,
+            "tr_n": 40,
+            "te_n": 30,
+            "cluster_n": 30,
+            "ticker_n": 20,
+            "hit_te": 0.6,
+            "alpha_te_pct": 1.0,
+            "test_p": 0.01,
+            "weight_mean": 0.55,
+            "sig": {"fdr": True, "bonf": False},
+        }
+        try:
+            with mock.patch.object(mechanism_backtest, "FEAT_DB", Path(path)):
+                mechanism_backtest.persist(
+                    [result], "2020-01-01", "development_test", "2026-07-31", 1,
+                    test_end="2021-01-01", train_start="2015-01-02",
+                )
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT test_start,test_end,train_start,evaluation_label "
+                "FROM discovered_mechanisms"
+            ).fetchone()
+            conn.close()
+            self.assertEqual(row, (
+                "2020-01-01", "2021-01-01", "2015-01-02", "development_test"
+            ))
+        finally:
+            os.unlink(path)
 
     def test_latest_features_returns_latest_value_per_name(self) -> None:
         conn = sqlite3.connect(":memory:")
@@ -1081,6 +1634,9 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertNotIn('add_argument("--reset"', source)
         self.assertNotIn('DELETE FROM mechanisms"', source)
         self.assertIn("bonf_sig=1", source)
+        self.assertIn("validate_approval_manifest", source)
+        preflight = (ROOT / "scripts/autotrade-preflight.py").read_text()
+        self.assertIn("feature-store-point-in-time-contract", preflight)
 
     def test_weekly_rediscovery_is_analytics_only_and_creates_no_backup(self) -> None:
         source = (ROOT / "scripts/learning-rediscovery.sh").read_text()

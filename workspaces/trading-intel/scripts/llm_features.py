@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import massive  # noqa: E402
+from feature_contract import validated_feature_rows  # noqa: E402
 
 FEAT_DB = os.path.expanduser("~/.openclaw/state/features.sqlite")
 CACHE_DB = os.path.expanduser("~/.openclaw/state/llm-scores.sqlite")
@@ -148,7 +149,8 @@ def write_features(conn_feat, ticker: str, triples: list[tuple]):
                  (ticker, d, "llm_news_neg_mat_ct", float(neg_ct), d, "llm")]
     if rows:
         conn_feat.executemany(
-            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)",
+            validated_feature_rows(rows))
         conn_feat.commit()
     return len(rows)
 

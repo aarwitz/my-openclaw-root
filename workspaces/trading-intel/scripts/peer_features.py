@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import fmp        # noqa: E402
 import feature_store as fs        # noqa: E402
+from feature_contract import validated_feature_rows  # noqa: E402
 
 FEAT_DB = os.path.expanduser("~/.openclaw/state/features.sqlite")
 H_MOM = 21
@@ -107,7 +108,8 @@ def run(names: list[str], dates: list[str]) -> int:
             print(f"  {i+1}/{len(names)} names, {len(rows)} rows", flush=True)
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)",
+            validated_feature_rows(rows))
         conn.commit()
     conn.close()
     ne = _write_kg_edges(kg_pairs)

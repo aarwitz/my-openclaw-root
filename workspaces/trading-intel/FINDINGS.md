@@ -19,6 +19,21 @@ incident postmortems) need no tag.
 
 ---
 
+## 2026-08-03 — isolated historical winners mostly changed by regime; two repeated across four folds
+
+- **A purged four-fold 2018–2025 development replay found no within-fold survivor that repeated
+  simply from the first period into the second, but two 63-session mechanisms were positive in all
+  four periods after costs.** Low realized-volatility names underperformed (`vol_20d_annual` bottom
+  quintile → short): median cost-net alpha **+1.502%**, combined p **6.12e-5**. High VIX plus deep
+  single-name drawdown subsequently rebounded: median **+2.279%**, combined p **3.50e-6**.
+- These are **stable historical development candidates, not edge proof**. The mechanism families
+  and test architecture were designed using these years; current universe history is incomplete;
+  provider histories may contain corrections; isolated fold winners changed sharply by regime;
+  and the audit found three multi-feature directions were previously mis-specified. A rerun against
+  frozen snapshot `f865c3b…d339b` is in progress, followed by the locked forward-shadow gate. Neither
+  result can enter the paper ledger without an exact committed operator approval manifest.
+- revalidate-by: 2026-11-03
+
 ## 2026-07-15 (pm) — the desk's best feature spent two weeks dead while its collector reported "ok"
 
 - **X/Twitter intake died 2026-07-01 (HTTP 402 credits-depleted — month-boundary billing)

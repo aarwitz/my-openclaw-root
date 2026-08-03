@@ -13,17 +13,19 @@ Rigor:
   * point-in-time: feature read = latest as_of <= decision date; entry = NEXT trading day's close.
   * NON-OVERLAPPING samples per ticker (spaced >= horizon) so the binomial test isn't inflated by
     autocorrelated overlapping windows.
-  * graded MARKET-RELATIVE (beat SPY), tested vs the EMPIRICAL base rate (not 0.5).
+  * graded MARKET-RELATIVE (beat SPY); the empirical base rate is reported rather than assumed 0.5.
   * candidate thresholds are percentiles computed from the TRAIN period only (no test leakage).
-  * train/test split by date; significance reported on the TEST holdout; Benjamini-Hochberg FDR +
-    Bonferroni across every (mechanism x horizon).
+  * bounded train/test split by date; training labels that cross the boundary are purged and test
+    labels must mature before the exclusive test end. Significance is reported on the TEST
+    holdout; Benjamini-Hochberg FDR + Bonferroni span every (mechanism x horizon).
   * trigger inference clusters same-date stocks into one portfolio observation
     and uses a Newey-West/HAC standard error across entry dates. Raw ticker
     samples remain descriptive; they are not treated as independent trials.
-  * survivorship-aware: include delisted/failed names; their prices come from FMP.
+  * survivorship-aware: the frozen broad universe retains locally built delisted/failed names.
 
-Reads state/features.sqlite (built by feature_store.py) + FMP prices. Writes survivors to
-state/features.sqlite::discovered_mechanisms.  python3 mechanism_backtest.py --universe ... --test-start 2020-06-18
+Reads state/features.sqlite (built by feature_store.py) + frozen price caches. Writes survivors to
+state/features.sqlite::discovered_mechanisms unless ``--no-persist`` is set. Historical folds should
+normally be non-persisting; the weekly single-split artifact is explicitly non-promotable.
 """
 
 from __future__ import annotations
@@ -301,8 +303,8 @@ def spy_ret(spy, d_entry, d_exit):
     return cj / ci - 1 if ci else None
 
 
-def samples_for(td, spy, conds, kind, H, event_feat=None):
-    """Non-overlapping graded samples for a mechanism on one ticker at horizon H."""
+def _sample_candidates(td, spy, conds, kind, H, event_feat=None):
+    """Yield valid samples before evaluation-window filtering and spacing."""
     dates = td["dates"]
     n = len(dates)
     # candidate fire dates
@@ -310,8 +312,6 @@ def samples_for(td, spy, conds, kind, H, event_feat=None):
         fire = [a for a in td["fkeys"].get(event_feat, []) if a in td["close"]]
     else:
         fire = dates[::5]  # weekly cadence reduces overlap before the spacing filter
-    out, last_idx = [], -10 ** 9
-    didx = {d: k for k, d in enumerate(dates)}
     for d in fire:
         if not holds(td, conds, d):
             continue
@@ -320,8 +320,6 @@ def samples_for(td, spy, conds, kind, H, event_feat=None):
         if k >= n:
             continue
         ent = k
-        if ent - last_idx < H:          # enforce non-overlap (spacing >= H)
-            continue
         ex = ent + H
         if ex >= n:
             continue
@@ -335,9 +333,81 @@ def samples_for(td, spy, conds, kind, H, event_feat=None):
         fwd = c_ex / c_ent - 1
         cap = WINSOR.get(H, 1.0)                                          # winsorize outlier returns
         fwd = max(-cap, min(cap, fwd))
+        yield ent, d_ent, d_ex, fwd, sp
+
+
+def samples_for(
+    td,
+    spy,
+    conds,
+    kind,
+    H,
+    event_feat=None,
+    *,
+    entry_start=None,
+    entry_end=None,
+    exit_before=None,
+    include_exit=False,
+):
+    """Return non-overlapping, point-in-time samples for one ticker.
+
+    ``entry_start`` is inclusive; ``entry_end`` and ``exit_before`` are
+    exclusive. Filtering happens before the spacing state advances, so a
+    sample outside a hidden fold cannot suppress a sample inside it.
+    ``include_exit`` is opt-in to preserve the historical 3-tuple API used by
+    diagnostic scripts.
+    """
+    out, last_idx = [], -10 ** 9
+    for ent, d_ent, d_ex, fwd, sp in _sample_candidates(
+        td, spy, conds, kind, H, event_feat
+    ):
+        if entry_start is not None and d_ent < entry_start:
+            continue
+        if entry_end is not None and d_ent >= entry_end:
+            continue
+        if exit_before is not None and d_ex >= exit_before:
+            continue
+        if ent - last_idx < H:          # enforce non-overlap inside this evaluation window
+            continue
         last_idx = ent
-        out.append((d_ent, fwd, sp))
+        if include_exit:
+            out.append((d_ent, d_ex, fwd, sp))
+        else:
+            out.append((d_ent, fwd, sp))
     return out
+
+
+def split_samples_for(
+    td, spy, conds, kind, H, event_feat, *, train_start, test_start, test_end
+):
+    """Build purged train and bounded test cohorts in one candidate scan.
+
+    Train and test keep independent non-overlap cursors. This preserves the
+    boundary semantics of two ``samples_for`` calls without evaluating every
+    mechanism twice over every ticker.
+    """
+    cohorts = {"train": [], "test": []}
+    last = {"train": -10 ** 9, "test": -10 ** 9}
+    for ent, d_ent, d_ex, fwd, sp in _sample_candidates(
+        td, spy, conds, kind, H, event_feat
+    ):
+        cohort = None
+        if (
+            (train_start is None or d_ent >= train_start)
+            and d_ent < test_start
+            and d_ex < test_start
+        ):
+            cohort = "train"
+        elif (
+            d_ent >= test_start
+            and (test_end is None or (d_ent < test_end and d_ex < test_end))
+        ):
+            cohort = "test"
+        if cohort is None or ent - last[cohort] < H:
+            continue
+        last[cohort] = ent
+        cohorts[cohort].append((d_ent, fwd, sp))
+    return cohorts["train"], cohorts["test"]
 
 
 def _ttest_moments(n, s, ss):
@@ -394,29 +464,31 @@ def gen_candidates(pools):
 
 
 # AlphaAgent-style multi-feature hypotheses: complexity-capped at 2 features, each pair
-# economically motivated (hypothesis-alignment), not a blind C(9,2) sweep. side: hi=>p80, lo=>p20.
+# economically motivated (hypothesis-alignment), not a blind C(9,2) sweep.
+# Feature side is hi=>p80 / lo=>p20; trade direction is explicit and never
+# inferred from prose.
 MULTI_PAIRS = [
-    ("pe_ttm", "lo", "mom_12_1", "hi", "value + momentum (cheap and rising)"),
-    ("pe_ttm", "lo", "net_margin_ttm", "hi", "value + quality (cheap and profitable)"),
-    ("drawdown_252", "lo", "dist_sma200", "hi", "oversold within a long uptrend"),
-    ("revenue_growth_yoy", "hi", "mom_12_1", "hi", "growth + momentum"),
-    ("vol_20d_annual", "lo", "pe_ttm", "lo", "low-vol + value (quality value)"),
-    ("net_margin_ttm", "hi", "revenue_growth_yoy", "hi", "quality + growth (compounders)"),
-    ("rsi14", "lo", "pe_ttm", "lo", "oversold + cheap"),
-    ("mom_12_1", "hi", "vol_20d_annual", "lo", "momentum + low volatility"),
-    ("sector_rel_63d", "hi", "mom_12_1", "hi", "sector tailwind + name momentum (supercycle)"),
-    ("insider_net_180d", "hi", "pe_ttm", "lo", "insider buying + cheap"),
-    ("rating_net_90d", "hi", "revenue_growth_yoy", "hi", "analyst upgrades + growth"),
-    ("sector_rel_63d", "hi", "drawdown_252", "lo", "pullback in a hot sector"),
-    ("news_sent_7d", "lo", "pe_ttm", "lo", "bearish news + cheap = contrarian overreaction (GOOG/MSFT)"),
-    ("news_vol_z", "hi", "news_sent_7d", "hi", "positive news spike = catalyst drift"),
-    ("news_sent_30d", "hi", "mom_12_1", "hi", "improving sentiment + momentum"),
-    ("rate_10y_chg_63d", "lo", "pe_ttm", "hi", "rates falling + high-duration growth -> long"),
-    ("rate_10y_chg_63d", "hi", "pe_ttm", "hi", "rates rising + high-duration tech -> short (duration repricing)"),
-    ("credit_spread_chg_63d", "hi", "vol_20d_annual", "hi", "credit stress + high-beta -> short"),
-    ("vix_level", "hi", "drawdown_252", "lo", "high VIX + deep drawdown -> capitulation bounce"),
-    ("days_to_cover", "hi", "drawdown_252", "lo", "crowded short + deep drawdown -> squeeze bounce"),
-    ("short_int_chg_2m", "hi", "mom_12_1", "lo", "rising shorts + weak momentum -> underperform"),
+    ("pe_ttm", "lo", "mom_12_1", "hi", "long", "value + momentum (cheap and rising)"),
+    ("pe_ttm", "lo", "net_margin_ttm", "hi", "long", "value + quality (cheap and profitable)"),
+    ("drawdown_252", "lo", "dist_sma200", "hi", "long", "oversold within a long uptrend"),
+    ("revenue_growth_yoy", "hi", "mom_12_1", "hi", "long", "growth + momentum"),
+    ("vol_20d_annual", "lo", "pe_ttm", "lo", "long", "low-vol + value (quality value)"),
+    ("net_margin_ttm", "hi", "revenue_growth_yoy", "hi", "long", "quality + growth (compounders)"),
+    ("rsi14", "lo", "pe_ttm", "lo", "long", "oversold + cheap"),
+    ("mom_12_1", "hi", "vol_20d_annual", "lo", "long", "momentum + low volatility"),
+    ("sector_rel_63d", "hi", "mom_12_1", "hi", "long", "sector tailwind + name momentum (supercycle)"),
+    ("insider_net_180d", "hi", "pe_ttm", "lo", "long", "insider buying + cheap"),
+    ("rating_net_90d", "hi", "revenue_growth_yoy", "hi", "long", "analyst upgrades + growth"),
+    ("sector_rel_63d", "hi", "drawdown_252", "lo", "long", "pullback in a hot sector"),
+    ("news_sent_7d", "lo", "pe_ttm", "lo", "long", "bearish news + cheap = contrarian overreaction (GOOG/MSFT)"),
+    ("news_vol_z", "hi", "news_sent_7d", "hi", "long", "positive news spike = catalyst drift"),
+    ("news_sent_30d", "hi", "mom_12_1", "hi", "long", "improving sentiment + momentum"),
+    ("rate_10y_chg_63d", "lo", "pe_ttm", "hi", "long", "rates falling + high-duration growth -> long"),
+    ("rate_10y_chg_63d", "hi", "pe_ttm", "hi", "short", "rates rising + high-duration tech -> short (duration repricing)"),
+    ("credit_spread_chg_63d", "hi", "vol_20d_annual", "hi", "short", "credit stress + high-beta -> short"),
+    ("vix_level", "hi", "drawdown_252", "lo", "long", "high VIX + deep drawdown -> capitulation bounce"),
+    ("days_to_cover", "hi", "drawdown_252", "lo", "long", "crowded short + deep drawdown -> squeeze bounce"),
+    ("short_int_chg_2m", "hi", "mom_12_1", "lo", "short", "rising shorts + weak momentum -> underperform"),
 ]
 
 
@@ -428,41 +500,82 @@ def gen_multi(pools):
             vals.sort()
             q[f] = (vals[int(0.20 * len(vals))], vals[int(0.80 * len(vals))])
     out = []
-    for fa, sa, fb, sb, label in MULTI_PAIRS:
+    for fa, sa, fb, sb, direction, label in MULTI_PAIRS:
         if fa not in q or fb not in q:
             continue
         ca = (fa, ">", round(q[fa][1], 4)) if sa == "hi" else (fa, "<", round(q[fa][0], 4))
         cb = (fb, ">", round(q[fb][1], 4)) if sb == "hi" else (fb, "<", round(q[fb][0], 4))
-        out.append((f"multi_{fa}_{sa}_{fb}_{sb}", f"generated 2-feature: {label}", [ca, cb], "long", "state"))
+        out.append((
+            f"multi_{fa}_{sa}_{fb}_{sb}", f"generated 2-feature: {label}",
+            [ca, cb], direction, "state",
+        ))
     return out
 
 
-def run(universe, spy, test_start):
-    """Two streaming passes over tickers (one ticker in memory at a time → scales to thousands).
-    Pass 1: base rate + gen-candidate pools + cross-sectional buckets. Pass 2: trigger moments."""
-    REBAL = spy["dk"][252::21]                       # ~monthly grid for cross-sectional factors
+def _validate_window(train_start, test_start, test_end):
+    if train_start is not None and train_start >= test_start:
+        raise ValueError("train_start must be earlier than test_start")
+    if test_end is not None and test_start >= test_end:
+        raise ValueError("test_end must be later than test_start")
+
+
+def run(
+    universe,
+    spy,
+    test_start,
+    test_end=None,
+    train_start=None,
+    excluded_features=None,
+):
+    """Run one purged historical fold while streaming one ticker at a time.
+
+    The test interval is ``[test_start, test_end)``. Training entries are
+    restricted to ``[train_start, test_start)`` and their label exits must also
+    precede ``test_start``. Test labels must mature before ``test_end``. This
+    makes the boundaries real data masks rather than reporting labels.
+    """
+    _validate_window(train_start, test_start, test_end)
+    excluded = set(excluded_features or ())
+    active_features = [feature for feature in GEN_FEATURES if feature not in excluded]
+    REBAL = [
+        d for d in spy["dk"][252::21]
+        if d >= test_start and (test_end is None or d < test_end)
+    ]                                               # ~monthly grid for test factors
     conn = sqlite3.connect(FEAT_DB, timeout=60.0)
+    conn.execute("BEGIN")  # one immutable SQLite snapshot for both streaming passes
 
     # ---- PASS 1 ----
     base = {h: [0, 0] for h in HORIZONS}             # [hits, n]
-    pools = {f: [] for f in GEN_FEATURES}
-    cross = {f: {} for f in GEN_FEATURES}            # f -> {rebal_date: [(val, fwd, spy_fwd)]}
+    pools = {f: [] for f in active_features}
+    cross = {f: {} for f in active_features}         # f -> {rebal_date: [(val, fwd, spy_fwd)]}
     nseen = 0
     for t in universe:
         try:
             td = load_ticker(conn, t)
         except Exception:
             continue
+        if not td["dates"]:
+            continue
         nseen += 1
         for hn, H in HORIZONS.items():
-            for d, fwd, sp in samples_for(td, spy, [], "state", H):
+            for d, fwd, sp in samples_for(
+                td, spy, [], "state", H,
+                entry_start=train_start,
+                entry_end=test_start,
+                exit_before=test_start,
+            ):
                 base[hn][1] += 1; base[hn][0] += 1 if fwd > sp else 0
-        for f in GEN_FEATURES:
-            pools[f] += [v for a, v in td["feats"].get(f, []) if a < test_start and v is not None][::3]
+        for f in active_features:
+            pools[f] += [
+                v for a, v in td["feats"].get(f, [])
+                if (train_start is None or a >= train_start) and a < test_start and v is not None
+            ][::3]
         dates = td["dates"]; n = len(dates)
         for rd in REBAL:
             k = bisect.bisect_right(dates, rd)
             if k >= n or k + 21 >= n:
+                continue
+            if test_end is not None and dates[k + 21] >= test_end:
                 continue
             c_ent, c_ex = td["close"][dates[k]], td["close"][dates[k + 21]]
             sp = spy_ret(spy, dates[k], dates[k + 21])
@@ -473,15 +586,19 @@ def run(universe, spy, test_start):
             fwd = c_ex / c_ent - 1
             cap = WINSOR[21]
             fwd = max(-cap, min(cap, fwd))
-            for f in GEN_FEATURES:
+            for f in active_features:
                 v = fval(td, f, rd)
                 if v is not None:
                     cross[f].setdefault(rd, []).append((v, fwd, sp))
     base_long = {h: (base[h][0] / base[h][1] if base[h][1] else 0.5) for h in HORIZONS}
 
-    mechs = list(SEEDS) + gen_candidates(pools) + gen_multi(pools)
+    seeds = [
+        mechanism for mechanism in SEEDS
+        if all(condition[0] not in excluded for condition in mechanism[2])
+    ]
+    mechs = seeds + gen_candidates(pools) + gen_multi(pools)
     cellmeta = {(m[0], hn): m for m in mechs for hn in HORIZONS}
-    cells = {k: [0, 0, 0, 0, 0.0, 0.0] for k in cellmeta}   # [n_tr,h_tr,n_te,h_te,s_te,ss_te]
+    cells = {k: [0, 0, 0, 0] for k in cellmeta}   # [n_tr,h_tr,n_te,h_te]
     # Same-date names share market/sector shocks. Collapse their test excess
     # returns to one equal-weight portfolio observation before inference.
     test_date_clusters = {k: {} for k in cellmeta}  # {(mid,horizon): {entry_date: [sum,n]}}
@@ -493,27 +610,34 @@ def run(universe, spy, test_start):
             td = load_ticker(conn, t)
         except Exception:
             continue
+        if not td["dates"]:
+            continue
         for (mid, rationale, conds, direction, kind) in mechs:
             evfeat = conds[0][0] if kind == "event" else None
             for hn, H in HORIZONS.items():
                 c = cells[(mid, hn)]
                 cost = COST_RT + (SHORT_BORROW_PER_DAY * H if direction == "short" else 0.0)
-                for d, fwd, sp in samples_for(td, spy, conds, kind, H, evfeat):
+                train_samples, test_samples = split_samples_for(
+                    td, spy, conds, kind, H, evfeat,
+                    train_start=train_start, test_start=test_start, test_end=test_end,
+                )
+                for d, fwd, sp in train_samples:
                     win = (fwd > sp) if direction == "long" else (fwd < sp)
-                    exc = ((fwd - sp) if direction == "long" else (sp - fwd)) - cost   # NET of costs
-                    if d < test_start:
-                        c[0] += 1; c[1] += int(win)
-                    else:
-                        c[2] += 1; c[3] += int(win); c[4] += exc; c[5] += exc * exc
-                        bucket = test_date_clusters[(mid, hn)].setdefault(d, [0.0, 0])
-                        bucket[0] += exc
-                        bucket[1] += 1
-                        test_tickers[(mid, hn)].add(t)
+                    c[0] += 1; c[1] += int(win)
+                for d, fwd, sp in test_samples:
+                    win = (fwd > sp) if direction == "long" else (fwd < sp)
+                    exc = ((fwd - sp) if direction == "long" else (sp - fwd)) - cost
+                    c[2] += 1; c[3] += int(win)
+                    bucket = test_date_clusters[(mid, hn)].setdefault(d, [0.0, 0])
+                    bucket[0] += exc
+                    bucket[1] += 1
+                    test_tickers[(mid, hn)].add(t)
     conn.close()
 
     results, tp, keys = [], [], []
     for (mid, hn), (_, rationale, conds, direction, kind) in cellmeta.items():
-        n_tr, h_tr, n_te, h_te, s, ss = cells[(mid, hn)]
+        H = HORIZONS[hn]
+        n_tr, h_tr, n_te, h_te = cells[(mid, hn)]
         base_dir = base_long[hn] if direction == "long" else 1 - base_long[hn]
         date_series = [
             total / count
@@ -533,7 +657,7 @@ def run(universe, spy, test_start):
                         "ticker_n": ticker_n,
                         "hit_te": round(h_te / n_te, 3) if n_te else None,
                         "alpha_te_pct": round(100 * m_exc, 3) if cluster_n else None,
-                        "test_p": round(p_mean, 5), "hit_p": p_hit,
+                        "test_p": round(p_mean, 5), "test_p_raw": p_mean, "hit_p": p_hit,
                         "weight_mean": round(wm.beta_mean(a_, b_), 3)})
         # A time-series effect in one or two stocks is not a portable market
         # mechanism. Require both independent entry-date clusters and
@@ -547,8 +671,6 @@ def run(universe, spy, test_start):
         for variant, dirn in (("hi", "long"), ("lo", "long"), ("ls", "long_short")):
             series = []
             for rd in sorted(buckets):
-                if rd < test_start:
-                    continue
                 rows = sorted(buckets[rd], key=lambda x: x[0])
                 if len(rows) < 20:
                     continue
@@ -561,18 +683,21 @@ def run(universe, spy, test_start):
                     series.append(sum(fw for _, fw, _ in rows[-k:]) / k - sum(fw for _, fw, _ in rows[:k]) / k - 2 * COST_RT)
             if len(series) < 8:
                 continue
-            m = sum(series) / len(series)
-            _mm, p = _ttest_moments(len(series), sum(series), sum(x * x for x in series))
+            # Monthly cross-sectional portfolios do not overlap, but adjacent
+            # portfolio returns can still be serially correlated. Use the
+            # same clustered/HAC inference contract instead of an iid t-test.
+            m, p = _hac_mean_p(series, 1)
             mid = f"xs_{f}_{variant}"
             results.append({"id": mid, "rationale": f"cross-sectional {f} {variant} quintile, monthly 21d",
                             "horizon": "month_21d", "direction": dirn, "conds": [[f, variant, 0.2]], "kind": "cross",
                             "base": 0.5, "tr_n": 0, "te_n": len(series),
                             "cluster_n": len(series), "hit_te": None,
                             "ticker_n": max(
-                                (len(rows) for rd, rows in buckets.items() if rd >= test_start),
+                                (len(rows) for rows in buckets.values()),
                                 default=0,
                             ),
-                            "alpha_te_pct": round(100 * m, 3), "test_p": round(p, 5), "hit_p": None,
+                            "alpha_te_pct": round(100 * m, 3), "test_p": round(p, 5),
+                            "test_p_raw": p, "hit_p": None,
                             "weight_mean": None})
             if results[-1]["cluster_n"] >= 30 and results[-1]["ticker_n"] >= 20:
                 tp.append(p); keys.append((mid, "month_21d", "cross"))
@@ -584,22 +709,31 @@ def run(universe, spy, test_start):
     return results, base_long, mechs, nseen
 
 
-def persist(results, test_start, evaluation_label, price_data_cutoff, universe_n):
+def persist(
+    results,
+    test_start,
+    evaluation_label,
+    price_data_cutoff,
+    universe_n,
+    *,
+    test_end=None,
+    train_start=None,
+):
     conn = sqlite3.connect(FEAT_DB, timeout=60.0)
     conn.execute("DROP TABLE IF EXISTS discovered_mechanisms")
     conn.execute("""CREATE TABLE discovered_mechanisms(
         id TEXT, horizon TEXT, direction TEXT, rationale TEXT, conds_json TEXT, kind TEXT,
         base REAL, tr_n INT, te_n INT, cluster_n INT, ticker_n INT, hit_te REAL, alpha_te_pct REAL, test_p REAL,
         fdr_sig INT, bonf_sig INT, weight_mean REAL, evaluation_label TEXT, test_start TEXT,
-        price_data_cutoff TEXT, universe_n INT, created_at TEXT)""")
+        test_end TEXT, train_start TEXT, price_data_cutoff TEXT, universe_n INT, created_at TEXT)""")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for r in results:
-        conn.execute("INSERT INTO discovered_mechanisms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO discovered_mechanisms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (r["id"], r["horizon"], r["direction"], r["rationale"], json.dumps(r["conds"]),
                       r["kind"], r["base"], r["tr_n"], r["te_n"], r["cluster_n"], r["ticker_n"],
                       r["hit_te"], r["alpha_te_pct"], r["test_p"], int(r["sig"]["fdr"]),
                       int(r["sig"]["bonf"]), r["weight_mean"], evaluation_label,
-                      test_start, price_data_cutoff, universe_n, now))
+                      test_start, test_end, train_start, price_data_cutoff, universe_n, now))
     conn.commit(); conn.close()
 
 
@@ -607,11 +741,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--universe", required=True, help="comma list, or ALL = every built ticker")
     ap.add_argument("--test-start", default="2020-06-18", help="OOS holdout starts here (train < this)")
+    ap.add_argument("--test-end", default=None,
+                    help="exclusive OOS end; labels maturing on/after this date stay hidden")
+    ap.add_argument("--train-start", default=None,
+                    help="optional inclusive training-entry start (expanding history by default)")
     ap.add_argument("--evaluation-label", default="development_reused_holdout",
                     help="provenance label; the default holdout has been reused for development "
                          "and is not clean final evidence")
     ap.add_argument("--allow-network", action="store_true",
                     help="refresh missing price/macro series from providers; default is frozen local cache")
+    ap.add_argument("--no-persist", action="store_true",
+                    help="do not replace the weekly discovered_mechanisms development artifact")
+    ap.add_argument("--exclude-feature", action="append", default=[],
+                    help="exclude a feature family from seeds, generated candidates, and cross factors")
     a = ap.parse_args()
     global ALLOW_NETWORK
     ALLOW_NETWORK = bool(a.allow_network)
@@ -626,17 +768,27 @@ def main():
         raise RuntimeError("no cached SPY bars; refresh market data or use --allow-network")
     spy = {"close": {b["t"]: b["c"] for b in spx}, "dk": [b["t"] for b in spx]}
 
-    results, base, mechs, nseen = run(universe, spy, a.test_start)
-    persist(results, a.test_start, a.evaluation_label, spx[-1]["t"], len(universe))
+    results, base, mechs, nseen = run(
+        universe, spy, a.test_start, test_end=a.test_end, train_start=a.train_start,
+        excluded_features=a.exclude_feature,
+    )
+    if not a.no_persist:
+        persist(
+            results, a.test_start, a.evaluation_label, spx[-1]["t"], len(universe),
+            test_end=a.test_end, train_start=a.train_start,
+        )
 
     ntrig = sum(1 for r in results if r["kind"] != "cross")
     ncross = sum(1 for r in results if r["kind"] == "cross")
     print(f"\n=== REAL-MECHANISM BACKTEST ===  {nseen}/{len(universe)} names with cached bars "
-          f"(incl. delisted)  test holdout >= {a.test_start}  price cutoff={spx[-1]['t']}")
+          f"(incl. delisted)  test=[{a.test_start},{a.test_end or 'latest'})  "
+          f"train_start={a.train_start or 'earliest'}  price cutoff={spx[-1]['t']}")
     if a.evaluation_label == "development_reused_holdout":
         print("WARNING: this holdout has informed prior iterations; treat it as development "
               "validation, not untouched production-edge evidence.")
-    print(f"tested: {ntrig} trigger cells ({len(SEEDS)} seeds + {len(mechs)-len(SEEDS)} machine-generated, x{len(HORIZONS)} horizons) + {ncross} cross-sectional factors")
+    seed_ids = {mechanism[0] for mechanism in SEEDS}
+    nseed = sum(mechanism[0] in seed_ids for mechanism in mechs)
+    print(f"tested: {ntrig} trigger cells ({nseed} seeds + {len(mechs)-nseed} machine-generated, x{len(HORIZONS)} horizons) + {ncross} cross-sectional factors")
     print("base rate P(beat SPY): " + "  ".join(f"{h}={base[h]:.3f}" for h in HORIZONS))
     surv = sorted([r for r in results if r["sig"]["fdr"]], key=lambda r: r["test_p"])
     print("\nSURVIVORS (FDR-significant positive OOS mean-alpha):  ** = also Bonferroni")
@@ -651,7 +803,10 @@ def main():
         print(f"  {r['id']:24} {r['horizon']:10} {r['direction']:10} {r['te_n']:>5} "
               f"{r['cluster_n']:>5} {r['ticker_n']:>5} {r['alpha_te_pct']:>7.3f} {r['test_p']:>8.5f} "
               f"{hit:>5} {wt:>5} {mark}")
-    print(f"\n(persisted all {len(results)} rows -> features.sqlite::discovered_mechanisms)")
+    if a.no_persist:
+        print(f"\n(not persisted; evaluated {len(results)} development rows)")
+    else:
+        print(f"\n(persisted all {len(results)} rows -> features.sqlite::discovered_mechanisms)")
     print("\nTop 12 by OOS mean-alpha (context, pre-correction):")
     for r in sorted([x for x in results if x["alpha_te_pct"] is not None], key=lambda r: -r["alpha_te_pct"])[:12]:
         flag = "FDR" if r["sig"]["fdr"] else "   "

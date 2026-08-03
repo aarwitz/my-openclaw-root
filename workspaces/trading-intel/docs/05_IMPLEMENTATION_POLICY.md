@@ -138,6 +138,12 @@ Phase 4 — Calibration:
 14. Two-week no-fill dry run: executor emits and validates intents.
 15. Grade intents against actual market movement and calibration quality (confidence vs realized outcomes).
 
+No calibration or discovery table is deployable. A risk-adding mechanism integration requires a
+source-controlled approval manifest that binds the exact completed locked-forward artifact and
+exact candidate-set digest. Development folds, historical replays, draft manifests, uncommitted
+manifests, expired approvals, and changed candidate rows fail closed. Agents cannot author approval
+manifests; the operator approval and committed decision-log entry are mandatory.
+
 Phase 5 — Live paper (90-day operational validation):
 
 16. Enable internal simulator submission.
@@ -152,6 +158,11 @@ Phase 5 — Live paper (90-day operational validation):
 - Reconciliation gate: 5 consecutive end-of-day reconciliations with zero unresolved divergences.
 - Fill realism gate: every performance report includes both idealized and slippage-adjusted P&L; benchmark comparisons use slippage-adjusted series.
 - Explainability gate: no intent reaches `submitted` without required thesis/falsifier/provenance/counterargument quality fields.
+- Point-in-time feature gate: every feature row has a finite value, ISO first-usable date,
+  `as_of == knowable_at`, and nonempty source; both shared writer validation and SQLite triggers
+  enforce it, and full preflight audits all rows.
+- Promotion-artifact gate: only an exact, completed, minimum-duration locked forward-shadow artifact
+  with a committed operator manifest can add active mechanisms to the paper ledger.
 
 Default A1 threshold values (can be tightened later):
 

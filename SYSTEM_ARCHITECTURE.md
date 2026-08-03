@@ -582,7 +582,7 @@ cron→SQLite migration in this build). The overseer drives the desk:
 
 ---
 
-## 11. Empirical foundation — feature store, backtesting & mechanism discovery (2026-06-18)
+## 11. Empirical foundation — feature store, replay & mechanism discovery
 
 The world model (§6) was bootstrapped from hand-authored mechanisms + a small, hindsight-biased
 episode library (12/13 episodes "confirmed"). That is being replaced by an **empirical, point-in-time,
@@ -597,7 +597,7 @@ One tall, point-in-time table `features(ticker, as_of, name, value, knowable_at,
 - *Fundamental* (FMP, stamped at **`filingDate`** = knowable_at, NOT the fiscal-period date):
   `revenue_ttm`, `eps_ttm`, `net_margin_ttm`, `revenue_growth_yoy`; `pe_ttm` derived at read time;
   plus `eps_surprise_pct` events.
-- Universe: **1,510 names, all-cap NASDAQ/NYSE (not S&P-restricted) ∪ delisted/failed** names, each
+- Universe: **1,570 names, all-cap NASDAQ/NYSE (not S&P-restricted) ∪ retained delisted/failed** names, each
   usable only within its real [IPO → delist] window. `members_asof()` reconstructs point-in-time S&P
   membership from FMP constituent-change history (for survivorship-safe index studies).
 
@@ -615,25 +615,67 @@ direction, horizon, kind}`. The 17 hand-authored mechanisms (§6.1) are **seeds*
 also **generates** candidates (single-feature quintile triggers + cross-sectional rank factors) and
 holds seeds, generated, and cross-sectional to the *same* bar.
 
-**Backtest / discovery engine — `mechanism_backtest.py` + `worldmodel_stats.py`.** Walk-forward,
-strictly point-in-time (decision uses `as_of` features + entry on the next bar; outcome graded on
-future bars only — **no-look-ahead proven** by a dataset-truncation diff). Streams ticker-by-ticker
+**Replay / discovery engine — `mechanism_backtest.py` + `historical_walkforward.py` +
+`worldmodel_stats.py`.** Strictly point-in-time (decision uses `as_of` features + entry on the next
+bar; outcome is graded on future bars only). Streams ticker-by-ticker
 (scales to thousands). Rigor controls:
 - **non-overlapping** samples (spacing ≥ horizon) — no autocorrelation inflation;
 - graded **market-relative vs the empirical base rate** (~0.49 on the broad universe, not 0.5);
-- **train/test holdout**; primary significance = one-sided **t-test on net mean-alpha** (catches
-  skew/tail edges), hit-rate secondary;
+- a bounded test interval with an exclusive end; training labels whose exits cross the test start
+  are purged, and test labels that mature outside the hidden interval are excluded;
+- primary significance = one-sided **HAC test on entry-date-clustered net mean-alpha**; raw ticker
+  hits are descriptive and never treated as independent trials;
 - **Benjamini-Hochberg FDR + Bonferroni** across every (mechanism × horizon) + cross-sectional factor;
 - **data-quality / tradability controls**: $5 price floor, $5M dollar-volume floor, per-horizon return
   winsorization, and a round-trip **transaction-cost** model (+short borrow) — alpha is reported **net**.
+
+The preregistered `purged_walkforward_v1` development lane hides four non-overlapping two-year
+periods from 2018 through 2025. Candidate thresholds are recomputed from each fold's training data;
+an aggregate candidate needs adequate date/name breadth in at least three folds, positive median
+alpha and at least three positive folds, plus a second Bonferroni correction over combined
+one-sided Stouffer p-values. It writes only an offline report under
+`state/historical-validation/`, cannot replace `discovered_mechanisms`, and has
+`promotion_authority=none`. These years have influenced system design, so even a survivor is a
+stable historical development candidate—not untouched proof of edge. The separate locked forward
+window remains the production-evidence lane. Canonical replay requires an immutable input directory
+created by `historical_snapshot.py`: one SQLite backup plus only the exact frozen price/FRED cache
+files the engine consumes, all content-hashed in a manifest. A report fingerprints that snapshot,
+the engine, aggregation runner, evaluation policy, and frozen universe. Each fold also holds one
+SQLite read snapshot across both passes, and any changed snapshot byte invalidates the run before
+aggregation. Live cache mtimes/WAL state are never used as research identity. Canonical execution
+is single-worker until a resource-bounded parallel implementation proves identical completion;
+failed parallel launches have no checkpoint and therefore no evidentiary status.
+
+Fundamental observations fail closed unless FMP supplies `filingDate` or `acceptedDate`; fiscal
+period dates are never substituted. The 2026-08-02 provenance audit found two missing-timestamp
+statements among 93,831 cached rows and removed their ten derived feature rows. The raw provider
+records remain cached for audit/recovery. Because FMP's archive is not yet proven to preserve the
+original pre-restatement statement values, `pe_ttm`, margin/growth fundamentals, and EPS-surprise
+features are excluded from the canonical historical fold lane until they are rebuilt from original
+filing accessions. Publication timestamps alone are not mistaken for full vintage safety.
 
 Informed by **AlphaAgent (arXiv 2502.16789)**: the enemy is *alpha decay* (overfit + crowding); the
 generator is regularized toward originality / hypothesis-alignment / complexity, and only OOS+FDR
 survivors earn weight. An LLM proposer (richer multi-feature hypotheses) slots in at the generator.
 
-**Calibrated mechanism set — `features.sqlite::calibrated_mechanisms`** (`promote_mechanisms.py`): the
-FDR-significant, net-positive-alpha survivors with their measured edge + a provisional world-model
-posterior. This is the **bootstrap source** for the live world model.
+**Calibrated mechanism set — `features.sqlite::calibrated_mechanisms`** (`promote_mechanisms.py`):
+an untrusted offline research table of FDR-significant, net-positive-alpha survivors with measured
+edge and a provisional world-model posterior. It is not, by itself, a deployment artifact.
+
+**Research/live boundary.** `integrate_calibrated.py` fails closed unless a manifest committed
+unchanged under `config/approved-strategies/` binds all of: the operator approval and decision-log
+D-number, an unexpired approval window, the exact candidate-set digest, and the exact digest of a
+completed minimum-duration locked forward-shadow report under `state/research-artifacts/`.
+Historical/development reports have no promotion authority. Any post-approval change to results,
+conditions, sample breadth, posterior, or candidate membership breaks the digest. Risk-reducing
+`--deprecate-all` remains available without a risk-adding approval. There is intentionally no
+approved manifest while the verdict is `NO_EDGE`.
+
+**Feature availability boundary.** The current tall store defines `as_of` as the first date a value
+is usable, so every writer must emit `as_of == knowable_at`, a finite value, and nonempty source.
+Shared Python validation plus SQLite insert/update triggers enforce that contract even for direct
+writers, and the release preflight audits the entire store. Economic-period, accession, and vintage
+metadata must be kept separately; they may never be represented by moving `as_of` earlier.
 
 **Historical 2026-06-18 cutover (superseded by the current zero-active NO_EDGE
 state).** `integrate_calibrated.py` reset the hindsight-biased learned state and
@@ -660,14 +702,23 @@ Three loops now close around it:
   *current* features → ranked conviction (advisory; wiring into live intents is the next gated step).
 - **Mechanism discovery (ongoing):** `mechanism_backtest.py` (`gen_candidates` single-feature +
   `gen_multi` economically-aligned 2-feature) keeps proposing candidates under the same OOS+FDR+cost bar;
-  survivors promote via `promote_mechanisms.py`. The free-form LLM proposer is the next layer.
+  `promote_mechanisms.py` may materialize survivors only as an untrusted analytics table. Crossing
+  into the paper ledger requires the committed exact-artifact manifest described above.
 
 **Current scheduling:** the weekday learning chain refreshes point-in-time
 features, resolves matured forecasts with `resolve_prediction_backlog.py`, and
 recomputes calibration. Signal and proposal jobs may continue collecting
 research evidence, but `author_intents.py` fails closed while the robust active
-mechanism count is zero. Promotion requires the full clustered/FDR evaluation
-and a gated proposal; a single-script p-value cannot promote a mechanism.
+mechanism count is zero. Promotion requires the full clustered/FDR evaluation,
+locked forward-shadow completion, and an exact committed operator manifest; neither a
+single-script p-value nor an approved prose proposal can promote a mechanism.
+
+**GBM shadow lane:** `ml_ranker.py --score-live` scores today's current top-cap
+universe for research discovery and a separate `model` simulator book that
+rebalances monthly. That shadow book is not the canonical desk book and its
+ranks do not enter desk intents, Kelly sizing, or Risk. Historical GBM metrics
+use today's active top-cap universe, so they are development diagnostics rather
+than survivorship-safe proof; only the forward shadow track is genuinely OOS.
 
 ---
 
@@ -680,7 +731,8 @@ ledger is the only broker/account surface. Scheduled feature refreshes bypass
 the normal intraday daily-bar cache and always include open positions plus
 recent/live hypothesis tickers in addition to the ranked discovery universe.
 
-**Robust live verdict: NO EDGE.** The 1,542-name replay collapses same-entry-
+**Robust live verdict: NO EDGE.** The latest single-split development replay had cached bars for
+1,569 of 1,570 frozen-universe names and collapses same-entry-
 date stocks into portfolios, applies HAC inference, requires at least 30 entry
 dates and 20 names, includes costs, and controls false discovery. Zero
 mechanisms survived. All 100 live mechanism records are deprecated; no new-risk

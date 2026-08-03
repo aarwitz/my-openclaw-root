@@ -18,7 +18,9 @@ Discipline (inherited from mechanism_backtest, same harness semantics):
 
 Output: per-year and aggregate rank IC (Spearman), ICIR, decile long-short and long-only
 net alphas, and per-feature marginal ICs for reference. JSON to stdout + saved to
-state/ml_ranker_eval.json. OFFLINE ONLY — nothing here writes to the live pipeline.
+state/ml_ranker_eval.json. Historical metrics are development-only because the panel uses
+today's active top-cap universe. ``--score-live`` writes advisory ranks that research can read and
+the separate internal shadow model book rebalances monthly; those ranks never authorize desk risk.
 
   python3 ml_ranker.py --top-n 600 --start 2016-01-01 --test-start 2020-01-01
 """
@@ -233,8 +235,9 @@ def feature_ics(X, y, meta, feats, test_start):
 def score_live(top_n: int, train_start: str):
     """Nightly ADVISORY scoring: train on the full closed-label history (rank-normalized),
     score every top-N name on TODAY's features, write to features.sqlite::ml_scores.
-    This builds a live out-of-sample track record — the promotion evidence for P2.
-    Nothing reads this table for trading; wiring into signal_scan is human-gated."""
+    This builds a live out-of-sample track record in a separate monthly shadow
+    model book and supplies discovery context to research. Desk-book sizing and
+    intent authorization do not read this table."""
     conn = sqlite3.connect(f"file:{FEAT_DB}?mode=ro", uri=True)
     names = _universe(conn, top_n)
     conn.close()

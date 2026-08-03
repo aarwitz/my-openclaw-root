@@ -7,6 +7,57 @@
     "allowed_use": "debugging, candidate comparison, and regression checks",
     "prohibited_claim": "untouched proof of production edge"
   },
+  "historical_walkforward_development": {
+    "version": "purged_walkforward_v1",
+    "preregistered_at": "2026-08-02T16:55:30Z",
+    "status": "development_only_all_historical_periods_have_informed_system_design",
+    "purpose": "stress-test sign, breadth, and regime stability without waiting for the live market",
+    "promotion_authority": "none",
+    "price_data_cutoff": "2026-07-31",
+    "universe": "all locally built price tickers including retained delisted names; eligibility is determined from point-in-time price and dollar-volume data inside each fold",
+    "universe_n": 1570,
+    "universe_sha256": "243b0ba0d061c2b432e2468019f18bfddb0eb03f7d078bff846c09c9b7bdcac0",
+    "excluded_features": [
+      "eps_surprise_pct",
+      "net_margin_ttm",
+      "revenue_growth_yoy",
+      "pe_ttm"
+    ],
+    "excluded_feature_reason": "FMP rows are publication-timestamped but the archive is not proven statement-vintage/restatement-safe; rebuild from original filing accessions before historical edge claims",
+    "known_limitations": [
+      "The current feature and mechanism families were designed after observing portions of these years, so the folds are not untouched discovery evidence.",
+      "The locally assembled all-cap universe includes delisted names but is not a complete frozen census of every historically listed US equity.",
+      "Historical provider corrections and corporate-action restatements can differ from the values available in real time."
+    ],
+    "folds": [
+      {"id": "wf_2018_2019", "train_start": "2015-01-02", "test_start": "2018-01-02", "test_end": "2020-01-02"},
+      {"id": "wf_2020_2021", "train_start": "2015-01-02", "test_start": "2020-01-02", "test_end": "2022-01-03"},
+      {"id": "wf_2022_2023", "train_start": "2015-01-02", "test_start": "2022-01-03", "test_end": "2024-01-02"},
+      {"id": "wf_2024_2025", "train_start": "2015-01-02", "test_start": "2024-01-02", "test_end": "2026-01-02"}
+    ],
+    "fixed_controls": {
+      "entry": "next trading-day close",
+      "train_label_purge": "training exits on or after test_start are excluded",
+      "test_label_mask": "test exits on or after exclusive test_end are excluded",
+      "round_trip_cost": 0.002,
+      "short_borrow_per_day": 0.0001,
+      "price_floor": 5.0,
+      "dollar_volume_floor": 5000000,
+      "candidate_thresholds": "training-fold quintiles only",
+      "inference": "equal-weight entry-date clusters with horizon-aware Newey-West HAC",
+      "within_fold_multiplicity": "BH FDR and Bonferroni over every eligible mechanism-horizon cell"
+    },
+    "aggregate_gate": {
+      "minimum_eligible_folds": 3,
+      "minimum_positive_alpha_folds": 3,
+      "minimum_entry_date_clusters_per_fold": 30,
+      "minimum_tickers_per_fold": 20,
+      "median_cost_net_alpha_must_be_positive": true,
+      "combined_p_method": "one-sided Stouffer over non-overlapping eligible folds",
+      "combined_multiplicity": "Bonferroni over every aggregate mechanism-horizon cell",
+      "result_class": "stable historical development candidate, never production-validated edge"
+    }
+  },
   "forward_shadow_holdout": {
     "start": "2026-08-03",
     "minimum_end": "2026-10-30",

@@ -11,7 +11,8 @@ INCREMENTAL BY DEFAULT (2026-06-19) — this NEVER wipes the live learning ledge
 This is what lets us refresh the mechanism set (after a new discovery run) AND keep accruing live learning.
 The two-learning-rates blend (calibrate.py) then shrinks the refreshed prior as live obs accumulate.
 
-  python3 integrate_calibrated.py            # incremental upsert; preserves the ledger
+  python3 integrate_calibrated.py --approval-manifest config/approved-strategies/DNNN.json
+                                             # exact approved artifact; preserves the ledger
 
 Adding TICKERS never goes through this script at all — tickers enter via the feature store + the live
 scan watchlist, and feed the ledger by trading + being graded (observations are keyed by mechanism).
@@ -26,6 +27,7 @@ import sqlite3
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 LIVE = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
@@ -106,6 +108,11 @@ def integration_eligibility(cal: sqlite3.Connection) -> dict:
     }
 
 
+def selected_survivors_for_mode(eligibility: dict, *, deprecate_all: bool) -> list[dict]:
+    """A quarantine can never preserve or reactivate an analytical survivor."""
+    return [] if deprecate_all else list(eligibility["eligible_survivors"])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -118,6 +125,13 @@ def main():
         action="store_true",
         help="report live-integration eligibility without writing the live database",
     )
+    ap.add_argument(
+        "--approval-manifest",
+        help=(
+            "source-controlled manifest binding an exact completed locked-forward "
+            "artifact and exact candidate set; required for every risk-adding write"
+        ),
+    )
     ap.add_argument("--reason", default="", help="required rationale for --deprecate-all")
     a = ap.parse_args()
     if a.check_only and a.deprecate_all:
@@ -128,18 +142,46 @@ def main():
     cal = sqlite3.connect(FEAT)
     cal.row_factory = sqlite3.Row
     eligibility = integration_eligibility(cal)
-    survivors = eligibility["eligible_survivors"]
+    survivors = selected_survivors_for_mode(
+        eligibility, deprecate_all=a.deprecate_all,
+    )
     cal.close()
+    approval = None
+    approval_error = None
+    if not a.deprecate_all:
+        if not a.approval_manifest:
+            approval_error = "no source-controlled approved strategy manifest"
+        else:
+            try:
+                from promotion_gate import validate_approval_manifest
+
+                approval = validate_approval_manifest(Path(a.approval_manifest), survivors)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                approval_error = f"invalid approval manifest: {exc}"
     if a.check_only:
-        verdict = "ELIGIBLE" if eligibility["eligible"] else "BLOCKED"
+        verdict = (
+            "ELIGIBLE"
+            if eligibility["eligible"] and approval_error is None
+            else "BLOCKED"
+        )
         print(f"LIVE INTEGRATION ELIGIBILITY: {verdict}")
         print(f"  analytical survivors: {eligibility['calibrated_count']}")
         print(f"  live-eligible survivors: {len(survivors)}")
         print(f"  evaluation labels: {eligibility['evaluation_labels']}")
         if eligibility["blockers"]:
             print("  blockers: " + "; ".join(eligibility["blockers"]))
+        if approval_error:
+            print("  promotion blocker: " + approval_error)
+        elif approval:
+            print(
+                "  approved artifact: "
+                f"{approval['decision_id']} manifest={approval['_manifest_sha256'][:12]} "
+                f"source={approval['_source_artifact_sha256'][:12]}"
+            )
         print("  live mechanism ledger: unchanged")
         return
+    if not a.deprecate_all and approval_error:
+        raise SystemExit(f"refusing live integration: {approval_error}")
     if not a.deprecate_all and eligibility["development_artifact"]:
         raise SystemExit(
             "refusing live integration from a development/reused holdout artifact; "
@@ -186,6 +228,9 @@ def main():
                                "backtest_n_raw": s["te_n"],
                                "backtest_n_date_clusters": s.get("cluster_n", s["te_n"]),
                                "skew_edge": bool(s["skew_edge"]),
+                               "approval_decision_id": approval["decision_id"],
+                               "approval_manifest_sha256": approval["_manifest_sha256"],
+                               "source_artifact_sha256": approval["_source_artifact_sha256"],
                                "refreshed": now})
             if mid in existing:
                 # PRESERVE live observations; refresh the backtest prior; re-blend the posterior
@@ -230,6 +275,23 @@ def main():
                     now,
                     a.reason.strip()[:500],
                     "preproduction_hardening_20260730",
+                ),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO audits(id,timestamp,actor,entity_type,entity_id,action,"
+                "before_state,after_state,rationale_concise,experiment_id) "
+                "VALUES(?,?,'developer','mechanism_set','approved_strategy_artifact',"
+                "'integrate_approved_artifact','quarantined','active',?,?)",
+                (
+                    "AUDIT-" + uuid.uuid4().hex,
+                    now,
+                    (
+                        f"{approval['decision_id']} manifest "
+                        f"{approval['_manifest_sha256']} source "
+                        f"{approval['_source_artifact_sha256']}"
+                    )[:500],
+                    exp,
                 ),
             )
         conn.execute("COMMIT")

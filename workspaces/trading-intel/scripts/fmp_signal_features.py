@@ -21,6 +21,7 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from connectors import fmp  # noqa: E402
+from feature_contract import validated_feature_rows  # noqa: E402
 
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
 
@@ -110,7 +111,8 @@ def build(names):
                     if past is not None:
                         rows.append((sym, D, "analyst_rating_chg_63d", round(sc - past, 4), D, "fmp"))
         conn.executemany(
-            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO features(ticker,as_of,name,value,knowable_at,source) VALUES(?,?,?,?,?,?)",
+            validated_feature_rows(rows))
         conn.commit(); total += len(rows)
         print(f"  {sym}: earnings={len(earn)} grades={len(grades)} targets={len(targets)} -> {len(rows)} rows", flush=True)
     print(f"done: {total} fmp-signal rows across {len(names)} names")

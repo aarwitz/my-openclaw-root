@@ -10,10 +10,11 @@ doc is the forward plan for the *alpha engine* specifically.
 The expensive, unusual, CORRECT parts of this system are the parts most
 projects never build:
 
-- **Point-in-time, survivorship-safe feature store** (`features.sqlite`, 1,510
+- **Point-in-time, survivorship-aware feature store** (`features.sqlite`, 1,570
   names ∪ delisted, 20yr, `knowable_at` discipline). This is the moat. Keep.
-- **The validation harness** (walk-forward, no-look-ahead proven, non-overlapping
-  samples, cost-net grading, BH-FDR across the hypothesis grid). Most funds
+- **The validation harness** (bounded purged folds, non-overlapping samples,
+  entry-date-clustered cost-net grading, BH-FDR/Bonferroni across the hypothesis
+  grid and a second cross-fold stability correction). Most funds
   don't hold themselves to this. Keep — everything new must pass through it.
 - **Determinism-first split** (scripts produce numbers, LLMs produce judgment)
   and the **non-bypassable risk gate**. Keep.
@@ -75,7 +76,9 @@ weekly audit).
 ## Phased plan (each phase gated by measured OOS lift)
 
 1. **P1 — GBM ranker evaluation** (offline) — **RUN 2026-07-02, verdict: promising,
-   below the promotion bar, iterate before P2.** 62,053 samples, 600 names,
+   below the promotion bar, iterate before P2.** All v1–v7 metrics below used
+   today's active top-cap universe; they are development diagnostics with
+   survivorship/selection bias, not historical edge proof. 62,053 samples, 600 names,
    walk-forward 2020–2026, cost-net, embargoed. v1 (raw values): IC 0.012,
    t=0.57 — broken by the 2023 regime shift (IC −0.098). v2 (per-date rank
    normalization, GKX-standard): **IC 0.023, t=1.21, ICIR 0.48, decile L/S
@@ -119,10 +122,11 @@ weekly audit).
 2. **P2 — Ranker → live (human-gated)**: nightly score after `refresh-live`;
    `signal_scan` consumes rank as the primary conviction input; mechanisms
    annotate the why. Rule proposal + operator approval before any sizing change.
-   **P2-prep LIVE 2026-07-02:** `ml_ranker.py --score-live` runs nightly in the
-   learning chain, writing ADVISORY ranks to `features.sqlite::ml_scores` —
-   nothing trades on them, but every night from today builds the live
-   out-of-sample track record that decides promotion. Grade it against realized
+   **P2-prep SHADOW 2026-07-02:** `ml_ranker.py --score-live` runs nightly in the
+   learning chain, writing ADVISORY ranks to `features.sqlite::ml_scores`.
+   Research may use them for discovery and a separate internal model book
+   rebalances monthly to build a forward track record; the desk book, intents,
+   sizing, and Risk never consume them. Grade the shadow ranks against realized
    returns after ~4 weeks (live IC vs the backtest's coverage-era 0.042).
 3. **P3 — LLM feature factory v1 — BUILT 2026-07-02, backfilling.**
    FMP transcripts turned out to be a paywalled tier (402), so v1 targets news
