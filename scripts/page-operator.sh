@@ -66,10 +66,19 @@ http_code="$(curl -sS -m 15 -o "$RESP_FILE" -w '%{http_code}' \
 if [[ "$http_code" == "200" ]]; then
   printf '%s' "$now" > "$STATE_FILE"
   log "sent alert=$KEY: $MSG"
+  /usr/bin/python3 /home/aaron/.openclaw/scripts/operator_event.py ingest \
+    --source direct-pager --channel telegram --target "$CHAT_ID" \
+    --severity crit --family "$KEY" --content "$TEXT" >/dev/null 2>&1 \
+    || log "WARN: durable operator-event intake failed for alert=$KEY"
   rm -f "$RESP_FILE"
   exit 0
 fi
 
 log "SEND FAILED (http=$http_code) alert=$KEY: $MSG :: $(head -c 300 "$RESP_FILE" 2>/dev/null || true)"
+/usr/bin/python3 /home/aaron/.openclaw/scripts/operator_event.py ingest \
+  --source direct-pager --channel telegram --target "$CHAT_ID" \
+  --severity crit --family "pager-delivery-$KEY" \
+  --content "Pager delivery failed (http=$http_code) for [$KEY]: $MSG" >/dev/null 2>&1 \
+  || true
 rm -f "$RESP_FILE"
 exit 1

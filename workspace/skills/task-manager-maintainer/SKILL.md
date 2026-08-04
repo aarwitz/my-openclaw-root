@@ -6,7 +6,9 @@ metadata: {"clawdbot":{"emoji":"🔧"}}
 
 # Task Manager Maintainer Router (Lean + Deterministic)
 
-Use this skill only for Task Manager source-code changes in `~/repos/Task-Manager/`.
+Use this skill only for Task Manager source-code changes in
+`/home/aaron/repos/lidi-task-manager/`. The hosted Cloudflare Worker/D1 service
+is canonical; do not revive the retired local Python service.
 For routine issue/sprint operations through API, use `task-manager`.
 
 ## Operation Table
@@ -40,11 +42,9 @@ For routine issue/sprint operations through API, use `task-manager`.
 
 Validation commands:
 
-```bash
-python3 -m py_compile backend/main.py backend/models.py backend/schemas.py
-pkill -f "uvicorn main:app" || true
-cd ~/repos/Task-Manager && nohup bash start.sh > /tmp/task-manager.log 2>&1 &
-```
+Use the repository's checked-in test, typecheck, and deployment commands from
+`/home/aaron/repos/lidi-task-manager/package.json`; never validate against a
+locally revived SQLite/FastAPI service.
 
 ## Output Contract
 

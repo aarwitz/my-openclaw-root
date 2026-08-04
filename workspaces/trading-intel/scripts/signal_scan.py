@@ -22,6 +22,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
@@ -29,8 +30,10 @@ from connectors import fmp     # noqa: E402
 import feature_store as fs     # noqa: E402
 import worldmodel as wm        # noqa: E402
 import symbol_lifecycle as symbols  # noqa: E402
+import promotion_gate  # noqa: E402
 
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
+LIVE = os.path.expanduser("~/.openclaw/state/trading-intel.sqlite")
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "UNH",
                      "XOM", "CAT", "WMT", "COST", "KO", "HD", "PG", "JNJ", "CRM", "AMD", "NFLX",
                      "DIS", "BA", "GE", "PFE", "INTC", "MU", "CVX", "ORCL", "QCOM"]
@@ -40,6 +43,106 @@ SUPPORTED_CONDITION_OPS = {">", "<"}
 # never let automatic origination claim more than a modest directional edge.
 MAX_LIVE_P_SHIFT = 0.10
 PROBABILITY_PRIOR_N = 20.0
+LIVE_HORIZON = {
+    "swing_5d": "swing_1_5d",
+    "month_21d": "position_1_4w",
+    "quarter_63d": "trend_1_3m",
+}
+
+
+def active_live_mechanism_ids(path=LIVE):
+    """Return the live-approved mechanism ids, failing closed on any read error.
+
+    ``calibrated_mechanisms`` is an offline research/staging table.  It may
+    retain historical rows while the live mechanism ledger is quarantined, so
+    its presence alone must never authorize signal origination.
+    """
+    try:
+        conn = sqlite3.connect(path, timeout=5)
+        rows = {
+            str(row[0]) for row in conn.execute(
+                "SELECT id FROM mechanisms WHERE status IN ('active','crowded')"
+            )
+        }
+        conn.close()
+        return rows
+    except (OSError, sqlite3.DatabaseError):
+        return set()
+
+
+def live_approved_calibrations(mechanisms, active_ids):
+    """Legacy pure matcher retained for compatibility tests only.
+
+    Runtime scanning uses ``live_authorized_calibrations`` below; matching an
+    offline research id to a live id is not authorization.
+    """
+    return [
+        row for row in mechanisms
+        if f"{row['id']}__{row['horizon']}" in active_ids
+    ]
+
+
+def live_authorized_calibrations(path=LIVE, *, now=None, connection=None):
+    """Load exact executable candidates from live mechanism notes.
+
+    This intentionally does not read ``features.sqlite::calibrated_mechanisms``.
+    That table is mutable research/staging state.  Every active live row must
+    carry a digest-bound candidate from a still-valid operator approval; one
+    malformed active row fails the entire scanner closed.
+    """
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    conn = connection or sqlite3.connect(path, timeout=5)
+    owned = connection is None
+    try:
+        cursor = conn.execute(
+            "SELECT id,direction,horizon,posterior_mean,notes "
+            "FROM mechanisms WHERE status IN ('active','crowded') ORDER BY id"
+        )
+        columns = [item[0] for item in cursor.description]
+        live_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        if owned:
+            conn.close()
+    out = []
+    errors = []
+    for live in live_rows:
+        label = str(live.get("id") or "<missing-id>")
+        try:
+            note = json.loads(live.get("notes") or "{}")
+            candidate = note["runtime_candidate"]
+            expected = promotion_gate.candidate_set_sha256([candidate])
+            if note.get("runtime_candidate_sha256") != expected:
+                raise ValueError("runtime candidate digest mismatch")
+            promotion_gate.validate_promotion_candidates([candidate])
+            expected_id = f"{candidate['id']}__{candidate['horizon']}"
+            if label != expected_id:
+                raise ValueError("live id differs from approved candidate")
+            if live.get("direction") != candidate["direction"]:
+                raise ValueError("live direction differs from approved candidate")
+            if live.get("horizon") != LIVE_HORIZON.get(candidate["horizon"]):
+                raise ValueError("live horizon differs from approved candidate")
+            if not all(str(note.get(key) or "").strip() for key in (
+                "approval_decision_id", "approval_manifest_sha256",
+                "source_artifact_sha256", "approval_expires_at",
+            )):
+                raise ValueError("approval lineage is incomplete")
+            expires = datetime.fromisoformat(
+                str(note["approval_expires_at"]).replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            if current > expires:
+                raise ValueError("operator approval has expired")
+            row = dict(candidate)
+            row["conds_json"] = json.dumps(candidate["conditions"], separators=(",", ":"))
+            # Live observations update the posterior in the live ledger.  The
+            # executable conditions/alpha remain artifact-bound; probability
+            # comes from the current audited posterior, not mutable research.
+            row["posterior_mean"] = float(live["posterior_mean"])
+            out.append(row)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"{label}: {exc}")
+    if errors:
+        raise RuntimeError("invalid live mechanism authorization: " + "; ".join(errors))
+    return out
 
 
 def live_watchlist(top_n=200):
@@ -187,20 +290,11 @@ def scan(names, min_fired=1):
     direction, and `fired` = the firing mechanisms (id/direction/horizon/posterior)."""
     conn = sqlite3.connect(FEAT)
     conn.row_factory = sqlite3.Row
-    calibrated_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(calibrated_mechanisms)")
-    }
-    mechs = [dict(r) for r in conn.execute(
-        "SELECT * FROM calibrated_mechanisms "
-        "WHERE kind != 'cross' AND hit_te IS NOT NULL AND te_n >= 30"
-    )]
+    mechs = live_authorized_calibrations()
+    mechs = [m for m in mechs if m.get("kind") != "cross"]
     for m in mechs:
         m["conds"] = json.loads(m["conds_json"])
-        effective_n = (
-            m.get("cluster_n") if "cluster_n" in calibrated_columns else m["te_n"]
-        )
-        m["posterior_mean"] = probability_from_hit_rate(m["hit_te"], effective_n)
-    mechs = [m for m in mechs if m["posterior_mean"] is not None
+    mechs = [m for m in mechs if m.get("posterior_mean") is not None
              and all(c[1] in SUPPORTED_CONDITION_OPS for c in m["conds"])]
     rw = {}                                          # (id,horizon) -> redundancy_weight (1/cluster_size)
     try:

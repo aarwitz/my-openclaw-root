@@ -231,8 +231,15 @@ def list_issues() -> list[dict]:
 
 
 def find_existing_issue(issues: list[dict], row_id: str) -> dict | None:
+    # A recurrence after the prior incident closed is new work. Prefer an open
+    # issue carrying the stable marker; never silently attach new evidence to a
+    # terminal issue that no lane will revisit.
     for issue in issues:
-        if issue_mentions_queue_id(issue, row_id):
+        if (
+            issue_mentions_queue_id(issue, row_id)
+            and str(issue.get("status") or "").strip().lower()
+            not in DUP_TERMINAL_STATUSES
+        ):
             return issue
     return None
 

@@ -586,6 +586,7 @@ def mark_book(conn, book: str) -> dict:
         "equity": round(equity, 2),
         "cash": round(cash, 2),
         "mark_quality": {
+            "position_count": len(held),
             "live_bulk": len(held) - len(stored_fallbacks) - len(cached_fallbacks),
             "stored_last_mark": len(stored_fallbacks),
             "stored_symbols": sorted(stored_fallbacks),
@@ -658,7 +659,11 @@ def main(argv=None) -> int:
         result = mark_book(conn, a.book)
         print(json.dumps(result))
         quality = result.get("mark_quality") or {}
-        if market_clock().get("is_open") and int(quality.get("live_bulk") or 0) == 0:
+        if (
+            market_clock().get("is_open")
+            and int(quality.get("position_count") or 0) > 0
+            and int(quality.get("live_bulk") or 0) == 0
+        ):
             return 1
     elif a.cmd == "corporate-actions":
         print(json.dumps({"applied": apply_corporate_actions(conn, a.book)}))

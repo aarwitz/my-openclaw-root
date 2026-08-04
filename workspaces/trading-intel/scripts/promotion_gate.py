@@ -53,7 +53,7 @@ def canonical_candidates(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
     out: list[dict[str, Any]] = []
     for raw in rows:
         row = dict(raw)
-        conds = row.get("conds_json", "[]")
+        conds = row.get("conditions", row.get("conds_json", "[]"))
         if isinstance(conds, str):
             conds = json.loads(conds)
         out.append({
@@ -64,11 +64,13 @@ def canonical_candidates(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
             "source": str(row.get("source") or ""),
             "conditions": conds,
             "net_alpha_pct": _finite(row.get("net_alpha_pct")),
+            "beta_neutral_alpha_pct": _finite(row.get("beta_neutral_alpha_pct")),
             "test_p": _finite(row.get("test_p")),
             "bonferroni": bool(row.get("bonf_sig")),
             "hit_rate": _finite(row.get("hit_te")),
             "raw_sample_n": int(row.get("te_n") or 0),
             "date_cluster_n": int(row.get("cluster_n") or 0),
+            "ticker_n": int(row.get("ticker_n") or 0),
             "posterior_mean": _finite(row.get("posterior_mean")),
         })
     return sorted(
@@ -82,6 +84,49 @@ def candidate_set_sha256(rows: Iterable[dict[str, Any]]) -> str:
         canonical_candidates(rows), sort_keys=True, separators=(",", ":"),
     ).encode()
     return _sha256_bytes(payload)
+
+
+def validate_promotion_candidates(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    raw_rows = [dict(row) for row in rows]
+    canonical = canonical_candidates(raw_rows)
+    if not canonical:
+        raise ValueError("source artifact contains no promotable candidates")
+    for row in canonical:
+        label = f"{row['id']}__{row['horizon']}"
+        if row["kind"] not in {"state", "event"}:
+            raise ValueError(f"{label}: unsupported live mechanism kind")
+        if row["direction"] not in {"long", "short"}:
+            raise ValueError(f"{label}: unsupported live direction")
+        if row["source"] != "locked_forward_shadow_v1":
+            raise ValueError(f"{label}: candidate lacks locked-forward provenance")
+        if not isinstance(row["conditions"], list) or not row["conditions"]:
+            raise ValueError(f"{label}: executable conditions are required")
+        if any(
+            not isinstance(condition, list)
+            or len(condition) != 3
+            or condition[1] not in {">", "<"}
+            for condition in row["conditions"]
+        ):
+            raise ValueError(f"{label}: unsupported condition contract")
+        if row["net_alpha_pct"] is None or row["net_alpha_pct"] <= 0:
+            raise ValueError(f"{label}: raw-SPY alpha must be positive")
+        if (
+            row["beta_neutral_alpha_pct"] is None
+            or row["beta_neutral_alpha_pct"] <= 0
+        ):
+            raise ValueError(f"{label}: beta-neutral alpha must be positive")
+        if row["test_p"] is None or row["test_p"] > 0.05 or not row["bonferroni"]:
+            raise ValueError(f"{label}: forward multiplicity gate not passed")
+        if row["date_cluster_n"] < 30 or row["ticker_n"] < 20:
+            raise ValueError(f"{label}: forward breadth minimum not met")
+        if row["raw_sample_n"] < row["date_cluster_n"]:
+            raise ValueError(f"{label}: invalid sample counts")
+        if (
+            row["posterior_mean"] is None
+            or not 0.0 < row["posterior_mean"] < 1.0
+        ):
+            raise ValueError(f"{label}: probability posterior is invalid")
+    return raw_rows
 
 
 def _parse_utc(value: Any, field: str) -> datetime:
@@ -123,7 +168,7 @@ def _assert_committed(path: Path, repo_root: Path) -> None:
 
 def validate_approval_manifest(
     manifest_path: Path,
-    candidates: Iterable[dict[str, Any]],
+    candidates: Iterable[dict[str, Any]] | None = None,
     *,
     now: datetime | None = None,
     approval_root: Path = APPROVAL_ROOT,
@@ -166,16 +211,6 @@ def validate_approval_manifest(
     if current > expires_at:
         raise ValueError("strategy approval has expired")
 
-    expected_candidates = candidate_set_sha256(candidates)
-    if manifest.get("candidate_set_sha256") != expected_candidates:
-        raise ValueError("candidate set differs from the approved digest")
-    approved_ids = sorted(str(value) for value in manifest.get("candidate_ids", []))
-    actual_ids = sorted(
-        f"{row['id']}__{row['horizon']}" for row in canonical_candidates(candidates)
-    )
-    if approved_ids != actual_ids:
-        raise ValueError("candidate_ids differ from the live integration set")
-
     source = manifest.get("source_artifact") or {}
     source_path_text = str(source.get("path") or "")
     if not source_path_text:
@@ -201,9 +236,35 @@ def validate_approval_manifest(
         raise ValueError("forward-shadow minimum session count was not met")
     if report.get("promotion_authority") != "human_manifest_only":
         raise ValueError("source artifact has invalid promotion authority")
+    expected_evaluator = file_sha256(Path(__file__).with_name("forward_shadow_report.py"))
+    expected_recorder = file_sha256(Path(__file__).with_name("forward_shadow.py"))
+    if report.get("evaluator_sha256") != expected_evaluator:
+        raise ValueError("source artifact evaluator code differs from the current release")
+    if report.get("recorder_engine_sha256") != expected_recorder:
+        raise ValueError("source artifact recorder code differs from the current release")
+    if report.get("promotion_gate_sha256") != file_sha256(Path(__file__)):
+        raise ValueError("source artifact promotion contract differs from the current release")
+    artifact_candidates = validate_promotion_candidates(
+        report.get("promotion_candidates") or []
+    )
+    expected_candidates = candidate_set_sha256(artifact_candidates)
     if report.get("candidate_set_sha256") != expected_candidates:
         raise ValueError("source artifact and approved candidate set differ")
+    if manifest.get("candidate_set_sha256") != expected_candidates:
+        raise ValueError("candidate set differs from the approved digest")
+    if candidates is not None:
+        supplied = list(candidates)
+        if candidate_set_sha256(supplied) != expected_candidates:
+            raise ValueError("candidate set differs from the approved digest")
+    approved_ids = sorted(str(value) for value in manifest.get("candidate_ids", []))
+    actual_ids = sorted(
+        f"{row['id']}__{row['horizon']}"
+        for row in canonical_candidates(artifact_candidates)
+    )
+    if approved_ids != actual_ids:
+        raise ValueError("candidate_ids differ from the live integration set")
 
     manifest["_manifest_sha256"] = file_sha256(path)
     manifest["_source_artifact_sha256"] = source["sha256"]
+    manifest["_promotion_candidates"] = artifact_candidates
     return manifest

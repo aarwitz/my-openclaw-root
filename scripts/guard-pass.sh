@@ -118,6 +118,8 @@ print(f"🛡 guard {'' if eq is None else f'— equity ${eq[0]:,.0f}'} | day P&L
       f"{npos} names, gross ${gross:,.0f}, cash ${eq[1]:,.0f} | intents today: {ints or 'none'} | biggest: {', '.join(movers)}{ptxt}")
 PYEOF
 )
+THEMES=$("$PY" "$OC/workspaces/trading-intel/scripts/theme_scoreboard.py" 2>/dev/null || echo "themes: unavailable")
+DIGEST="$DIGEST | $THEMES"
 [[ -n "${FAILED:-}" ]] && DIGEST="$DIGEST | ⚠ failed: $FAILED"
 tg "$DIGEST"
 log "===== guard pass end (failed: ${FAILED:-none}) ====="

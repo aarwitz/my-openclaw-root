@@ -158,8 +158,13 @@ class SelectionFunnelTests(unittest.TestCase):
         self.assertEqual(sfa.write_rows(conn, [base])["written"], 1)
         changed = dict(base)
         changed["raw_return_pct"] = 3.0
-        with self.assertRaisesRegex(RuntimeError, "revision refused"):
-            sfa.write_rows(conn, [changed])
+        report = sfa.write_rows(conn, [changed])
+        self.assertEqual(report["matured_revision_refused"], 1)
+        self.assertEqual(report["revision_samples"], ["h:ABC:5d"])
+        frozen = conn.execute(
+            "SELECT raw_return_pct FROM selection_funnel_outcomes WHERE id='sfo-1'"
+        ).fetchone()[0]
+        self.assertEqual(frozen, 2.0)
 
     def test_report_distinguishes_latency_and_only_labels_negative_harm(self) -> None:
         conn = sqlite3.connect(":memory:")

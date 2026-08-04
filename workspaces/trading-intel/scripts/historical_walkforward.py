@@ -27,7 +27,7 @@ import historical_snapshot as hs
 
 ROOT = Path(os.path.expanduser("~/.openclaw"))
 POLICY_PATH = ROOT / "workspaces/trading-intel/config/evaluation_policy.json"
-DEFAULT_OUTPUT = ROOT / "state/historical-validation/purged_walkforward_v1.json"
+DEFAULT_OUTPUT = ROOT / "state/historical-validation/purged_walkforward_v2.json"
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -36,6 +36,12 @@ def _sha256_bytes(value: bytes) -> str:
 
 def _sha256_file(path: Path) -> str:
     return _sha256_bytes(path.read_bytes())
+
+
+def _sha256_json(value: dict) -> str:
+    return _sha256_bytes(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    )
 
 
 def _universe(conn: sqlite3.Connection) -> list[str]:
@@ -146,9 +152,16 @@ def aggregate(fold_reports: list[dict], gate: dict) -> list[dict]:
             and row.get("ticker_n", 0) >= gate["minimum_tickers_per_fold"]
         ]
         alphas = [float(row["alpha_te_pct"]) for row in eligible]
+        beta_alphas = [
+            float(row.get("beta_neutral_alpha_te_pct", row["alpha_te_pct"]))
+            for row in eligible
+        ]
         p_values = [float(row.get("test_p_raw", row["test_p"])) for row in eligible]
         combined = _combined_p(p_values)
-        positive = sum(alpha > 0 for alpha in alphas)
+        positive = sum(
+            alpha > 0 and beta_alpha > 0
+            for alpha, beta_alpha in zip(alphas, beta_alphas)
+        )
         aggregate_row = {
             "id": mid,
             "horizon": horizon,
@@ -159,11 +172,20 @@ def aggregate(fold_reports: list[dict], gate: dict) -> list[dict]:
             "median_alpha_pct": round(statistics.median(alphas), 4) if alphas else None,
             "worst_alpha_pct": round(min(alphas), 4) if alphas else None,
             "best_alpha_pct": round(max(alphas), 4) if alphas else None,
+            "median_beta_neutral_alpha_pct": (
+                round(statistics.median(beta_alphas), 4) if beta_alphas else None
+            ),
+            "worst_beta_neutral_alpha_pct": (
+                round(min(beta_alphas), 4) if beta_alphas else None
+            ),
             "combined_p": combined,
             "folds": [
                 {
                     "id": row["fold_id"],
                     "alpha_pct": row.get("alpha_te_pct"),
+                    "beta_neutral_alpha_pct": row.get(
+                        "beta_neutral_alpha_te_pct", row.get("alpha_te_pct")
+                    ),
                     "p": row.get("test_p_raw", row.get("test_p")),
                     "clusters": row.get("cluster_n"),
                     "tickers": row.get("ticker_n"),
@@ -186,9 +208,70 @@ def aggregate(fold_reports: list[dict], gate: dict) -> list[dict]:
             and row["positive_alpha_folds"] >= gate["minimum_positive_alpha_folds"]
             and row["median_alpha_pct"] is not None
             and row["median_alpha_pct"] > 0
+            and row["median_beta_neutral_alpha_pct"] is not None
+            and row["median_beta_neutral_alpha_pct"] > 0
             and row["combined_bonferroni"]
         )
     return aggregates
+
+
+def freeze_forward_candidate_set(
+    fold_reports: list[dict],
+    stable_candidates: list[dict],
+    historical_spec: dict,
+    forward_spec: dict,
+) -> dict:
+    """Bind the exact executable definitions that enter the forward shadow.
+
+    Generated thresholds vary by training fold. A bare mechanism id therefore
+    is not an executable hypothesis. We deliberately freeze the definitions
+    trained for the chronologically latest development fold; its thresholds
+    were fixed before that fold's test period and are not refit after seeing
+    the aggregate result.
+    """
+    source_fold_id = historical_spec["folds"][-1]["id"]
+    source_fold = next(
+        (fold for fold in fold_reports if fold.get("id") == source_fold_id),
+        None,
+    )
+    if source_fold is None:
+        raise RuntimeError("latest development fold missing from candidate freeze")
+    definitions = {
+        (row["id"], row["horizon"], row["direction"], row["kind"]): row
+        for row in source_fold.get("results", [])
+    }
+    candidates = []
+    for stable in sorted(
+        stable_candidates,
+        key=lambda row: (row["id"], row["horizon"], row["direction"], row["kind"]),
+    ):
+        key = (
+            stable["id"], stable["horizon"],
+            stable["direction"], stable["kind"],
+        )
+        definition = definitions.get(key)
+        if definition is None:
+            raise RuntimeError(f"forward definition missing for {stable['id']}")
+        candidates.append({
+            "id": stable["id"],
+            "horizon": stable["horizon"],
+            "horizon_sessions": mb.HORIZONS[stable["horizon"]],
+            "direction": stable["direction"],
+            "kind": stable["kind"],
+            "conditions": definition.get("conds") or [],
+            "rationale": definition.get("rationale"),
+            "threshold_source_fold": source_fold_id,
+            "threshold_information_end_exclusive": source_fold["test_start"],
+        })
+    return {
+        "status": "frozen_no_trading_authority",
+        "start": forward_spec["start"],
+        "minimum_end": forward_spec["minimum_end"],
+        "minimum_sessions": forward_spec["minimum_sessions"],
+        "threshold_source_fold": source_fold_id,
+        "candidate_set_sha256": _sha256_json(candidates),
+        "candidates": candidates,
+    }
 
 
 def _new_report(
@@ -196,11 +279,13 @@ def _new_report(
     universe: list[str],
     engine_sha: str,
     runner_sha: str,
-    policy_sha: str,
+    historical_spec_sha: str,
+    policy_file_sha: str,
+    forward_policy_sha: str,
     data_snapshot: dict,
 ) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "evaluation_version": spec["version"],
         "status": "running",
         "development_only": True,
@@ -209,11 +294,14 @@ def _new_report(
         "completed_at": None,
         "engine_sha256": engine_sha,
         "runner_sha256": runner_sha,
-        "policy_sha256": policy_sha,
+        "historical_spec_sha256": historical_spec_sha,
+        "policy_file_sha256": policy_file_sha,
+        "forward_policy_sha256": forward_policy_sha,
         "data_snapshot_signature": data_snapshot,
         "price_data_cutoff": spec["price_data_cutoff"],
         "universe_n": len(universe),
         "universe_sha256": _universe_sha(universe),
+        "universe_symbols": universe,
         "known_limitations": spec["known_limitations"],
         "excluded_features": spec["excluded_features"],
         "excluded_feature_reason": spec["excluded_feature_reason"],
@@ -228,6 +316,7 @@ def _execute_fold(
 ) -> dict:
     """Process-safe fold runner; all inputs and outputs are deterministic data."""
     mb.ALLOW_NETWORK = False
+    coverage = {}
     results, base, mechanisms, nseen = mb.run(
         universe,
         spy,
@@ -235,10 +324,12 @@ def _execute_fold(
         test_end=fold["test_end"],
         train_start=fold["train_start"],
         excluded_features=excluded_features,
+        coverage_report=coverage,
     )
     return {
         **fold,
         "names_with_cached_bars": nseen,
+        "coverage": coverage,
         "mechanism_count": len(mechanisms),
         "base_rate_beat_spy": base,
         "results": results,
@@ -274,6 +365,7 @@ def main() -> int:
 
     policy = json.loads(POLICY_PATH.read_text())
     spec = policy["historical_walkforward_development"]
+    forward_spec = policy["forward_shadow_holdout"]
     conn = sqlite3.connect(mb.FEAT_DB, timeout=60.0)
     universe = _universe(conn)
     conn.close()
@@ -286,16 +378,20 @@ def main() -> int:
 
     engine_sha = _sha256_file(Path(mb.__file__))
     runner_sha = _sha256_file(Path(__file__))
-    policy_sha = _sha256_file(POLICY_PATH)
+    historical_spec_sha = _sha256_json(spec)
+    policy_file_sha = _sha256_file(POLICY_PATH)
+    forward_policy_sha = _sha256_json(forward_spec)
     data_snapshot = _data_snapshot_signature(snapshot_dir)
     report = _new_report(
-        spec, universe, engine_sha, runner_sha, policy_sha, data_snapshot
+        spec, universe, engine_sha, runner_sha, historical_spec_sha,
+        policy_file_sha, forward_policy_sha, data_snapshot
     )
     if not args.no_resume and args.output.exists():
         prior = json.loads(args.output.read_text())
         identity = (
             "evaluation_version", "engine_sha256", "runner_sha256",
-            "policy_sha256", "universe_sha256", "data_snapshot_signature",
+            "historical_spec_sha256", "forward_policy_sha256",
+            "universe_sha256", "data_snapshot_signature",
         )
         if all(prior.get(key) == report.get(key) for key in identity):
             report = prior
@@ -369,10 +465,15 @@ def main() -> int:
         {key: row[key] for key in (
             "id", "horizon", "direction", "kind", "eligible_folds",
             "positive_alpha_folds", "median_alpha_pct", "worst_alpha_pct",
+            "median_beta_neutral_alpha_pct", "worst_beta_neutral_alpha_pct",
             "combined_p", "combined_bonferroni",
         )}
         for row in report["aggregates"] if row["stable_development_candidate"]
     ]
+    report["forward_candidate_set"] = freeze_forward_candidate_set(
+        report["folds"], report["stable_development_candidates"],
+        spec, forward_spec,
+    )
     report["status"] = "complete" if len(report["folds"]) == len(spec["folds"]) else "partial"
     report["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _atomic_json(args.output, report)

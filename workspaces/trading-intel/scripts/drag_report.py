@@ -1141,6 +1141,17 @@ def collect_signals(cur: sqlite3.Cursor) -> list[dict]:
                 reason = report.get("selection_reason")
                 if reason:
                     evidence.append(f"selection_reason: {reason}")
+                discriminator = report.get("forward_discriminator_candidate") or {}
+                if discriminator:
+                    high = discriminator.get("buckets", {}).get("valuation_confidence_gt_0_5", {})
+                    low = discriminator.get("buckets", {}).get("valuation_confidence_le_0_5", {})
+                    evidence.append(
+                        "forward-available candidate: valuation_confidence > 0.5 "
+                        f"n={high.get('n')} mean_brier={high.get('mean_brier')} vs <=0.5 "
+                        f"n={low.get('n')} mean_brier={low.get('mean_brier')}; "
+                        f"high-minus-low error gap={discriminator.get('high_minus_low_error_gap')}; "
+                        "retrospective discovery only, actual Brier unchanged, forward shadow required"
+                    )
                 evidence.append(
                     "single-regime caveat: all resolved calibration rows in this report are neutral / position_1_4w"
                 )

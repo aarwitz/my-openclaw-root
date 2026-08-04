@@ -100,10 +100,13 @@ def check(conn, path: Path, health_checker=None, inventory_checker=None) -> dict
                        "detail": f"hypotheses snap={snap_hypo} db={db_hypo}"})
 
     topology = d.get("topology")
-    if not isinstance(topology, list):
+    if not isinstance(topology, dict):
         issues.append({"severity": "red", "area": "topology",
-                       "detail": f"snapshot topology must be an agent-id list, got {type(topology).__name__}"})
-    elif set(topology) != agents:
+                       "detail": f"snapshot topology must be the v5 contract object, got {type(topology).__name__}"})
+    elif topology.get("topology_version") != "v5":
+        issues.append({"severity": "red", "area": "topology",
+                       "detail": f"snapshot topology version={topology.get('topology_version')!r}"})
+    elif set(topology.get("agents_order") or []) != agents:
         issues.append({"severity": "red", "area": "topology",
                        "detail": "snapshot topology and agent roster disagree"})
     broker = d.get("broker") or {}

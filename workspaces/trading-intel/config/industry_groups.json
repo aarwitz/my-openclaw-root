@@ -1,0 +1,11 @@
+{
+  "software": ["MSFT", "ORCL", "CRM", "NOW", "ADBE", "SNOW", "DDOG"],
+  "ai_hardware": ["NVDA", "AMD", "AVGO", "MU", "ARM", "VRT", "NBIS"],
+  "banks": ["JPM", "BAC", "WFC", "C", "GS", "MS"],
+  "healthcare": ["LLY", "UNH", "JNJ", "MRK", "ABBV", "REGN"],
+  "industrials": ["CAT", "GE", "RTX", "BA", "HON", "ETN"],
+  "consumer": ["AMZN", "TSLA", "HD", "LOW", "NKE", "MCD"],
+  "energy": ["XOM", "CVX", "COP", "SLB", "EOG", "OXY"],
+  "defensives": ["WMT", "COST", "PG", "KO", "PEP", "CL"],
+  "communications": ["GOOG", "META", "NFLX", "DIS", "T", "VZ"]
+}

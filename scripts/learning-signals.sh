@@ -40,6 +40,13 @@ fi
 log "===== signals start (pid $$) args=$* ====="
 FAILED=""
 
+# 0) Market-wide event intake. This is intentionally broader than ticker
+# news: forced flows, fund distress, ownership transfers, and market-structure
+# shocks often become knowable before the affected ticker set is obvious.
+# The frequent host-cron owns normal collection; this is a pre-open fallback.
+if "$OC/scripts/market-event-intake.sh" >>"$LOG" 2>&1; then log "   ok: market-event-intake"
+else log "   WARN: market-event-intake failed (advisory, health sweep will page)"; fi
+
 # 1) fresh live prices into the point-in-time store
 if "$PY" "$TI/feature_store.py" refresh-live >>"$LOG" 2>&1; then log "   ok: refresh-live"
 else log "   FAIL: refresh-live"; FAILED="refresh-live"; fi

@@ -13,7 +13,9 @@ Rigor:
   * point-in-time: feature read = latest as_of <= decision date; entry = NEXT trading day's close.
   * NON-OVERLAPPING samples per ticker (spaced >= horizon) so the binomial test isn't inflated by
     autocorrelated overlapping windows.
-  * graded MARKET-RELATIVE (beat SPY); the empirical base rate is reported rather than assumed 0.5.
+  * graded against both SPY and a trailing-beta-adjusted SPY benchmark; a cell
+    must survive the more conservative of the two tests, so high-beta rebound
+    exposure cannot masquerade as alpha.
   * candidate thresholds are percentiles computed from the TRAIN period only (no test leakage).
   * bounded train/test split by date; training labels that cross the boundary are purged and test
     labels must mature before the exclusive test end. Significance is reported on the TEST
@@ -57,6 +59,10 @@ DV_FLOOR = 5_000_000                        # min entry dollar-volume — instit
 WINSOR = {5: 0.25, 21: 0.50, 63: 1.00}     # cap |single-name return| per horizon (outlier control)
 COST_RT = 0.002                            # round-trip transaction cost (20 bps) per trade
 SHORT_BORROW_PER_DAY = 0.0001              # ~2.5%/yr borrow cost applied to short trades
+BETA_LOOKBACK = 252
+BETA_MIN_OBS = 126
+BETA_FLOOR = 0.0
+BETA_CAP = 3.0
 
 # Economic seed mechanisms (the hypotheses). conds: list of (feature, op, threshold). op in >,<.
 SEEDS = [
@@ -303,6 +309,47 @@ def spy_ret(spy, d_entry, d_exit):
     return cj / ci - 1 if ci else None
 
 
+def rolling_beta(td, spy, decision_date):
+    """Estimate trailing market beta using information available at decision time.
+
+    The estimate uses at most 252 prior close-to-close observations, requires
+    126 aligned observations, and is clipped to a conservative long-only range.
+    Samples without enough history are ineligible for the beta-robust test
+    instead of silently receiving beta=1.
+    """
+    cache = td.setdefault("_beta_cache", {})
+    if decision_date in cache:
+        return cache[decision_date]
+    dates = td["dates"]
+    end = bisect.bisect_right(dates, decision_date)
+    start = max(1, end - BETA_LOOKBACK)
+    xs, ys = [], []
+    for i in range(start, end):
+        d0, d1 = dates[i - 1], dates[i]
+        c0, c1 = td["close"].get(d0), td["close"].get(d1)
+        market = spy_ret(spy, d0, d1)
+        if not c0 or c1 is None or market is None:
+            continue
+        stock = c1 / c0 - 1.0
+        if not math.isfinite(stock) or not math.isfinite(market):
+            continue
+        xs.append(market)
+        ys.append(stock)
+    if len(xs) < BETA_MIN_OBS:
+        cache[decision_date] = None
+        return None
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    variance = sum((x - mx) ** 2 for x in xs)
+    if variance <= 0:
+        cache[decision_date] = None
+        return None
+    beta = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / variance
+    beta = max(BETA_FLOOR, min(BETA_CAP, beta))
+    cache[decision_date] = beta
+    return beta
+
+
 def _sample_candidates(td, spy, conds, kind, H, event_feat=None):
     """Yield valid samples before evaluation-window filtering and spacing."""
     dates = td["dates"]
@@ -333,7 +380,7 @@ def _sample_candidates(td, spy, conds, kind, H, event_feat=None):
         fwd = c_ex / c_ent - 1
         cap = WINSOR.get(H, 1.0)                                          # winsorize outlier returns
         fwd = max(-cap, min(cap, fwd))
-        yield ent, d_ent, d_ex, fwd, sp
+        yield ent, d_ent, d_ex, fwd, sp, rolling_beta(td, spy, d)
 
 
 def samples_for(
@@ -348,6 +395,7 @@ def samples_for(
     entry_end=None,
     exit_before=None,
     include_exit=False,
+    include_beta=False,
 ):
     """Return non-overlapping, point-in-time samples for one ticker.
 
@@ -358,7 +406,7 @@ def samples_for(
     diagnostic scripts.
     """
     out, last_idx = [], -10 ** 9
-    for ent, d_ent, d_ex, fwd, sp in _sample_candidates(
+    for ent, d_ent, d_ex, fwd, sp, beta in _sample_candidates(
         td, spy, conds, kind, H, event_feat
     ):
         if entry_start is not None and d_ent < entry_start:
@@ -370,15 +418,20 @@ def samples_for(
         if ent - last_idx < H:          # enforce non-overlap inside this evaluation window
             continue
         last_idx = ent
-        if include_exit:
+        if include_exit and include_beta:
+            out.append((d_ent, d_ex, fwd, sp, beta))
+        elif include_exit:
             out.append((d_ent, d_ex, fwd, sp))
+        elif include_beta:
+            out.append((d_ent, fwd, sp, beta))
         else:
             out.append((d_ent, fwd, sp))
     return out
 
 
 def split_samples_for(
-    td, spy, conds, kind, H, event_feat, *, train_start, test_start, test_end
+    td, spy, conds, kind, H, event_feat, *, train_start, test_start, test_end,
+    include_beta=False,
 ):
     """Build purged train and bounded test cohorts in one candidate scan.
 
@@ -388,7 +441,7 @@ def split_samples_for(
     """
     cohorts = {"train": [], "test": []}
     last = {"train": -10 ** 9, "test": -10 ** 9}
-    for ent, d_ent, d_ex, fwd, sp in _sample_candidates(
+    for ent, d_ent, d_ex, fwd, sp, beta in _sample_candidates(
         td, spy, conds, kind, H, event_feat
     ):
         cohort = None
@@ -406,7 +459,8 @@ def split_samples_for(
         if cohort is None or ent - last[cohort] < H:
             continue
         last[cohort] = ent
-        cohorts[cohort].append((d_ent, fwd, sp))
+        row = (d_ent, fwd, sp, beta) if include_beta else (d_ent, fwd, sp)
+        cohorts[cohort].append(row)
     return cohorts["train"], cohorts["test"]
 
 
@@ -526,6 +580,7 @@ def run(
     test_end=None,
     train_start=None,
     excluded_features=None,
+    coverage_report=None,
 ):
     """Run one purged historical fold while streaming one ticker at a time.
 
@@ -549,22 +604,32 @@ def run(
     pools = {f: [] for f in active_features}
     cross = {f: {} for f in active_features}         # f -> {rebal_date: [(val, fwd, spy_fwd)]}
     nseen = 0
+    pass1_loaded, pass1_empty, pass1_errors = [], [], {}
     for t in universe:
         try:
             td = load_ticker(conn, t)
-        except Exception:
+        except Exception as exc:
+            pass1_errors[t] = {
+                "type": type(exc).__name__,
+                "message": str(exc)[:300],
+            }
             continue
         if not td["dates"]:
+            pass1_empty.append(t)
             continue
         nseen += 1
+        pass1_loaded.append(t)
         for hn, H in HORIZONS.items():
-            for d, fwd, sp in samples_for(
+            for d, fwd, sp, beta in samples_for(
                 td, spy, [], "state", H,
                 entry_start=train_start,
                 entry_end=test_start,
                 exit_before=test_start,
+                include_beta=True,
             ):
-                base[hn][1] += 1; base[hn][0] += 1 if fwd > sp else 0
+                if beta is None:
+                    continue
+                base[hn][1] += 1; base[hn][0] += 1 if fwd > beta * sp else 0
         for f in active_features:
             pools[f] += [
                 v for a, v in td["feats"].get(f, [])
@@ -584,12 +649,15 @@ def run(
             if c_ent < PRICE_FLOOR or td["dvol"].get(dates[k], 0) < DV_FLOOR:
                 continue
             fwd = c_ex / c_ent - 1
+            beta = rolling_beta(td, spy, rd)
+            if beta is None:
+                continue
             cap = WINSOR[21]
             fwd = max(-cap, min(cap, fwd))
             for f in active_features:
                 v = fval(td, f, rd)
                 if v is not None:
-                    cross[f].setdefault(rd, []).append((v, fwd, sp))
+                    cross[f].setdefault(rd, []).append((v, fwd, sp, beta))
     base_long = {h: (base[h][0] / base[h][1] if base[h][1] else 0.5) for h in HORIZONS}
 
     seeds = [
@@ -602,16 +670,24 @@ def run(
     # Same-date names share market/sector shocks. Collapse their test excess
     # returns to one equal-weight portfolio observation before inference.
     test_date_clusters = {k: {} for k in cellmeta}  # {(mid,horizon): {entry_date: [sum,n]}}
+    beta_date_clusters = {k: {} for k in cellmeta}
     test_tickers = {k: set() for k in cellmeta}
+    pass2_loaded, pass2_empty, pass2_errors = [], [], {}
 
     # ---- PASS 2: trigger moments ----
     for t in universe:
         try:
             td = load_ticker(conn, t)
-        except Exception:
+        except Exception as exc:
+            pass2_errors[t] = {
+                "type": type(exc).__name__,
+                "message": str(exc)[:300],
+            }
             continue
         if not td["dates"]:
+            pass2_empty.append(t)
             continue
+        pass2_loaded.append(t)
         for (mid, rationale, conds, direction, kind) in mechs:
             evfeat = conds[0][0] if kind == "event" else None
             for hn, H in HORIZONS.items():
@@ -620,19 +696,47 @@ def run(
                 train_samples, test_samples = split_samples_for(
                     td, spy, conds, kind, H, evfeat,
                     train_start=train_start, test_start=test_start, test_end=test_end,
+                    include_beta=True,
                 )
-                for d, fwd, sp in train_samples:
-                    win = (fwd > sp) if direction == "long" else (fwd < sp)
+                for d, fwd, sp, beta in train_samples:
+                    if beta is None:
+                        continue
+                    benchmark = beta * sp
+                    win = (fwd > benchmark) if direction == "long" else (fwd < benchmark)
                     c[0] += 1; c[1] += int(win)
-                for d, fwd, sp in test_samples:
-                    win = (fwd > sp) if direction == "long" else (fwd < sp)
+                for d, fwd, sp, beta in test_samples:
+                    if beta is None:
+                        continue
+                    benchmark = beta * sp
+                    win = (fwd > benchmark) if direction == "long" else (fwd < benchmark)
                     exc = ((fwd - sp) if direction == "long" else (sp - fwd)) - cost
+                    beta_exc = (
+                        (fwd - benchmark) if direction == "long"
+                        else (benchmark - fwd)
+                    ) - cost
                     c[2] += 1; c[3] += int(win)
                     bucket = test_date_clusters[(mid, hn)].setdefault(d, [0.0, 0])
                     bucket[0] += exc
                     bucket[1] += 1
+                    beta_bucket = beta_date_clusters[(mid, hn)].setdefault(d, [0.0, 0])
+                    beta_bucket[0] += beta_exc
+                    beta_bucket[1] += 1
                     test_tickers[(mid, hn)].add(t)
     conn.close()
+
+    if coverage_report is not None:
+        coverage_report.clear()
+        coverage_report.update({
+            "universe_n": len(universe),
+            "loaded_n": len(pass1_loaded),
+            "loaded_symbols": pass1_loaded,
+            "empty_symbols": pass1_empty,
+            "load_errors": pass1_errors,
+            "pass2_loaded_n": len(pass2_loaded),
+            "pass2_empty_symbols": pass2_empty,
+            "pass2_load_errors": pass2_errors,
+            "pass_mismatch": sorted(set(pass1_loaded) ^ set(pass2_loaded)),
+        })
 
     results, tp, keys = [], [], []
     for (mid, hn), (_, rationale, conds, direction, kind) in cellmeta.items():
@@ -644,11 +748,18 @@ def run(
             for _, (total, count) in sorted(test_date_clusters[(mid, hn)].items())
             if count
         ]
+        beta_date_series = [
+            total / count
+            for _, (total, count) in sorted(beta_date_clusters[(mid, hn)].items())
+            if count
+        ]
         cluster_n = len(date_series)
         ticker_n = len(test_tickers[(mid, hn)])
         # Entry-date portfolios can still overlap for H sessions. HAC with up
         # to H date lags is conservative for event mechanisms and state scans.
         m_exc, p_mean = _hac_mean_p(date_series, H)
+        beta_m_exc, beta_p_mean = _hac_mean_p(beta_date_series, H)
+        robust_p = max(p_mean, beta_p_mean)
         p_hit = None  # raw-name binomial independence is not defensible
         a_, b_ = 1 + h_tr, 1 + (n_tr - h_tr)
         results.append({"id": mid, "rationale": rationale, "horizon": hn, "direction": direction,
@@ -657,36 +768,48 @@ def run(
                         "ticker_n": ticker_n,
                         "hit_te": round(h_te / n_te, 3) if n_te else None,
                         "alpha_te_pct": round(100 * m_exc, 3) if cluster_n else None,
-                        "test_p": round(p_mean, 5), "test_p_raw": p_mean, "hit_p": p_hit,
+                        "beta_neutral_alpha_te_pct": round(100 * beta_m_exc, 3) if cluster_n else None,
+                        "spy_test_p_raw": p_mean,
+                        "beta_neutral_test_p_raw": beta_p_mean,
+                        "test_p": round(robust_p, 5), "test_p_raw": robust_p, "hit_p": p_hit,
                         "weight_mean": round(wm.beta_mean(a_, b_), 3)})
         # A time-series effect in one or two stocks is not a portable market
         # mechanism. Require both independent entry-date clusters and
         # cross-sectional breadth before a hypothesis enters multiplicity
         # correction or becomes promotion-eligible.
         if cluster_n >= 30 and ticker_n >= 20:
-            tp.append(p_mean); keys.append((mid, hn, "trig"))
+            tp.append(robust_p); keys.append((mid, hn, "trig"))
 
     # ---- cross-sectional factor results ----
     for f, buckets in cross.items():
         for variant, dirn in (("hi", "long"), ("lo", "long"), ("ls", "long_short")):
-            series = []
+            series, beta_series = [], []
             for rd in sorted(buckets):
                 rows = sorted(buckets[rd], key=lambda x: x[0])
                 if len(rows) < 20:
                     continue
                 k = max(2, int(0.2 * len(rows)))
                 if variant == "hi":
-                    series.append(sum(fw - sp for _, fw, sp in rows[-k:]) / k - COST_RT)
+                    series.append(sum(fw - sp for _, fw, sp, _ in rows[-k:]) / k - COST_RT)
+                    beta_series.append(sum(fw - beta * sp for _, fw, sp, beta in rows[-k:]) / k - COST_RT)
                 elif variant == "lo":
-                    series.append(sum(fw - sp for _, fw, sp in rows[:k]) / k - COST_RT)
+                    series.append(sum(fw - sp for _, fw, sp, _ in rows[:k]) / k - COST_RT)
+                    beta_series.append(sum(fw - beta * sp for _, fw, sp, beta in rows[:k]) / k - COST_RT)
                 else:
-                    series.append(sum(fw for _, fw, _ in rows[-k:]) / k - sum(fw for _, fw, _ in rows[:k]) / k - 2 * COST_RT)
+                    series.append(sum(fw for _, fw, _, _ in rows[-k:]) / k - sum(fw for _, fw, _, _ in rows[:k]) / k - 2 * COST_RT)
+                    beta_series.append(
+                        sum(fw - beta * sp for _, fw, sp, beta in rows[-k:]) / k
+                        - sum(fw - beta * sp for _, fw, sp, beta in rows[:k]) / k
+                        - 2 * COST_RT
+                    )
             if len(series) < 8:
                 continue
             # Monthly cross-sectional portfolios do not overlap, but adjacent
             # portfolio returns can still be serially correlated. Use the
             # same clustered/HAC inference contract instead of an iid t-test.
             m, p = _hac_mean_p(series, 1)
+            beta_m, beta_p = _hac_mean_p(beta_series, 1)
+            robust_p = max(p, beta_p)
             mid = f"xs_{f}_{variant}"
             results.append({"id": mid, "rationale": f"cross-sectional {f} {variant} quintile, monthly 21d",
                             "horizon": "month_21d", "direction": dirn, "conds": [[f, variant, 0.2]], "kind": "cross",
@@ -696,11 +819,15 @@ def run(
                                 (len(rows) for rows in buckets.values()),
                                 default=0,
                             ),
-                            "alpha_te_pct": round(100 * m, 3), "test_p": round(p, 5),
-                            "test_p_raw": p, "hit_p": None,
+                            "alpha_te_pct": round(100 * m, 3),
+                            "beta_neutral_alpha_te_pct": round(100 * beta_m, 3),
+                            "spy_test_p_raw": p,
+                            "beta_neutral_test_p_raw": beta_p,
+                            "test_p": round(robust_p, 5),
+                            "test_p_raw": robust_p, "hit_p": None,
                             "weight_mean": None})
             if results[-1]["cluster_n"] >= 30 and results[-1]["ticker_n"] >= 20:
-                tp.append(p); keys.append((mid, "month_21d", "cross"))
+                tp.append(robust_p); keys.append((mid, "month_21d", "cross"))
 
     keep = st.benjamini_hochberg(tp, 0.05); bonf = st.bonferroni(tp, 0.05)
     sig = {(keys[i][0], keys[i][1]): {"fdr": keep[i], "bonf": bonf[i]} for i in range(len(keys))}

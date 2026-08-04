@@ -387,6 +387,7 @@ def data_reality(conn, now: datetime | None = None) -> list[dict]:
 def loop_closure(conn, now: datetime | None = None) -> list[dict]:
     out = []
     current = _current_time(now)
+    out.append(themes_fresh(conn, now=current))
     for tbl, tsc, max_missed, label in FRESHNESS_CHECKS:
         try:
             last = conn.execute(f"SELECT MAX({tsc}) FROM {tbl}").fetchone()[0]
@@ -476,6 +477,36 @@ def loop_closure(conn, now: datetime | None = None) -> list[dict]:
     except sqlite3.Error:
         pass
     return out
+
+
+def themes_fresh(conn: sqlite3.Connection, now: datetime | None = None) -> dict:
+    """Active themes must be touched by actual evidence at least every 14 days."""
+    current = _current_time(now)
+    try:
+        rows = conn.execute(
+            "SELECT id,last_evidence_at FROM themes WHERE status='active'"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return {"family": "loop", "id": "fresh:themes", "status": "RED",
+                "detail": f"themes_fresh cannot read canonical theme store: {exc}"}
+    stale = []
+    for row in rows:
+        touched = row["last_evidence_at"]
+        if not touched:
+            stale.append(row["id"])
+            continue
+        try:
+            age_days = (current - _timestamp(touched)).total_seconds() / 86400.0
+        except (TypeError, ValueError):
+            age_days = 10_000
+        if age_days > 14:
+            stale.append(row["id"])
+    return {
+        "family": "loop", "id": "fresh:themes",
+        "status": "RED" if stale else "OK",
+        "detail": (f"{len(stale)} active theme(s) have no evidence touch in 14d"
+                   + (f": {', '.join(stale[:5])}" if stale else "")),
+    }
 
 
 def edge(conn) -> list[dict]:

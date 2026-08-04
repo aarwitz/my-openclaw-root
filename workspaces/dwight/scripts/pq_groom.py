@@ -38,7 +38,10 @@ FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("schema_docs", r"schema|architecture|authority docs|archived architecture"),
         ("short_path", r"short.*(ready|intent|author|express)|executor.*buy.only"),
         ("valuation_hygiene", r"value_scan|valuation.*rationale|valuation share|visa valuation|swbi valuation"),
-        ("learning_outcomes", r"prediction|learning|calibrat|brier|debrief"),
+        # Keep this deliberately specific. Generic words such as "learning" or
+        # "prediction" collapsed unrelated resolver, scheduling, and corpus
+        # incidents into one family (and could suppress a critical outage).
+        ("learning_outcomes", r"matured predictions?.*(unresolved|grading)|prediction outcome.*(unresolved|grading)|grade.outcomes|calibration.*brier|brier.*calibration|market debrief.*missing"),
         ("evidence_freshness", r"stale evidence|evidence.*fresh"),
         ("risk_gate_crash", r"risk.gate.*(crash|error|index)|hypothesis_id crash"),
     )

@@ -9,12 +9,14 @@ set -uo pipefail
 # single failure, and Telegram-alerts if any stage failed.
 # Stages (dependency order):
 #   1. feature_store refresh-live  — fresh EOD prices into the point-in-time store
-#   2. grade_outcomes              — resolve matured predictions -> mechanism_observations
-#   3. prediction-challenger       — grade shadow calibration variants (no trading authority)
-#   4. calibrate                   — fold outcomes into Beta posteriors + draft rule_proposals
-#   5. compute_attribution         — closed-position P&L attribution vs SPY -> benchmarks
-#   6. selection-funnel            — counterfactual returns for every research candidate
-#   7. extract_patterns            — recurring mechanism themes from postmortems
+#   2. forward-shadow              — immutable no-authority candidate observations
+#   3. forward-shadow-report       — deterministic, human-gated forward assessment
+#   4. grade_outcomes              — resolve matured predictions -> mechanism_observations
+#   4. prediction-challenger       — grade shadow calibration variants (no trading authority)
+#   5. calibrate                   — fold outcomes into Beta posteriors + draft rule_proposals
+#   6. compute_attribution         — closed-position P&L attribution vs SPY -> benchmarks
+#   7. selection-funnel            — counterfactual returns for every research candidate
+#   8. extract_patterns            — recurring mechanism themes from postmortems
 # Paired host crontab entry: `12 16 * * 1-5` (weekdays 16:12 ET, post-close, before daily-learning).
 
 OC="$HOME/.openclaw"
@@ -63,6 +65,8 @@ step "ledger-backup"       bash "$HOME/.openclaw/scripts/backup-ledger.sh"
 step "autotrade-preflight" bash "$HOME/.openclaw/scripts/run-with-trace.sh" --tag test "$HOME/.openclaw/scripts/autotrade-preflight.py"
 step "sync-symbol-aliases" "$PY" "$TI/sync_symbol_aliases.py"
 step "refresh-live"        "$PY" "$TI/feature_store.py" refresh-live --top-n 600
+step "forward-shadow"      "$PY" "$TI/forward_shadow.py"
+step "forward-shadow-report" "$PY" "$TI/forward_shadow_report.py"
 # LLM feature factory (P3): type today's news into point-in-time features
 # (llm_news_dir / material_ct / neg_mat_ct). Cached per batch — only new
 # articles cost a model call. Best-effort: never blocks the learning chain.
@@ -72,6 +76,11 @@ step "llm-features"        "$PY" "$TI/llm_features.py" daily --top-n 64
 step "edgar-deltas"        "$PY" "$TI/edgar_deltas.py" daily --top-n 150
 # Economic-link momentum (peers' relative return propagates with a lag) + KG peer edges
 step "peer-features"       "$PY" "$TI/peer_features.py" daily --top-n 300
+# Cross-name narratives must emerge from price structure and then be graded by
+# prices. Both jobs are offline/deterministic; neither has trading authority.
+step "industry-rs"         "$PY" "$TI/industry_rs.py"
+step "score-themes"        "$PY" "$TI/score_themes.py"
+step "theme-context"       "$PY" "$TI/theme_context.py" --write
 # ADVISORY nightly ML rank (P2 prep): builds the live out-of-sample track record
 # in features.sqlite::ml_scores. Research may use it for discovery and the
 # separate internal shadow model book rebalances from it monthly; desk intents,

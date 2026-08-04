@@ -1,6 +1,6 @@
 # Operator Guide — AutoTrade
 
-Status: active. Reconciled 2026-07-30.
+Status: active. Reconciled 2026-08-03.
 
 AutoTrade is an internal-paper simulation. The owned SQLite ledger is the only
 account and execution surface; no external broker switch or fallback exists.
@@ -8,14 +8,19 @@ Druck’s Telegram messages are narration, not the source of truth.
 
 ## Current posture
 
-- Strategy verdict: **NO EDGE / do not scale**. The robust 1,542-name replay
-  found zero FDR survivors and all 100 mechanisms are deprecated.
+- Strategy verdict: **NO EDGE / do not scale**. Historical development
+  candidates have no trading authority; all 100 live mechanisms are deprecated.
 - Open-risk authoring is quarantined. Cash is intentional while no robust
   mechanism is active; idle-cash reduction is not a success target.
-- Existing paper positions remain subject to stops, falsifiers, horizons, risk,
-  reconciliation, marks, and attribution.
-- The locked forward shadow evaluation begins 2026-08-03 and must run at least
-  60 sessions without tuning from its outcomes.
+- The desk is currently flat after every legacy/incomplete-lineage position was
+  exited through the normal paper execution path. Any future position remains
+  subject to stops, falsifiers, horizons, risk, reconciliation, and attribution.
+- The locked forward shadow begins 2026-08-04 and must run at least 60 sessions
+  without tuning. `forward_shadow.py` records every frozen-candidate signal and
+  no-trade/ineligible outcome post-close. `forward_shadow_report.py` waits for
+  the fixed window and every observation to mature, then applies dual-alpha,
+  breadth, HAC, and multiplicity gates. Neither script has intent or trading
+  authority; even a completed survivor needs a committed operator manifest.
 
 Do not copy position counts or P&L from this document. Query current state:
 
@@ -46,6 +51,29 @@ Ask in plain language for:
 Treat every Telegram number as a summary of canonical state. If it conflicts
 with the scripts above, the scripts/ledger win and the narration bug should be
 filed.
+
+Telegram is not an operational sink. Every successful outbound bot message is
+recorded in `~/.openclaw/state/operator-events.jsonl`; direct emergency pages
+use the same intake. INFO is retained as observed evidence. Explicit
+WARN/CRIT/FAILED messages create or recur a stable item in
+`state/priority-queue.jsonl`, and the five-minute deterministic Dwight rail
+reconciles that item to hosted Task Manager sprint 5. Repeated identical pages
+within 24 hours do not create duplicate issues. A changed or later recurrence
+is a new observation and must not be suppressed merely because an older issue
+was closed.
+
+Read-only inspection:
+
+```bash
+tail -n 20 ~/.openclaw/state/operator-events.jsonl
+python3 ~/.openclaw/workspaces/overseer/scripts/pq_list.py --status open
+tail -n 50 ~/.openclaw/logs/dwight-pq-rail.log
+```
+
+Do not copy Telegram text by hand into Task Manager. If an actionable message
+is absent from the ledger, repair the hook/direct-page intake; if it is in the
+ledger but not the queue, repair classification; if it is queued but not in
+Task Manager, repair the deterministic rail.
 
 ## Scheduled behavior
 
@@ -125,6 +153,41 @@ For a failure:
 Missing marks, foreign-key violations, matured unresolved predictions,
 closed trades without attribution, or a reintroduced broker path are critical.
 `NO_EDGE` is an honest strategy warning, not a machine outage.
+
+## Model authentication and gateway recovery
+
+Hosted OpenAI inference is Codex OAuth-only. `openai/gpt-5.5` is the registered
+model name; it is expected to resolve through `authProvider=openai-codex` and
+does not imply API-key billing. `openai:default`, `OPENAI_API_KEY`, a missing
+agent OAuth store, or a health result based only on foreground synthetic auth is
+a critical configuration defect.
+
+Read-only fleet audit:
+
+```bash
+python3 ~/.openclaw/scripts/enforce-codex-oauth.py
+openclaw models --agent overseer status --json
+```
+
+The first command must report `clean: true`; the second must show a usable
+OpenAI runtime route whose auth provider is `openai-codex`. To repair store
+drift, run the enforcer through the trace wrapper with `--apply`. It removes
+direct OpenAI tokens and seeds every existing agent from the shared OAuth
+profile without touching market/news API credentials.
+
+Most config and mounted auth-store changes hot-reload. If an environment
+variable was removed from `credentials/openclaw-gateway.env`, the existing
+container still retains its original process environment until recreation.
+Use only:
+
+```bash
+~/.openclaw/scripts/run-with-trace.sh --tag auth-recovery \
+  ~/.openclaw/scripts/safe-restart.sh --reason codex-oauth-env-reload
+```
+
+`safe-restart.sh` sanitizes the fleet before backup, disables/re-enables cron,
+force-recreates the container, validates auth, and restores OAuth-only state on
+failure. Do not use `systemctl restart`, `docker restart`, or ad-hoc Compose.
 
 ## Simulator limits
 

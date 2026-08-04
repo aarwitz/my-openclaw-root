@@ -130,6 +130,31 @@ class BrierContributorTests(unittest.TestCase):
 
         self.assertEqual(blocker["kind"], "current_linker_behavior")
 
+    def test_valuation_discriminator_is_point_in_time_and_never_actual_improvement(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE valuations(ticker TEXT,as_of TEXT,confidence REAL)")
+        conn.executemany(
+            "INSERT INTO valuations VALUES (?,?,?)",
+            [
+                ("AAA", "2026-07-01T00:00:00Z", 0.8),
+                # This later row must be invisible to the prediction.
+                ("AAA", "2026-07-03T00:00:00Z", 0.1),
+                ("BBB", "2026-07-01T00:00:00Z", 0.2),
+            ],
+        )
+        rows = []
+        for index in range(20):
+            rows.append({"tickers": '["AAA"]', "predicted_at": "2026-07-02T00:00:00Z", "brier_component": 0.20})
+            rows.append({"tickers": '["BBB"]', "predicted_at": "2026-07-02T00:00:00Z", "brier_component": 0.30})
+        report = brier_contributors.valuation_confidence_discriminator(conn, rows)
+        self.assertTrue(report["candidate_discriminates"])
+        self.assertEqual(report["buckets"]["valuation_confidence_gt_0_5"]["mean_brier"], 0.2)
+        self.assertEqual(report["high_minus_low_error_gap"], 0.1)
+        self.assertFalse(report["actual_improvement_claimed"])
+        self.assertFalse(report["resolved_history_mutation_allowed"])
+        self.assertIn("forward", report["source_semantics"])
+
 
 if __name__ == "__main__":
     unittest.main()

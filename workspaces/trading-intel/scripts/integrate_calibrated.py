@@ -113,6 +113,140 @@ def selected_survivors_for_mode(eligibility: dict, *, deprecate_all: bool) -> li
     return [] if deprecate_all else list(eligibility["eligible_survivors"])
 
 
+def normalize_approved_candidates(rows: list[dict]) -> list[dict]:
+    """Map the exact forward artifact payload to the runtime library schema."""
+    normalized = []
+    for raw in rows:
+        row = dict(raw)
+        conditions = row.get("conditions", row.get("conds_json", []))
+        if isinstance(conditions, str):
+            conditions = json.loads(conditions)
+        normalized.append({
+            **row,
+            "conds_json": json.dumps(conditions, separators=(",", ":")),
+            "source": str(row["source"]),
+            "bonf_sig": int(bool(row["bonf_sig"])),
+            "skew_edge": int(bool(row.get("skew_edge"))),
+        })
+    return normalized
+
+
+def approved_candidate_note(row: dict, approval: dict, refreshed_at: str) -> str:
+    """Freeze the executable candidate inside the live authorization row.
+
+    The feature-store calibration table is mutable research state.  A live
+    scanner must be able to reconstruct and verify its exact executable spec
+    from the approved live row alone, including expiry and an artifact digest.
+    """
+    from promotion_gate import candidate_set_sha256
+
+    conditions = row.get("conditions", row.get("conds_json", []))
+    if isinstance(conditions, str):
+        conditions = json.loads(conditions)
+    candidate = {
+        "id": row["id"],
+        "horizon": row["horizon"],
+        "direction": row["direction"],
+        "kind": row["kind"],
+        "source": row["source"],
+        "conditions": conditions,
+        "rationale": row.get("rationale"),
+        "net_alpha_pct": row["net_alpha_pct"],
+        "beta_neutral_alpha_pct": row["beta_neutral_alpha_pct"],
+        "test_p": row["test_p"],
+        "bonf_sig": int(bool(row["bonf_sig"])),
+        "hit_te": row["hit_te"],
+        "te_n": row["te_n"],
+        "cluster_n": row["cluster_n"],
+        "ticker_n": row["ticker_n"],
+        "posterior_mean": row["posterior_mean"],
+        "skew_edge": int(bool(row.get("skew_edge"))),
+    }
+    return json.dumps({
+        "calibrated": True,
+        "runtime_candidate": candidate,
+        "runtime_candidate_sha256": candidate_set_sha256([candidate]),
+        "approval_decision_id": approval["decision_id"],
+        "approval_manifest_sha256": approval["_manifest_sha256"],
+        "source_artifact_sha256": approval["_source_artifact_sha256"],
+        "approval_expires_at": approval["expires_at"],
+        "refreshed": refreshed_at,
+    }, sort_keys=True, separators=(",", ":"))
+
+
+def quarantine_live_for_staging(path: str, approval: dict) -> int:
+    """Disable every scanner authorization before replacing its offline library.
+
+    Cross-database atomic commits are not portable in WAL mode.  Quarantining
+    the live ids first makes every partial failure safe: an offline staging row
+    cannot fire until the final live transaction explicitly reactivates it.
+    """
+    conn = sqlite3.connect(path, timeout=60.0)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    active = conn.execute(
+        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
+    ).fetchone()[0]
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE mechanisms SET status='deprecated' "
+            "WHERE status IN ('active','crowded')"
+        )
+        conn.execute(
+            "INSERT INTO audits(id,timestamp,actor,entity_type,entity_id,action,"
+            "before_state,after_state,rationale_concise,experiment_id) "
+            "VALUES(?,?,'developer','mechanism_set','approved_strategy_artifact',"
+            "'quarantine_before_artifact_stage','active','deprecated',?,?)",
+            (
+                "AUDIT-" + uuid.uuid4().hex,
+                now,
+                (
+                    f"fail-closed staging for {approval['decision_id']} source "
+                    f"{approval['_source_artifact_sha256']}"
+                )[:500],
+                "preproduction_hardening_20260730",
+            ),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        conn.close()
+        raise
+    conn.close()
+    return int(active)
+
+
+def stage_approved_candidates(path: str, rows: list[dict], approval: dict) -> None:
+    """Replace the scanner library with only the exact approved artifact rows."""
+    conn = sqlite3.connect(path, timeout=60.0)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DROP TABLE IF EXISTS calibrated_mechanisms")
+        conn.execute("""CREATE TABLE calibrated_mechanisms(
+            id TEXT, horizon TEXT, direction TEXT, kind TEXT, source TEXT,
+            conds_json TEXT, rationale TEXT, net_alpha_pct REAL, test_p REAL,
+            bonf_sig INT, hit_te REAL, te_n INT, cluster_n INT,
+            posterior_mean REAL, skew_edge INT, created_at TEXT)""")
+        for row in rows:
+            conn.execute(
+                "INSERT INTO calibrated_mechanisms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    row["id"], row["horizon"], row["direction"], row["kind"],
+                    row["source"], row["conds_json"], row.get("rationale"),
+                    row["net_alpha_pct"], row["test_p"], row["bonf_sig"],
+                    row["hit_te"], row["te_n"], row["cluster_n"],
+                    row["posterior_mean"], row["skew_edge"], now,
+                ),
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        conn.close()
+        raise
+    conn.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -142,10 +276,8 @@ def main():
     cal = sqlite3.connect(FEAT)
     cal.row_factory = sqlite3.Row
     eligibility = integration_eligibility(cal)
-    survivors = selected_survivors_for_mode(
-        eligibility, deprecate_all=a.deprecate_all,
-    )
     cal.close()
+    survivors = []
     approval = None
     approval_error = None
     if not a.deprecate_all:
@@ -155,20 +287,23 @@ def main():
             try:
                 from promotion_gate import validate_approval_manifest
 
-                approval = validate_approval_manifest(Path(a.approval_manifest), survivors)
+                approval = validate_approval_manifest(Path(a.approval_manifest))
+                survivors = normalize_approved_candidates(
+                    approval["_promotion_candidates"]
+                )
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 approval_error = f"invalid approval manifest: {exc}"
     if a.check_only:
         verdict = (
             "ELIGIBLE"
-            if eligibility["eligible"] and approval_error is None
+            if approval is not None and survivors and approval_error is None
             else "BLOCKED"
         )
         print(f"LIVE INTEGRATION ELIGIBILITY: {verdict}")
         print(f"  analytical survivors: {eligibility['calibrated_count']}")
         print(f"  live-eligible survivors: {len(survivors)}")
         print(f"  evaluation labels: {eligibility['evaluation_labels']}")
-        if eligibility["blockers"]:
+        if eligibility["blockers"] and approval is None:
             print("  blockers: " + "; ".join(eligibility["blockers"]))
         if approval_error:
             print("  promotion blocker: " + approval_error)
@@ -182,16 +317,15 @@ def main():
         return
     if not a.deprecate_all and approval_error:
         raise SystemExit(f"refusing live integration: {approval_error}")
-    if not a.deprecate_all and eligibility["development_artifact"]:
-        raise SystemExit(
-            "refusing live integration from a development/reused holdout artifact; "
-            "complete the locked forward evaluation"
-        )
     if not survivors and not a.deprecate_all:
         raise SystemExit(
             "no robust calibrated mechanisms (bonf_sig=1); preserving the "
             "quarantined live set"
         )
+
+    if not a.deprecate_all:
+        quarantine_live_for_staging(LIVE, approval)
+        stage_approved_candidates(FEAT, survivors, approval)
 
     conn = sqlite3.connect(LIVE, timeout=60.0)
     conn.row_factory = sqlite3.Row
@@ -211,7 +345,7 @@ def main():
 
     led_before = {t: count(t) for t in ("mechanism_observations", "predictions", "attribution")}
     existing = {r["id"]: dict(r) for r in conn.execute(
-        "SELECT id, observed_hits, observed_misses, created_at FROM mechanisms")}
+        "SELECT id, observed_hits, observed_misses, created_at, status FROM mechanisms")}
     added = updated = deprecated = 0
     try:
         conn.execute("BEGIN")
@@ -222,16 +356,7 @@ def main():
             pm = float(s["posterior_mean"])
             pa, pb = round(pm * PSEUDO_N, 4), round((1 - pm) * PSEUDO_N, 4)
             ant, cons = tokens(s["id"])
-            note = json.dumps({"calibrated": True, "source": s["source"], "conds": json.loads(s["conds_json"]),
-                               "net_alpha_pct": s["net_alpha_pct"], "test_p": s["test_p"],
-                               "bonferroni": bool(s["bonf_sig"]), "hit_rate": s["hit_te"],
-                               "backtest_n_raw": s["te_n"],
-                               "backtest_n_date_clusters": s.get("cluster_n", s["te_n"]),
-                               "skew_edge": bool(s["skew_edge"]),
-                               "approval_decision_id": approval["decision_id"],
-                               "approval_manifest_sha256": approval["_manifest_sha256"],
-                               "source_artifact_sha256": approval["_source_artifact_sha256"],
-                               "refreshed": now})
+            note = approved_candidate_note(s, approval, now)
             if mid in existing:
                 # PRESERVE live observations; refresh the backtest prior; re-blend the posterior
                 hits = float(existing[mid].get("observed_hits") or 0.0)
@@ -262,8 +387,12 @@ def main():
         # Deprecate mechanisms no longer in the accepted set (KEEP observations/history).
         for mid in existing:
             if mid not in cal_ids:
-                conn.execute("UPDATE mechanisms SET status='deprecated' WHERE id=?", (mid,))
-                deprecated += 1
+                cursor = conn.execute(
+                    "UPDATE mechanisms SET status='deprecated' "
+                    "WHERE id=? AND status!='deprecated'",
+                    (mid,),
+                )
+                deprecated += cursor.rowcount
         if a.deprecate_all:
             conn.execute(
                 "INSERT INTO audits(id,timestamp,actor,entity_type,entity_id,action,"
@@ -303,8 +432,12 @@ def main():
     mode = "FAIL-CLOSED QUARANTINE" if a.deprecate_all else "incremental — ledger preserved"
     print("LIVE INTEGRATION COMPLETE", f"({mode})")
     print(f"  experiment_id={exp}")
+    mechanism_total = count("mechanisms")
+    mechanism_active = conn.execute(
+        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
+    ).fetchone()[0]
     print(f"  mechanisms: +{added} added, {updated} updated (priors refreshed, obs preserved), "
-          f"{deprecated} deprecated -> {count('mechanisms')} live ({count('mechanisms') - deprecated} active)")
+          f"{deprecated} deprecated -> {mechanism_total} retained ({mechanism_active} active)")
     print("  LEDGER (preserved):")
     for t in led_before:
         flag = "" if led_before[t] == led_after[t] else "  <-- CHANGED?!"

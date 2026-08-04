@@ -46,15 +46,10 @@
   "auth": {
     "order": {
       "openai": [
-        "openai-codex:aaronhorowitz97@gmail.com",
-        "openai:default"
+        "openai-codex:aaronhorowitz97@gmail.com"
       ]
     },
     "profiles": {
-      "openai:default": {
-        "provider": "openai",
-        "mode": "token"
-      },
       "openai-codex:aaronhorowitz97@gmail.com": {
         "provider": "openai-codex",
         "mode": "oauth"
@@ -521,6 +516,9 @@
           "enabled": true
         },
         "telegram-agent-relay": {
+          "enabled": true
+        },
+        "telegram-ops-intake": {
           "enabled": true
         },
         "credential-preflight": {

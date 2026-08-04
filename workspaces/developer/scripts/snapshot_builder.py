@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Deterministic builder for the product app's data.json.
+"""Deterministic builder for the canonical app-state intermediate.
 
 Reads canonical SQLite + the internal paper broker + cron-run state, computes the
-shape consumed by `/repos/lidi-solutions/public/solutions/trader_intel/app/`,
-and writes it atomically (temp file + rename).
+shape projected into the product contract, and writes it atomically (temp file
++ rename).
 
-This is the ONLY sanctioned writer of `data.json`. LLM turns may add
-narrative fields by post-processing the file with strict-JSON outputs, but
-the deterministic core must come from here.
+This script deliberately defaults to `canonical-state.json`; it must never
+overwrite the final `data.json` contract. The Node projector is the only writer
+of `data.json` and consumes this file through `TRADER_INTEL_BASE_FILE`.
 
 Goal alignment:
 - G1 (beat SPY): every hypothesis carries per-horizon scores; portfolio block
@@ -39,7 +39,7 @@ from broker import get_account, list_orders, list_positions  # noqa: E402  (adap
 
 DB_PATH = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
 DEFAULT_OUT = Path(
-    os.path.expanduser("~/.openclaw/state/trader-intel-snapshot/data.json")
+    os.path.expanduser("~/.openclaw/state/trader-intel-snapshot/canonical-state.json")
 )
 CRON_JOBS_PATH = Path(os.path.expanduser("~/.openclaw/cron/jobs.json"))
 CRON_RUNS_DIR = Path(os.path.expanduser("~/.openclaw/cron/runs"))
@@ -846,6 +846,30 @@ def _load_rotation(conn: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
+def _load_themes(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Market-graded narrative state for the operator GUI."""
+    try:
+        rows = []
+        for row in conn.execute(
+            "SELECT id,statement,beneficiaries_json,victims_json,status,source,"
+            "created_at,updated_at,score,score_as_of,last_evidence_at "
+            "FROM themes ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'watch' THEN 1 "
+            "WHEN 'fading' THEN 2 ELSE 3 END, score IS NULL, ABS(score) DESC"
+        ):
+            rows.append({
+                "id": row[0], "statement": row[1],
+                "beneficiaries": json.loads(row[2] or "[]"),
+                "victims": json.loads(row[3] or "[]"),
+                "status": row[4], "source": row[5], "created_at": row[6],
+                "updated_at": row[7], "score_pct": _safe_float(row[8], None),
+                "score_as_of": row[9], "last_evidence_at": row[10],
+                "authority": "research_context_only",
+            })
+        return {"available": True, "count": len(rows), "items": rows}
+    except (sqlite3.Error, ValueError, TypeError) as exc:
+        return {"available": False, "note": f"themes_unavailable:{type(exc).__name__}"}
+
+
 def _load_selection_funnel(conn: sqlite3.Connection) -> dict[str, Any]:
     """Counterfactual stage attribution for the operator/research GUI."""
     try:
@@ -941,6 +965,7 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "counts": counts,
         "simBooks": _load_sim_books(conn),
         "rotation": _load_rotation(conn),
+        "themes": _load_themes(conn),
         "selectionFunnel": _load_selection_funnel(conn),
         "predictionChallenger": _load_prediction_challenger(conn),
         "predictionReplay": _load_prediction_replay(conn),

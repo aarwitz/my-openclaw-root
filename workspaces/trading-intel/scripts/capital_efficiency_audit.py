@@ -26,9 +26,9 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 import trading_policy  # noqa: E402
+import signal_scan  # noqa: E402
 
 DB = Path(os.path.expanduser("~/.openclaw/state/trading-intel.sqlite"))
-FEATURE_DB = Path(os.path.expanduser("~/.openclaw/state/features.sqlite"))
 # TRADING days per horizon — mirrors worldmodel.HORIZON_DAYS (canonical clock
 # shared with predict/grade_outcomes/enforce_horizons).
 HORIZON_DAYS = {
@@ -99,30 +99,22 @@ def _prospective_edge_rate(conn: sqlite3.Connection) -> tuple[float, str, int]:
     The old implementation multiplied idle cash by all-period realized alpha,
     converting a backward-looking score into a fictitious opportunity cost.
     """
-    active_ids = [
-        row[0] for row in conn.execute(
-            "SELECT id FROM mechanisms WHERE status IN ('active','crowded')"
-        )
-    ]
-    if not active_ids:
+    active_count = conn.execute(
+        "SELECT COUNT(*) FROM mechanisms WHERE status IN ('active','crowded')"
+    ).fetchone()[0]
+    if not active_count:
         return 0.0, "no_robust_active_mechanisms", 0
-    if not FEATURE_DB.exists():
-        return 0.0, "robust_artifact_unavailable", len(active_ids)
-    feat = sqlite3.connect(f"file:{FEATURE_DB}?mode=ro", uri=True)
-    placeholders = ",".join("?" for _ in active_ids)
-    rows = feat.execute(
-        f"SELECT net_alpha_pct FROM calibrated_mechanisms "
-        f"WHERE (id || '__' || horizon) IN ({placeholders}) "
-        f"AND bonf_sig=1 AND net_alpha_pct>0",
-        active_ids,
-    ).fetchall()
-    feat.close()
-    if not rows:
-        return 0.0, "active_mechanisms_lack_robust_forward_artifact", len(active_ids)
+    try:
+        authorized = signal_scan.live_authorized_calibrations(connection=conn)
+    except RuntimeError:
+        return 0.0, "invalid_live_mechanism_authorization", int(active_count)
+    alphas = [float(row["net_alpha_pct"]) for row in authorized if float(row["net_alpha_pct"]) > 0]
+    if not alphas:
+        return 0.0, "active_mechanisms_lack_robust_forward_artifact", int(active_count)
     # Median is resistant to one spectacular backtest cell; cap is an
     # additional telemetry-only guard, not a trading assumption.
-    rate = min(0.10, statistics.median(float(row[0]) for row in rows) / 100.0)
-    return max(0.0, rate), "robust_calibrated_mechanism_median", len(active_ids)
+    rate = min(0.10, statistics.median(alphas) / 100.0)
+    return max(0.0, rate), "approved_live_artifact_median", len(authorized)
 
 
 def _classify_idle_cash(residual_cash: float, active_edge_count: int) -> tuple[float, float]:

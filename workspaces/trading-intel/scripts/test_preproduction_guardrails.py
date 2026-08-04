@@ -48,6 +48,8 @@ import symbol_lifecycle  # noqa: E402
 import mechanism_backtest  # noqa: E402
 import historical_walkforward  # noqa: E402
 import historical_snapshot  # noqa: E402
+import forward_shadow  # noqa: E402
+import forward_shadow_report  # noqa: E402
 import mechanism_correlation  # noqa: E402
 import integrate_calibrated  # noqa: E402
 import causal_graph  # noqa: E402
@@ -60,6 +62,7 @@ import integrity_check  # noqa: E402
 import hypothesis_hygiene  # noqa: E402
 import sync_symbol_aliases  # noqa: E402
 import market_debrief  # noqa: E402
+import market_event_intake  # noqa: E402
 import macro_calendar  # noqa: E402
 import capital_efficiency_audit  # noqa: E402
 import compute_attribution  # noqa: E402
@@ -87,6 +90,20 @@ assert _pq_groom_spec and _pq_groom_spec.loader
 pq_groom = importlib.util.module_from_spec(_pq_groom_spec)
 _pq_groom_spec.loader.exec_module(pq_groom)
 
+_operator_event_spec = importlib.util.spec_from_file_location(
+    "operator_event", ROOT / "scripts/operator_event.py"
+)
+assert _operator_event_spec and _operator_event_spec.loader
+operator_event = importlib.util.module_from_spec(_operator_event_spec)
+_operator_event_spec.loader.exec_module(operator_event)
+
+_oauth_enforcer_spec = importlib.util.spec_from_file_location(
+    "enforce_codex_oauth", ROOT / "scripts/enforce-codex-oauth.py"
+)
+assert _oauth_enforcer_spec and _oauth_enforcer_spec.loader
+enforce_codex_oauth = importlib.util.module_from_spec(_oauth_enforcer_spec)
+_oauth_enforcer_spec.loader.exec_module(enforce_codex_oauth)
+
 _health_spec = importlib.util.spec_from_file_location(
     "system_health_sweep", ROOT / "scripts/system-health-sweep.py"
 )
@@ -109,6 +126,89 @@ def _scratch() -> tuple[sqlite3.Connection, str]:
 
 
 class SignalSafetyTests(unittest.TestCase):
+    def test_market_event_taxonomy_recognizes_completed_distressed_portfolio_transfer(self) -> None:
+        taxonomy = market_event_intake.load_json(
+            ROOT / "workspaces/trading-intel/config/market_event_taxonomy.json"
+        )
+        classes, phase = market_event_intake.classify_event(
+            "AI-focused hedge fund sells all of its stocks",
+            "Situational Awareness sold the bulk of its public equities portfolio "
+            "to Citadel after suffering steep losses.",
+            taxonomy,
+        )
+        self.assertIn("portfolio_transfer", classes)
+        self.assertIn("fund_distress", classes)
+        self.assertEqual(phase, "transfer_complete")
+
+    def test_market_event_taxonomy_does_not_treat_generic_record_or_deal_as_catalyst(self) -> None:
+        taxonomy = market_event_intake.load_json(
+            ROOT / "workspaces/trading-intel/config/market_event_taxonomy.json"
+        )
+        classes, phase = market_event_intake.classify_event(
+            "Apple falls after record run; investors debate whether to buy the dip",
+            "Commentators discuss a possible deal, but no contract, guidance, or filing changed.",
+            taxonomy,
+        )
+        self.assertNotIn("corporate_positive", classes)
+        self.assertEqual(phase, "none")
+
+    def test_market_event_intake_fixture_is_idempotent_and_coverage_auditable(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            tmp = Path(td)
+            db = tmp / "events.sqlite"
+            fixture = tmp / "fixture.json"
+            fixture.write_text(json.dumps({"articles": [{
+                "source": "fixture:wire",
+                "source_event_id": "evt-1",
+                "title": "AI fund sells all of its stocks to Citadel",
+                "description": "Situational Awareness sold the bulk after steep losses.",
+                "url": "https://example.test/event-1",
+                "published_at": "2026-07-30T16:18:39Z",
+                "retrieved_at": "2026-07-30T16:48:39Z",
+                "query_ids": ["portfolio_transfer"],
+                "tickers": ["NVDA"],
+                "entities": ["Situational Awareness", "Citadel"],
+            }]}))
+            taxonomy = ROOT / "workspaces/trading-intel/config/market_event_taxonomy.json"
+            first = market_event_intake.collect(db, taxonomy, fixture)
+            second = market_event_intake.collect(db, taxonomy, fixture)
+            self.assertEqual(first["status"], "ok")
+            self.assertEqual(first["new"], 1)
+            self.assertEqual(second["new"], 0)
+            events = market_event_intake.rows_for_brief(db, hours=100000, limit=10)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["retrieval_latency_minutes"], 30.0)
+
+            cases = tmp / "cases.json"
+            cases.write_text(json.dumps({
+                "cutover_at": "2026-07-01T00:00:00Z",
+                "cases": [{
+                    "id": "case-1",
+                    "known_at": "2026-07-30T16:18:39Z",
+                    "deadline_minutes": 60,
+                    "terms_any": ["situational awareness"],
+                    "terms_all": ["citadel"],
+                    "required_classes_any": ["portfolio_transfer"],
+                }],
+            }))
+            audit = market_event_intake.audit_cases(db, cases)
+            self.assertEqual(audit["enforced_misses"], 0)
+            self.assertTrue(audit["cases"][0]["passed"])
+
+    def test_market_event_lane_is_advisory_and_read_by_research(self) -> None:
+        wrapper = (ROOT / "scripts/market-event-intake.sh").read_text()
+        self.assertIn("market_event_intake.py", wrapper)
+        for forbidden in ("author_intents.py", "execute_intent.py", "gate_risk_intents.py"):
+            self.assertNotIn(forbidden, wrapper)
+        researcher = (ROOT / "workspaces/researcher/AGENTS.md").read_text()
+        self.assertIn("state/market-event-brief.json", researcher)
+        self.assertIn("transfer_complete", researcher)
+        installer = (ROOT / "scripts/install-market-event-cron.sh").read_text()
+        self.assertIn("*/15 6-20 * * 1-5", installer)
+        self.assertIn("# BEGIN AUTOTRADE MARKET EVENT INTAKE", installer)
+        self.assertIn("mktemp", installer)
+        self.assertIn("trap", installer)
+
     def test_priority_queue_poller_loads_unattended_session_token(self) -> None:
         fd, path = tempfile.mkstemp(suffix=".json", dir="/tmp")
         os.close(fd)
@@ -150,6 +250,107 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertEqual(changes[0]["superseded_by"], "new")
         self.assertTrue(pq_groom.eligible(rows["new"]))
         self.assertTrue(pq_groom.eligible(rows["idea"]))
+
+    def test_priority_queue_grooming_never_collapses_distinct_learning_failures(self) -> None:
+        rows = {
+            "resolver": {
+                "id": "resolver", "status": "open", "task_id": None,
+                "claimed_by": None, "submitted_at": "2026-08-03T17:30:52Z",
+                "title": "Unblock matured prediction grading price windows",
+            },
+            "lock": {
+                "id": "lock", "status": "open", "task_id": None,
+                "claimed_by": None, "submitted_at": "2026-08-03T20:38:12Z",
+                "title": "Prevent learning-pass core lock overlap",
+            },
+        }
+        self.assertEqual(pq_groom.family(rows["resolver"]["title"]), "learning_outcomes")
+        self.assertIsNone(pq_groom.family(rows["lock"]["title"]))
+        self.assertEqual(pq_groom.plan(rows), [])
+
+    def test_operator_event_deduplicates_pages_but_records_every_output(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            paths = {
+                "ledger_path": root / "events.jsonl",
+                "queue_path": root / "queue.jsonl",
+                "lock_path": root / "events.lock",
+            }
+            first = operator_event.ingest(
+                "🚨 HEALTH SWEEP CRIT — learning loop unresolved",
+                family="health-learning-loop",
+                now=datetime(2026, 8, 3, tzinfo=timezone.utc),
+                **paths,
+            )
+            second = operator_event.ingest(
+                "🚨 HEALTH SWEEP CRIT — learning loop unresolved",
+                family="health-learning-loop",
+                now=datetime(2026, 8, 3, 1, tzinfo=timezone.utc),
+                **paths,
+            )
+            self.assertEqual(first["disposition"], "queued")
+            self.assertEqual(second["disposition"], "duplicate")
+            self.assertEqual(len(paths["ledger_path"].read_text().splitlines()), 2)
+            self.assertEqual(len(paths["queue_path"].read_text().splitlines()), 1)
+
+    def test_operator_event_recurrence_reopens_stable_queue_family(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            paths = {
+                "ledger_path": root / "events.jsonl",
+                "queue_path": root / "queue.jsonl",
+                "lock_path": root / "events.lock",
+            }
+            operator_event.ingest(
+                "Cron job learning failed: first error", family="learning-cron",
+                now=datetime(2026, 8, 3, tzinfo=timezone.utc), **paths,
+            )
+            operator_event.ingest(
+                "Cron job learning failed: different error", family="learning-cron",
+                now=datetime(2026, 8, 3, 2, tzinfo=timezone.utc), **paths,
+            )
+            rows = [json.loads(line) for line in paths["queue_path"].read_text().splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["id"], rows[1]["id"])
+            self.assertIsNone(rows[1]["task_id"])
+            terminal = {"id": 1, "status": "done", "description": f"pq:{rows[0]['id']}"}
+            active = {"id": 2, "status": "to_do", "description": f"pq:{rows[0]['id']}"}
+            self.assertIsNone(poll_priority_queue.find_existing_issue([terminal], rows[0]["id"]))
+            self.assertEqual(
+                poll_priority_queue.find_existing_issue([terminal, active], rows[0]["id"])["id"],
+                2,
+            )
+
+    def test_operator_event_hook_captures_transport_and_info_does_not_ticket(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            event = operator_event.ingest(
+                "Quiet pass — book unchanged.",
+                ledger_path=root / "events.jsonl",
+                queue_path=root / "queue.jsonl",
+                lock_path=root / "events.lock",
+            )
+            self.assertEqual(event["disposition"], "observed")
+            self.assertFalse((root / "queue.jsonl").exists())
+        hook = (ROOT / "hooks/telegram-ops-intake/handler.ts").read_text()
+        self.assertIn('event.action !== "sent"', hook)
+        self.assertIn('context.channelId !== "telegram"', hook)
+        self.assertIn("operator_event.py", hook)
+        config = json.loads((ROOT / "openclaw.json").read_text())
+        self.assertTrue(
+            config["hooks"]["internal"]["entries"]["telegram-ops-intake"]["enabled"]
+        )
+
+    def test_operator_event_delivery_rail_is_fast_deterministic_and_idempotent(self) -> None:
+        wrapper = (ROOT / "scripts/dwight-pq-rail.sh").read_text()
+        self.assertIn("poll_priority_queue.py", wrapper)
+        self.assertIn("flock -n", wrapper)
+        self.assertNotIn("openclaw agent", wrapper)
+        installer = (ROOT / "scripts/install-operator-event-cron.sh").read_text()
+        self.assertIn("*/5 * * * *", installer)
+        self.assertIn("# BEGIN AUTOTRADE OPERATOR EVENT RAIL", installer)
+        self.assertIn("mktemp", installer)
+        self.assertIn("trap", installer)
 
     def test_connector_errors_redact_credential_query_values(self) -> None:
         redacted = connector_http._redacted_url(
@@ -333,6 +534,75 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertAlmostEqual(promote_mechanisms.posterior(0.50, 1000), 0.50, places=3)
         self.assertGreater(promote_mechanisms.posterior(0.60, 1000), 0.58)
 
+    def test_offline_calibration_cannot_originate_without_live_approval(self) -> None:
+        candidate = {
+            "id": "candidate", "horizon": "month_21d", "direction": "long",
+            "kind": "state", "source": "locked_forward_shadow_v1",
+            "conditions": [["mom", ">", 0.1]], "rationale": "test",
+            "net_alpha_pct": 1.25, "beta_neutral_alpha_pct": 0.8,
+            "test_p": 0.001, "bonf_sig": 1, "hit_te": 0.55,
+            "te_n": 120, "cluster_n": 60, "ticker_n": 25,
+            "posterior_mean": 0.54, "skew_edge": 0,
+        }
+        normalized = integrate_calibrated.normalize_approved_candidates([candidate])[0]
+        approval = {
+            "decision_id": "D999", "_manifest_sha256": "a" * 64,
+            "_source_artifact_sha256": "b" * 64,
+            "expires_at": "2026-09-01T00:00:00Z",
+        }
+        note = integrate_calibrated.approved_candidate_note(
+            normalized, approval, "2026-08-01T00:00:00Z",
+        )
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            live = Path(td) / "live.sqlite"
+            conn = sqlite3.connect(live)
+            conn.execute(
+                "CREATE TABLE mechanisms(id TEXT,status TEXT,direction TEXT,"
+                "horizon TEXT,posterior_mean REAL,notes TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO mechanisms VALUES(?,?,?,?,?,?)",
+                ("candidate__month_21d", "active", "long", "position_1_4w", 0.57, note),
+            )
+            conn.commit()
+            conn.close()
+            authorized = signal_scan.live_authorized_calibrations(
+                str(live), now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            )
+            self.assertEqual(len(authorized), 1)
+            self.assertEqual(authorized[0]["conditions"], [["mom", ">", 0.1]])
+            self.assertEqual(authorized[0]["posterior_mean"], 0.57)
+
+            # A research-table mutation cannot affect this payload. A live
+            # note mutation without the artifact digest fails the scanner.
+            broken = json.loads(note)
+            broken["runtime_candidate"]["conditions"] = [["mom", ">", -99]]
+            conn = sqlite3.connect(live)
+            conn.execute("UPDATE mechanisms SET notes=?", (json.dumps(broken),))
+            conn.commit()
+            conn.close()
+            with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
+                signal_scan.live_authorized_calibrations(
+                    str(live), now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+                )
+
+    def test_expired_or_legacy_active_mechanism_fails_scanner_closed(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            live = Path(td) / "live.sqlite"
+            conn = sqlite3.connect(live)
+            conn.execute(
+                "CREATE TABLE mechanisms(id TEXT,status TEXT,direction TEXT,"
+                "horizon TEXT,posterior_mean REAL,notes TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO mechanisms VALUES(?,?,?,?,?,?)",
+                ("legacy", "active", "long", "position_1_4w", 0.5, "{}"),
+            )
+            conn.commit()
+            conn.close()
+            with self.assertRaisesRegex(RuntimeError, "runtime_candidate"):
+                signal_scan.live_authorized_calibrations(str(live))
+
     def test_feature_writer_contract_rejects_unavailable_and_unprovenanced_rows(self) -> None:
         valid = ("aapl", "2026-08-01", "ret_1d", 1.2, "2026-08-01", "price")
         self.assertEqual(feature_contract.validate_feature_row(valid)[0], "AAPL")
@@ -449,10 +719,13 @@ class SignalSafetyTests(unittest.TestCase):
     def test_only_exact_completed_forward_artifact_can_cross_promotion_gate(self) -> None:
         candidate = {
             "id": "m1", "horizon": "month_21d", "direction": "long",
-            "kind": "state", "source": "seed", "conds_json": "[]",
+            "kind": "state", "source": "locked_forward_shadow_v1",
+            "conditions": [["mom", ">", 0.1]],
             "net_alpha_pct": 1.25, "test_p": 0.001, "bonf_sig": 1,
             "hit_te": 0.55, "te_n": 120, "cluster_n": 60,
-            "posterior_mean": 0.54,
+            "ticker_n": 25, "posterior_mean": 0.54,
+            "beta_neutral_alpha_pct": 0.80, "rationale": "test",
+            "skew_edge": 0,
         }
         with tempfile.TemporaryDirectory(dir="/tmp") as td:
             root = Path(td)
@@ -468,7 +741,17 @@ class SignalSafetyTests(unittest.TestCase):
                 "development_only": False,
                 "minimum_sessions_met": True,
                 "promotion_authority": "human_manifest_only",
+                "evaluator_sha256": promotion_gate.file_sha256(
+                    Path(promotion_gate.__file__).with_name("forward_shadow_report.py")
+                ),
+                "recorder_engine_sha256": promotion_gate.file_sha256(
+                    Path(promotion_gate.__file__).with_name("forward_shadow.py")
+                ),
+                "promotion_gate_sha256": promotion_gate.file_sha256(
+                    Path(promotion_gate.__file__)
+                ),
                 "candidate_set_sha256": digest,
+                "promotion_candidates": [candidate],
             }
             report_path.write_text(json.dumps(report))
             manifest_path = approval_root / "D999.json"
@@ -496,6 +779,7 @@ class SignalSafetyTests(unittest.TestCase):
                 require_committed=False,
             )
             self.assertEqual(validated["decision_id"], "D999")
+            self.assertEqual(validated["_promotion_candidates"], [candidate])
 
             report["development_only"] = True
             report_path.write_text(json.dumps(report))
@@ -508,6 +792,59 @@ class SignalSafetyTests(unittest.TestCase):
                     approval_root=approval_root, repo_root=root,
                     require_committed=False,
                 )
+
+    def test_forward_artifact_candidates_stage_exactly_and_safely(self) -> None:
+        candidate = {
+            "id": "m1", "horizon": "month_21d", "direction": "long",
+            "kind": "state", "source": "locked_forward_shadow_v1",
+            "conditions": [["mom", ">", 0.1]], "rationale": "test",
+            "net_alpha_pct": 1.25, "beta_neutral_alpha_pct": 0.8,
+            "test_p": 0.001, "bonf_sig": 1, "hit_te": 0.55,
+            "te_n": 120, "cluster_n": 60, "ticker_n": 25,
+            "posterior_mean": 0.54, "skew_edge": 0,
+        }
+        normalized = integrate_calibrated.normalize_approved_candidates([candidate])
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            path = str(Path(td) / "features.sqlite")
+            integrate_calibrated.stage_approved_candidates(
+                path, normalized,
+                {"decision_id": "D999", "_source_artifact_sha256": "a" * 64},
+            )
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT id,horizon,conds_json,source FROM calibrated_mechanisms"
+            ).fetchone()
+            conn.close()
+        self.assertEqual(row[0:2], ("m1", "month_21d"))
+        self.assertEqual(json.loads(row[2]), [["mom", ">", 0.1]])
+        self.assertEqual(row[3], "locked_forward_shadow_v1")
+
+    def test_forward_metric_requires_maturity_breadth_and_dual_alpha(self) -> None:
+        candidate = {
+            "id": "m1", "horizon": "month_21d", "horizon_sessions": 21,
+            "direction": "long", "kind": "state",
+            "conditions": [["mom", ">", 0.1]], "rationale": "test",
+            "threshold_source_fold": "latest",
+        }
+        decisions = []
+        for index in range(30):
+            decisions.append({
+                "candidate_id": "m1", "horizon": "month_21d",
+                "ticker": f"T{index % 20:02d}",
+                "decision_date": f"2026-09-{index + 1:02d}", "status": "resolved",
+                "raw_excess_return": 0.01, "beta_neutral_excess_return": 0.008,
+            })
+        decisions.append({
+            "candidate_id": "m1", "horizon": "quarter_63d", "ticker": "NOPE",
+            "decision_date": "2026-09-01", "status": "resolved",
+            "raw_excess_return": -1.0, "beta_neutral_excess_return": -1.0,
+        })
+        metric = forward_shadow_report._candidate_metric(candidate, decisions, True)
+        self.assertTrue(metric["matured"])
+        self.assertEqual(metric["date_cluster_n"], 30)
+        self.assertEqual(metric["ticker_n"], 20)
+        self.assertGreater(metric["raw_spy_alpha_pct"], 0)
+        self.assertGreater(metric["beta_neutral_alpha_pct"], 0)
 
     def test_promotion_gate_rejects_candidate_drift_and_expired_approval(self) -> None:
         source = (ROOT / "workspaces/trading-intel/scripts/promotion_gate.py").read_text()
@@ -532,6 +869,32 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIn("cluster_n >= 30", source)
         self.assertIn("ticker_n >= 20", source)
         self.assertIn("m, p = _hac_mean_p(series, 1)", source)
+        self.assertIn("robust_p = max(p_mean, beta_p_mean)", source)
+
+    def test_backtest_trailing_beta_is_point_in_time_and_requires_history(self) -> None:
+        start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        dates = [(start + timedelta(days=i)).date().isoformat() for i in range(180)]
+        market_close = 100.0
+        stock_close = 100.0
+        market, stock = {}, {}
+        for i, day in enumerate(dates):
+            if i:
+                market_return = 0.01 if i % 2 else -0.008
+                market_close *= 1.0 + market_return
+                stock_close *= 1.0 + 2.0 * market_return
+            market[day] = market_close
+            stock[day] = stock_close
+        td = {"dates": dates, "close": stock}
+        spy = {"dk": dates, "close": market}
+        beta = mechanism_backtest.rolling_beta(td, spy, dates[-1])
+        self.assertAlmostEqual(beta, 2.0, places=6)
+        self.assertIsNone(
+            mechanism_backtest.rolling_beta(
+                {"dates": dates[:50], "close": {d: stock[d] for d in dates[:50]}},
+                spy,
+                dates[49],
+            )
+        )
 
     def test_historical_fold_purges_labels_across_both_boundaries(self) -> None:
         dates = [f"2020-01-{day:02d}" for day in range(1, 11)]
@@ -592,6 +955,40 @@ class SignalSafetyTests(unittest.TestCase):
             mechanism_backtest._validate_window(
                 None, "2021-01-01", "2020-01-01"
             )
+
+    def test_historical_fold_reports_every_loaded_empty_and_failed_symbol(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
+        os.close(fd)
+        coverage = {}
+
+        def load(_conn, ticker):
+            if ticker == "BAD":
+                raise ValueError("corrupt cache")
+            dates = [] if ticker == "EMPTY" else ["2019-01-02"]
+            return {
+                "dates": dates,
+                "close": {day: 10.0 for day in dates},
+                "dvol": {day: 10_000_000.0 for day in dates},
+                "feats": {},
+                "fkeys": {},
+            }
+
+        try:
+            with mock.patch.object(mechanism_backtest, "FEAT_DB", Path(path)), \
+                    mock.patch.object(mechanism_backtest, "load_ticker", side_effect=load):
+                mechanism_backtest.run(
+                    ["GOOD", "EMPTY", "BAD"],
+                    {"dk": [], "close": {}},
+                    "2020-01-01",
+                    test_end="2021-01-01",
+                    coverage_report=coverage,
+                )
+            self.assertEqual(coverage["loaded_symbols"], ["GOOD"])
+            self.assertEqual(coverage["empty_symbols"], ["EMPTY"])
+            self.assertEqual(coverage["load_errors"]["BAD"]["type"], "ValueError")
+            self.assertEqual(coverage["pass_mismatch"], [])
+        finally:
+            os.unlink(path)
 
     def test_historical_fold_excludes_unvintaged_feature_families_everywhere(self) -> None:
         fd, path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
@@ -785,6 +1182,12 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertEqual(rows[0]["eligible_folds"], 2)
         self.assertFalse(rows[0]["stable_development_candidate"])
 
+        folds[2]["results"][0]["ticker_n"] = 30
+        folds[2]["results"][0]["beta_neutral_alpha_te_pct"] = -0.1
+        rows = historical_walkforward.aggregate(folds, gate)
+        self.assertEqual(rows[0]["positive_alpha_folds"], 2)
+        self.assertFalse(rows[0]["stable_development_candidate"])
+
     def test_walkforward_data_snapshot_detects_midrun_input_mutation(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:
             root = Path(directory)
@@ -843,6 +1246,21 @@ class SignalSafetyTests(unittest.TestCase):
                 historical_snapshot._cached_price_path(root, "TEST"), older
             )
 
+    def test_snapshot_preflight_exercises_the_engines_exact_feature_query(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE features(ticker TEXT,name TEXT,as_of TEXT,value REAL)"
+        )
+        conn.execute(
+            "INSERT INTO features VALUES('PEG','mom','2026-01-01',1.0)"
+        )
+        historical_snapshot._validate_replay_feature_reads(conn, ["PEG"])
+        trace = []
+        conn.set_trace_callback(trace.append)
+        historical_snapshot._validate_replay_feature_reads(conn, ["PEG"])
+        self.assertTrue(any("ORDER BY as_of" in query for query in trace))
+        conn.close()
+
     def test_snapshot_rejects_unmanifested_sqlite_wal(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:
             root = Path(directory)
@@ -859,15 +1277,137 @@ class SignalSafetyTests(unittest.TestCase):
             (ROOT / "workspaces/trading-intel/config/evaluation_policy.json").read_text()
         )["historical_walkforward_development"]
         report = historical_walkforward._new_report(
-            spec, ["AAA"], "engine-hash", "runner-hash", "policy-hash",
+            spec, ["AAA"], "engine-hash", "runner-hash", "spec-hash",
+            "policy-file-hash", "forward-policy-hash",
             {"sha256": "data-hash", "file_count": 3, "total_bytes": 10},
         )
         self.assertEqual(report["engine_sha256"], "engine-hash")
         self.assertEqual(report["runner_sha256"], "runner-hash")
-        self.assertEqual(report["policy_sha256"], "policy-hash")
+        self.assertEqual(report["historical_spec_sha256"], "spec-hash")
+        self.assertEqual(report["policy_file_sha256"], "policy-file-hash")
+        self.assertEqual(report["forward_policy_sha256"], "forward-policy-hash")
+        self.assertEqual(report["universe_symbols"], ["AAA"])
         self.assertEqual(report["data_snapshot_signature"]["sha256"], "data-hash")
         self.assertTrue(report["development_only"])
         self.assertEqual(report["promotion_authority"], "none")
+
+    def test_forward_candidate_freeze_binds_conditions_from_latest_fold(self) -> None:
+        folds = [
+            {
+                "id": "old",
+                "test_start": "2020-01-01",
+                "results": [{
+                    "id": "m", "horizon": "month_21d", "direction": "long",
+                    "kind": "state", "conds": [["mom", ">", 0.1]],
+                    "rationale": "old threshold",
+                }],
+            },
+            {
+                "id": "latest",
+                "test_start": "2024-01-01",
+                "results": [{
+                    "id": "m", "horizon": "month_21d", "direction": "long",
+                    "kind": "state", "conds": [["mom", ">", 0.3]],
+                    "rationale": "latest pre-test threshold",
+                }],
+            },
+        ]
+        stable = [{
+            "id": "m", "horizon": "month_21d", "direction": "long",
+            "kind": "state",
+        }]
+        frozen = historical_walkforward.freeze_forward_candidate_set(
+            folds, stable, {"folds": [{"id": "old"}, {"id": "latest"}]},
+            {"start": "2026-08-04", "minimum_end": "2026-10-30", "minimum_sessions": 60},
+        )
+        self.assertEqual(frozen["candidates"][0]["conditions"], [["mom", ">", 0.3]])
+        self.assertEqual(frozen["candidates"][0]["threshold_source_fold"], "latest")
+        self.assertEqual(len(frozen["candidate_set_sha256"]), 64)
+
+    def test_forward_shadow_excludes_the_current_et_bar_and_ids_are_stable(self) -> None:
+        spy = {"dk": ["2026-08-03", "2026-08-04", "2026-08-05"]}
+        now = datetime(2026, 8, 5, 16, 12, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(
+            forward_shadow._eligible_decision_dates(spy, "2026-08-04", now),
+            ["2026-08-04"],
+        )
+        candidate = {"id": "m", "horizon": "month_21d"}
+        first = forward_shadow._decision_id(candidate, "ABC", "2026-08-04", "long")
+        self.assertEqual(
+            first,
+            forward_shadow._decision_id(candidate, "ABC", "2026-08-04", "long"),
+        )
+        self.assertNotEqual(
+            first,
+            forward_shadow._decision_id(candidate, "ABC", "2026-08-04", "short"),
+        )
+
+    def test_forward_shadow_starts_end_to_end_with_its_frozen_spy_loader(self) -> None:
+        """Exercise startup, session recording, SQLite, and atomic output together."""
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            database = root / "features.sqlite"
+            sqlite3.connect(database).close()
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "manifest.json").write_text(
+                json.dumps({"missing_price_symbols": []}) + "\n"
+            )
+            output = root / "forward.json"
+            report = {
+                "forward_candidate_set": {"candidates": []},
+                "universe_symbols": [],
+            }
+            protocol = {
+                "schema_version": 1,
+                "evaluation_class": "locked_forward_shadow",
+                "recorder_sha256": "recorder",
+                "report_sha256": "report",
+                "candidate_set_sha256": "candidates",
+                "universe_sha256": "universe",
+                "start": "2026-08-04",
+                "minimum_end": "2026-10-30",
+                "minimum_sessions": 60,
+                "promotion_authority": "none",
+            }
+            original_features = mechanism_backtest.FEAT_DB
+            original_cache = mechanism_backtest.CACHE_DIR
+            original_network = mechanism_backtest.ALLOW_NETWORK
+            try:
+                with (
+                    mock.patch.object(forward_shadow, "LIVE_FEATURES", database),
+                    mock.patch.object(forward_shadow, "LIVE_CACHE", root / "cache"),
+                    mock.patch.object(
+                        forward_shadow, "_protocol", return_value=(report, protocol)
+                    ),
+                    mock.patch.object(
+                        mechanism_backtest,
+                        "_backtest_prices",
+                        return_value=[
+                            {"t": "2026-08-03", "c": 100.0},
+                            {"t": "2026-08-04", "c": 101.0},
+                            {"t": "2026-08-05", "c": 102.0},
+                        ],
+                    ),
+                ):
+                    artifact = forward_shadow.run(
+                        root / "report.json", snapshot, output,
+                        now=datetime(
+                            2026, 8, 5, 16, 12,
+                            tzinfo=ZoneInfo("America/New_York"),
+                        ),
+                    )
+            finally:
+                mechanism_backtest.FEAT_DB = original_features
+                mechanism_backtest.CACHE_DIR = original_cache
+                mechanism_backtest.ALLOW_NETWORK = original_network
+            self.assertEqual(artifact["sessions_recorded"], ["2026-08-04"])
+            self.assertEqual(artifact["summary"]["candidate_count"], 0)
+            self.assertEqual(json.loads(output.read_text()), artifact)
+
+    def test_daily_learning_chain_owns_forward_shadow_recorder(self) -> None:
+        source = (ROOT / "scripts/learning-chain.sh").read_text()
+        self.assertIn('step "forward-shadow"      "$PY" "$TI/forward_shadow.py"', source)
 
     def test_historical_walkforward_has_no_promotion_authority(self) -> None:
         policy = json.loads(
@@ -1405,6 +1945,17 @@ class SignalSafetyTests(unittest.TestCase):
         )
         conn.close()
 
+    def test_flat_open_market_is_a_successful_mark_not_a_quote_failure(self) -> None:
+        mark = {
+            "book": "desk",
+            "mark_quality": {"position_count": 0, "live_bulk": 0},
+        }
+        with mock.patch.object(sim_broker, "connect", return_value=object()), \
+                mock.patch.object(sim_broker, "mark_book", return_value=mark), \
+                mock.patch.object(sim_broker, "market_clock", return_value={"is_open": True}), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(sim_broker.main(["mark", "--book", "desk"]), 0)
+
     def test_historical_shadow_book_cannot_be_marked_or_narrated(self) -> None:
         with self.assertRaisesRegex(ValueError, "not operational"):
             sim_broker.mark_book(sqlite3.connect(":memory:"), "shadow")
@@ -1472,36 +2023,35 @@ class SignalSafetyTests(unittest.TestCase):
 
     def test_prospective_edge_matches_live_id_to_artifact_horizon(self) -> None:
         live = sqlite3.connect(":memory:")
-        live.execute("CREATE TABLE mechanisms(id TEXT, status TEXT)")
         live.execute(
-            "INSERT INTO mechanisms VALUES('quality__month_21d','active')"
+            "CREATE TABLE mechanisms(id TEXT,status TEXT,direction TEXT,"
+            "horizon TEXT,posterior_mean REAL,notes TEXT)"
         )
-        fd, feature_path = tempfile.mkstemp(suffix=".sqlite", dir="/tmp")
-        os.close(fd)
+        candidate = integrate_calibrated.normalize_approved_candidates([{
+            "id": "quality", "horizon": "month_21d", "direction": "long",
+            "kind": "state", "source": "locked_forward_shadow_v1",
+            "conditions": [["quality", ">", 1]], "rationale": "quality",
+            "net_alpha_pct": 2.5, "beta_neutral_alpha_pct": 1.5,
+            "test_p": 0.001, "bonf_sig": 1, "hit_te": 0.6, "te_n": 100,
+            "cluster_n": 60, "ticker_n": 30, "posterior_mean": 0.58,
+            "skew_edge": 0,
+        }])[0]
+        note = integrate_calibrated.approved_candidate_note(candidate, {
+            "decision_id": "D999", "_manifest_sha256": "a" * 64,
+            "_source_artifact_sha256": "b" * 64,
+            "expires_at": "2026-09-01T00:00:00Z",
+        }, "2026-08-01T00:00:00Z")
+        live.execute(
+            "INSERT INTO mechanisms VALUES(?,?,?,?,?,?)",
+            ("quality__month_21d", "active", "long", "position_1_4w", 0.58, note),
+        )
         try:
-            feature = sqlite3.connect(feature_path)
-            feature.execute(
-                "CREATE TABLE calibrated_mechanisms("
-                "id TEXT,horizon TEXT,net_alpha_pct REAL,bonf_sig INT)"
-            )
-            feature.execute(
-                "INSERT INTO calibrated_mechanisms VALUES("
-                "'quality','month_21d',2.5,1)"
-            )
-            feature.commit()
-            feature.close()
-            with mock.patch.object(
-                capital_efficiency_audit, "FEATURE_DB", Path(feature_path)
-            ):
-                rate, source, count = (
-                    capital_efficiency_audit._prospective_edge_rate(live)
-                )
+            rate, source, count = capital_efficiency_audit._prospective_edge_rate(live)
             self.assertEqual(count, 1)
-            self.assertEqual(source, "robust_calibrated_mechanism_median")
+            self.assertEqual(source, "approved_live_artifact_median")
             self.assertAlmostEqual(rate, 0.025)
         finally:
             live.close()
-            os.unlink(feature_path)
 
     def test_attribution_accepts_nanosecond_timestamps(self) -> None:
         parsed = compute_attribution._parse("2026-07-06T13:38:36.848190044Z")
@@ -1618,6 +2168,18 @@ class SignalSafetyTests(unittest.TestCase):
             else:
                 self.assertIn("Do not spawn researcher", message)
 
+    def test_daily_learning_agent_never_reruns_the_money_path(self) -> None:
+        jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
+        learning = next(
+            job for job in jobs if job.get("name") == "overseer-daily-learning-1630-et"
+        )
+        message = str((learning.get("payload") or {}).get("message", ""))
+        step_one = message.split("Step 1", 1)[1].split("Step 2", 1)[0]
+        self.assertIn("never rerun it", step_one)
+        self.assertIn("Do NOT execute `trader-pass-deterministic.sh`", step_one)
+        self.assertIn("If the chain is still running or failed", step_one)
+        self.assertNotIn("execute `~/.openclaw/scripts/run-with-trace.sh", step_one)
+
     def test_data_scout_cannot_dirty_source_control_or_create_proposals(self) -> None:
         jobs = json.loads((ROOT / "cron/jobs.json").read_text()).get("jobs", [])
         scout = next(job for job in jobs if job.get("name") == "data-scout-monthly")
@@ -1643,20 +2205,33 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertNotIn("PRE-REDISCOVERY", source)
         self.assertNotIn('run "backup db"', source)
         self.assertNotIn('run "integrate"', source)
-        self.assertIn('integrate_calibrated.py" --check-only', source)
-        self.assertIn("live mechanism ledger unchanged", source)
+        self.assertIn('historical_report_check.py"', source)
+        self.assertIn("purged_walkforward_v2.json", source)
+        self.assertIn("purged_walkforward_v2", source)
+        self.assertNotIn('"$TI/promote_mechanisms.py"', source)
+        self.assertNotIn('"$TI/mechanism_correlation.py"', source)
+        self.assertNotIn('"$TI/mechanism_regime.py"', source)
+        self.assertNotIn('"$TI/integrate_calibrated.py"', source)
+        self.assertIn("live state was untouched", source)
 
     def test_canonical_architecture_matches_live_contract_boundaries(self) -> None:
         architecture = (ROOT / "SYSTEM_ARCHITECTURE.md").read_text()
         risk_source = (
             ROOT / "workspaces/risk/scripts/gate_risk_intents.py"
         ).read_text()
-        self.assertIn("migrations:** through 0028", architecture)
+        self.assertIn("migrations:** through 0030", architecture)
         self.assertIn("Concurrent names:** ≤ 48", architecture)
         self.assertIn("MAX_POSITIONS = 48", risk_source)
         self.assertIn("These are **not one unified graph**", architecture)
         self.assertIn(
             "do not directly contain thesis, prediction,", architecture
+        )
+
+    def test_money_path_allows_bounded_bulk_risk_reduction(self) -> None:
+        source = (ROOT / "scripts/trader-pass-deterministic.sh").read_text()
+        self.assertIn(
+            'run_step "execute_intent" 300 python3 workspaces/executor/scripts/execute_intent.py --max 48',
+            source,
         )
         overseer = (ROOT / "workspaces/overseer/AGENTS.md").read_text()
         self.assertIn("“Very concise” means", overseer)
@@ -1764,7 +2339,7 @@ class SignalSafetyTests(unittest.TestCase):
         errors = system_health_sweep.validate_reference_policy(config, ROOT)
         self.assertTrue(any("deleted-skill" in error for error in errors))
 
-    def test_token_health_accepts_plugin_owned_codex_runtime(self) -> None:
+    def test_token_health_rejects_foreground_only_synthetic_auth(self) -> None:
         status = {
             "auth": {
                 "runtimeAuthRoutes": [
@@ -1790,8 +2365,79 @@ class SignalSafetyTests(unittest.TestCase):
             ),
         ):
             result = system_health_sweep.check_tokens()
-        self.assertEqual(result["severity"], "ok")
-        self.assertIn("plugin-owned", result["detail"])
+        self.assertEqual(result["severity"], "crit")
+        self.assertRegex(
+            result["detail"],
+            r"OAuth-only fleet policy violated|Overseer cron auth profile missing",
+        )
+
+    def test_oauth_fleet_policy_rejects_api_tokens_and_missing_agent_profiles(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            root = Path(td)
+            (root / "credentials").mkdir()
+            (root / "cron").mkdir()
+            (root / "agents/overseer/agent").mkdir(parents=True)
+            config = {
+                "auth": {
+                    "order": {"openai": ["openai-codex:test"]},
+                    "profiles": {
+                        "openai-codex:test": {
+                            "provider": "openai-codex", "mode": "oauth",
+                        }
+                    },
+                },
+                "agents": {"list": [{"id": "overseer"}, {"id": "researcher"}]},
+            }
+            (root / "openclaw.json").write_text(json.dumps(config))
+            (root / "cron/jobs.json").write_text(json.dumps({"jobs": []}))
+            (root / "credentials/openclaw-gateway.env").write_text("OPENAI_API_KEY=bad\n")
+            (root / "agents/overseer/agent/auth-profiles.json").write_text(json.dumps({
+                "version": 1,
+                "profiles": {
+                    "openai:default": {"provider": "openai", "type": "token"},
+                    "openai-codex:test": {"provider": "openai-codex", "type": "oauth"},
+                },
+            }))
+            errors = system_health_sweep.audit_codex_oauth_fleet(root)
+        self.assertTrue(any("OPENAI_API_KEY" in error for error in errors))
+        self.assertTrue(any("overseer: direct OpenAI" in error for error in errors))
+        self.assertTrue(any("researcher: auth profile" in error for error in errors))
+
+    def test_oauth_enforcer_creates_a_missing_configured_agent_store(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            (root / "agents/overseer/agent").mkdir(parents=True)
+            (root / "credentials/token-backups").mkdir(parents=True)
+            (root / "credentials/openclaw-gateway.env").write_text("")
+            (root / "openclaw.json").write_text(json.dumps({
+                "agents": {"list": [{"id": "overseer"}, {"id": "risk"}]},
+            }))
+            profile = {
+                "version": 1,
+                "profiles": {
+                    "openai-codex:test": {
+                        "provider": "openai-codex", "type": "oauth",
+                        "access": "test", "refresh": "test",
+                    },
+                },
+            }
+            (root / "agents/overseer/agent/auth-profiles.json").write_text(
+                json.dumps(profile)
+            )
+            result = enforce_codex_oauth.enforce(root, apply=True)
+            risk = json.loads(
+                (root / "agents/risk/agent/auth-profiles.json").read_text()
+            )
+            self.assertEqual(result["active_stores_seeded_with_codex_oauth"], 1)
+            self.assertEqual(
+                risk["profiles"]["openai-codex:test"]["provider"],
+                "openai-codex",
+            )
+
+    def test_token_restore_cannot_resurrect_direct_openai_tokens(self) -> None:
+        source = (ROOT / "scripts/token-restore.sh").read_text()
+        self.assertIn('select(.value.provider != "openai"', source)
+        self.assertIn('provider == "openai-codex"', source)
 
     def test_integrity_freshness_counts_sessions_not_weekend_hours(self) -> None:
         friday_mark = "2026-07-31T20:00:00Z"
@@ -2075,6 +2721,41 @@ class GateLineageTests(unittest.TestCase):
 
 
 class ShellContinuityTests(unittest.TestCase):
+    def test_tm_git_reconciler_is_active_project_scoped_not_legacy_autotap(self) -> None:
+        source = (ROOT / "scripts/reconcile-task-manager-with-git.py").read_text()
+        self.assertIn('default="AutoTrade"', source)
+        self.assertIn('project_scope(args.project)', source)
+        self.assertIn('api/issues?sprint_id={sprint_id}', source)
+        self.assertIn('credentials/task-manager-agent.json', source)
+        self.assertIn('default_branch(repo)', source)
+        self.assertNotIn('/home/aaron/repos/AutoTap-iosApp', source)
+
+    def test_gateway_restart_requires_real_rpc_and_verified_scheduler_restore(self) -> None:
+        compose = (ROOT / "docker-compose.openclaw.yml").read_text()
+        restart = (ROOT / "scripts/safe-restart.sh").read_text()
+        self.assertIn('test: ["CMD", "openclaw", "health"]', compose)
+        self.assertNotIn('test: ["CMD", "openclaw", "gateway", "status"]', compose)
+        self.assertIn('&& "${OPENCLAW_BIN}" health &>/dev/null', restart)
+        self.assertIn("START_WAIT=120", restart)
+        self.assertIn("consecutive >= 2", restart)
+        self.assertIn("SECONDS + START_WAIT", restart)
+        self.assertIn("--restore-cron-only", restart)
+        self.assertIn("Restore-only cron recovery complete", restart)
+        self.assertIn('[[ -n "${_next_wake}" ]]', restart)
+        self.assertIn('recovery manifests retained', restart)
+        self.assertIn('fail "Cron restore was not verified', restart)
+
+    def test_token_restore_can_target_a_specific_agent_safely(self) -> None:
+        source = (ROOT / "scripts/token-restore.sh").read_text()
+        self.assertIn('--agent) agent_id="$2"', source)
+        self.assertIn('[[ ! "$agent_id" =~ ^[a-z0-9_-]+$ ]]', source)
+        self.assertIn('agents/${agent_id}/agent/auth-profiles.json', source)
+
+    def test_auth_health_checks_real_overseer_store_not_foreground_synthetic_auth(self) -> None:
+        source = (ROOT / "scripts/system-health-sweep.py").read_text()
+        self.assertIn('[ocl, "models", "--agent", "overseer", "status", "--json"]', source)
+        self.assertNotIn('fleet auth healthy via plugin-owned codex-app-server', source)
+
     def test_pipeline_propagates_failures_and_guard_runs_both_gates(self) -> None:
         pipeline = (ROOT / "scripts/trader-pass-deterministic.sh").read_text()
         guard = (ROOT / "scripts/guard-pass.sh").read_text()
@@ -2090,8 +2771,9 @@ class ShellContinuityTests(unittest.TestCase):
     def test_runtime_snapshots_never_mutate_the_website_checkout(self) -> None:
         pipeline = (ROOT / "scripts/trader-pass-deterministic.sh").read_text()
         publisher = (ROOT / "scripts/push-trader-data.sh").read_text()
+        builder = (ROOT / "workspaces/developer/scripts/snapshot_builder.py").read_text()
         provenance = (ROOT / "scripts/provenance-check.py").read_text()
-        overlay = Path(
+        projector = Path(
             "/home/aaron/repos/lidi-solutions/scripts/snapshot-trader-intel.mjs"
         ).read_text()
         tracked_path = "public/solutions/trader_intel/app/data.json"
@@ -2102,7 +2784,15 @@ class ShellContinuityTests(unittest.TestCase):
         self.assertNotIn(tracked_path, publisher)
         self.assertIn("TRADER_INTEL_OUT_DIR", pipeline)
         self.assertIn("TRADER_INTEL_OUT_DIR", publisher)
-        self.assertIn("TRADER_INTEL_SKIP_DIST", overlay)
+        self.assertIn("canonical-state.json", pipeline)
+        self.assertIn("canonical-state.json", publisher)
+        self.assertIn("trader-intel-snapshot/canonical-state.json", builder)
+        self.assertNotIn('trader-intel-snapshot/data.json")', builder)
+        self.assertIn("TRADER_INTEL_BASE_FILE", pipeline)
+        self.assertIn("TRADER_INTEL_BASE_FILE", publisher)
+        self.assertIn("TRADER_INTEL_SKIP_DIST", projector)
+        self.assertIn("BASE_FILE", projector)
+        self.assertIn("audit_app_snapshot.py", publisher)
         self.assertNotIn('"generated": [', provenance)
 
     def test_postmortem_audit_ids_are_unique_per_hypothesis(self) -> None:
@@ -2187,6 +2877,32 @@ class ShellContinuityTests(unittest.TestCase):
                     check=True, capture_output=True,
                 )
 
+    def test_clean_live_repo_also_launches_in_an_isolated_worktree(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+            repo = Path(temp_dir) / "sample"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Guardrail Test"], check=True)
+            (repo / "tracked.txt").write_text("committed\n")
+            subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+            issue = {"title": "Clean isolation", "branch": "issue-998-clean-isolation"}
+            launch_repo, original, isolated = dwight_launch_from_issue.prepare_launch_repo(
+                str(repo), "TM-998", "998", issue,
+            )
+            try:
+                self.assertEqual(original, "main")
+                self.assertEqual(dwight_launch_from_issue.git_current_branch(str(repo)), "main")
+                self.assertEqual(dwight_launch_from_issue.git_current_branch(launch_repo), issue["branch"])
+                self.assertIsNotNone(isolated)
+                self.assertNotEqual(launch_repo, str(repo))
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(repo), "worktree", "remove", launch_repo],
+                    check=True, capture_output=True,
+                )
+
     def test_agent_crons_never_announce_completion_receipts(self) -> None:
         jobs = json.loads((ROOT / "cron/jobs.json").read_text())["jobs"]
         agent_jobs = [
@@ -2195,6 +2911,8 @@ class ShellContinuityTests(unittest.TestCase):
         ]
         self.assertTrue(agent_jobs)
         for job in agent_jobs:
+            self.assertEqual(job.get("sessionTarget"), "isolated", msg=job.get("name"))
+            self.assertNotIn("sessionKey", job, msg=job.get("name"))
             self.assertEqual(
                 (job.get("delivery") or {}).get("mode"),
                 "none",

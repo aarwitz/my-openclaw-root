@@ -7,7 +7,7 @@
 > `workspaces/trading-intel/docs/02_ARCHITECTURE.md`) were **archived 2026-07-02**
 > to `archive/docs-retired-20260702/`.
 >
-> **Topology:** v5 · **DB schema/migrations:** through 0028 · **Last reconciled:** 2026-08-02
+> **Topology:** v5 · **DB schema/migrations:** through 0030 · **Last reconciled:** 2026-08-03
 
 ---
 
@@ -36,10 +36,14 @@ replace it with the agent roster, a stage inventory, or volatile status. Current
 positions, performance, edge verdict, and health must be read from the runtime
 snapshot and health reports at answer time.
 
-### 1.2 Three distinct research structures
+### 1.2 Four distinct research structures
 
 - **Thesis engine (live SQLite, relational):** canonical live thesis per ticker,
   evidence, Critic state, predictions, intents, fills, and realized outcomes.
+- **Theme model (live SQLite, relational):** explicit beneficiary and victim
+  baskets, point-in-time evidence, measured relative-strength observations,
+  lifecycle state, and optional thesis/intent lineage. It supplies research
+  context only; a theme score never authorizes or sizes risk.
 - **Quant knowledge graph (offline analytics SQLite):** ticker, sector,
   mechanism, and regime nodes plus correlation, co-mention, theme, redundancy,
   and regime-conditioning edges.
@@ -90,9 +94,30 @@ Two design commitments shape everything below:
   = "gateway"` — exec runs directly on the gateway host.
 - **Model harness:** all agents use the bundled **Codex app-server harness**
   (`models.providers.openai.agentRuntime.id = "codex"`), OAuth (ChatGPT/Codex
-  sub), **no API keys, no per-agent model selection**. `openai-codex` refresh
-  tokens are single-use and fragile; backups rotate in
+  sub), **no OpenAI API keys and no per-agent model selection**. The model id
+  remains `openai/gpt-*`; that namespace does not select API-key auth. The
+  effective runtime route must say `authProvider=openai-codex`, every agent
+  store must contain the shared `openai-codex` OAuth profile, and neither
+  `openai:default` nor `OPENAI_API_KEY` may exist. Local Ollama credentials and
+  market/news vendor keys are separate and do not authorize hosted OpenAI
+  models. `enforce-codex-oauth.py`, offline preflight, and the live health sweep
+  enforce this contract. `openai-codex` refresh tokens are single-use and
+  fragile; sanitized OAuth-only recovery copies rotate in
   `credentials/token-backups/`.
+- **2026-08-03 auth-drift incident:** the direct `openai:default` fallback had
+  existed since the initial 2026-05-24 tracked baseline, and the gateway env
+  also carried `OPENAI_API_KEY`, despite this document and the 2026-07-29
+  handoff already specifying OAuth-only operation. Per-agent stores later
+  diverged: Overseer/Researcher/Dwight could be empty while foreground status
+  still exposed synthetic or alternate credentials. The result was an
+  interactive-green/cron-red split. Exact evidence does not identify the
+  operation that emptied each store, so no more specific cause is asserted.
+  Fleet enforcement now removes direct OpenAI tokens from active and recovery
+  stores, seeds every agent from one OAuth profile, rejects missing scheduled
+  stores, and makes token restore incapable of resurrecting API-token auth.
+  Removing a container environment key requires a **recreate through
+  `safe-restart.sh`**; direct `docker restart`, direct Compose, and host systemd
+  restart are not sanctioned recovery paths.
 - **Jerry (host repair)** runs on **host cron** (not systemd). All six prior
   systemd user units were removed; a wrapper-governed host cron runs the
   Jerry/watchdog passes.
@@ -146,9 +171,10 @@ decision) are separate and individually visible.
 Single SQLite database: `~/.openclaw/state/trading-intel.sqlite` (WAL mode).
 `sql/schema.sql` contains the baseline schema (its world-model block originated
 as schema v8); the live contract is that baseline plus numbered migrations
-through **0028** under `workspaces/trading-intel/sql/migrations/`.
+through **0030** under `workspaces/trading-intel/sql/migrations/`.
 
-Core pipeline tables: `hypotheses`, `hypothesis_evidence`, `regime`,
+Core pipeline tables: `themes`, `theme_observations`, `hypotheses`,
+`hypothesis_evidence`, `regime`,
 `critic_reviews`, `expression_candidates`, `trade_intents`, `risk_reviews`,
 `positions`, `portfolio_snapshots`, `audits`, `rule_proposals`.
 
@@ -209,7 +235,8 @@ classify_regime          quant/scripts/classify_regime.py      → regime row
   → macro_seed/actuals   trading-intel/scripts/macro_calendar.py → macro_releases (+ surprise → market_event)
   → capital_efficiency   trading-intel/scripts/capital_efficiency_audit.py → capital_efficiency_snapshots
                                                                (ranked dollar bottlenecks, D55)
-  → snapshot (+overlay)  developer/scripts/snapshot_builder.py → app data.json
+  → snapshot_state       developer/scripts/snapshot_builder.py → canonical-state.json
+  → snapshot_project     lidi-solutions snapshot projector → public v4 data.json
   → pipeline_health + app_snapshot   developer watchdogs
 ```
 
@@ -333,6 +360,24 @@ post-cutoff and 60 negative-control minimums. Pending rows and fake-date
 companions never inflate sample size. An empty corpus is honest and keeps the
 production-edge reasoning gate closed; it is not a reason to invent cases or
 stop internal-paper simulation.
+
+### 6.13 Theme model (`themes`, `theme_observations`; schema v30)
+
+Themes are falsifiable cross-name research frames, not prose tags. A theme owns
+explicit beneficiary and victim baskets, a thesis, falsifier, status
+(`watch|active|challenged|dead`), source and point-in-time evidence timestamps,
+plus its latest measured spread/breadth score. `industry_rs.py` scans declared
+industry baskets for bottom-to-top-quartile inflections; `score_themes.py`
+measures each theme basket against its opposite basket or SPY; and
+`theme_context.py` emits compact deterministic context for Researcher.
+
+`hypotheses.theme_id` and `trade_intents.theme_id` preserve lineage when a
+thesis genuinely belongs to a theme. The link is optional and never substitutes
+for thesis evidence, prediction, Critic, Kelly, or Risk gates. Backfilled seed
+observations are labeled observational; they cannot establish edge or alter the
+live `NO_EDGE` verdict. Active themes without fresh evidence are a health error,
+and stale or unfalsifiable themes must be challenged or killed instead of kept
+as permanent narrative.
 
 ### 6.8 Macro expectations & surprise (`macro_releases`, schema v10)
 The desk's biggest blind spot was being *surprised* by scheduled macro prints it
@@ -534,24 +579,35 @@ cron→SQLite migration in this build). The overseer drives the desk:
   - The browser never calls OpenClaw, a broker, or a market-data provider.
   - Missing/malformed snapshot data returns a fail-closed error; there is no
     external-broker fallback or broker credential in the Pages runtime.
-- **Snapshot contract audit:** `audit_app_snapshot.py` validates the current v2
-  roster/list topology, internal-paper source and label, desk cash/equity/
-  position arithmetic, open-inventory lineage counts, selection coverage,
-  prediction-replay count, capital equity, and the exact deterministic
-  pipeline-health color. Retired
-  `risk_gate`, `calibration`, or `world_model` top-level blocks are not part of
-  the contract. `snapshot_builder.py` embeds the full pipeline health result;
-  it may not render a shallow green while the production-edge gate is yellow.
+- **Snapshot contract audit:** the Python builder owns canonical ledger and
+  safety state in runtime-only `canonical-state.json`; the Node projector owns
+  the richer `trader-intel/v4` presentation contract in `data.json`. They never
+  overwrite the same file. The projector must preserve selection-funnel,
+  prediction-replay, inventory-lineage, and exact pipeline-health state from
+  the canonical input. `audit_app_snapshot.py` validates v5 topology,
+  internal-paper identity, desk cash/equity/positions, those closed-loop
+  reports, capital equity, and health color. KV publication fails closed on a
+  red audit, so a shallow presentation-layer green cannot hide a canonical
+  yellow/red condition.
 - **Telegram** narration goes out on the `druck` bot (cron handles routing to
   the group topic / DM). Narration is action-first, source-backed, no tables.
+  Telegram is a view, never the work queue: successful outbound bot messages
+  are appended to `state/operator-events.jsonl` by the `message:sent` hook.
+  Direct emergency Bot API pages pass through the same intake explicitly.
+  INFO remains an observed audit event; explicit WARN/CRIT/FAILED output is
+  assigned a stable incident family and appended to `state/priority-queue.jsonl`.
+  Identical repeats inside 24 hours are observed without queue spam; changed or
+  later recurrences reuse the stable family and can reopen work even when an
+  older Task Manager issue is terminal.
 - Any bot that should stay visibly responsive in Telegram needs the
   `group:messaging` capability in its tool allowlist/profile. A routed Telegram
   account with `group:messaging` missing can warn or fail on replies,
   attachments, and thread actions.
-- **Backlog visibility (Task Manager):** `poll_priority_queue.py` is a **one-way,
+- **Backlog ownership (Task Manager):** `dwight-pq-rail.sh` runs every five
+  minutes under a host lock and invokes `poll_priority_queue.py`, a **one-way,
   deterministic** mirror — it reads the overseer's append-only priority queue
   (`state/priority-queue.jsonl`) and creates/updates Task Manager issues for
-  visibility. It is the *only* desk-side Task Manager mutation path and it **does not
+  sprint 5. It is the *only* desk-side Task Manager mutation path and it **does not
   launch agents**. (The `dwight` LLM agent — a general dev/PM + dispatcher for broader
   work — was decoupled from the desk 2026-06-17, §3; the desk relies on this
   deterministic mirror, not on dwight.)
@@ -569,7 +625,7 @@ cron→SQLite migration in this build). The overseer drives the desk:
             rule_proposals ──→ HUMAN approves ──→ Developer applies ──→ DECISION_LOG
                               ▲                                            │
             ┌──────────────── SOFTWARE (slow, human-gated) ───────────────┘
- overseer → priority queue → TM mirror (poll_priority_queue.py, visibility) ; Developer worktrees → PRs
+ bot/health output → operator-event ledger → priority queue → TM mirror ; Developer worktrees → PRs
 ```
 
 - **Knowledge** improves continuously and autonomously (mechanism beliefs).
@@ -625,24 +681,38 @@ bar; outcome is graded on future bars only). Streams ticker-by-ticker
   are purged, and test labels that mature outside the hidden interval are excluded;
 - primary significance = one-sided **HAC test on entry-date-clustered net mean-alpha**; raw ticker
   hits are descriptive and never treated as independent trials;
+- every candidate must survive both raw SPY-relative alpha and a point-in-time
+  trailing-252-session market-beta residual test (minimum 126 aligned returns,
+  beta clipped to [0,3]); the cell p-value is the conservative maximum of the
+  two one-sided p-values, so high-beta rebound exposure cannot masquerade as
+  alpha;
 - **Benjamini-Hochberg FDR + Bonferroni** across every (mechanism × horizon) + cross-sectional factor;
 - **data-quality / tradability controls**: $5 price floor, $5M dollar-volume floor, per-horizon return
   winsorization, and a round-trip **transaction-cost** model (+short borrow) — alpha is reported **net**.
 
 The preregistered `purged_walkforward_v1` development lane hides four non-overlapping two-year
 periods from 2018 through 2025. Candidate thresholds are recomputed from each fold's training data;
-an aggregate candidate needs adequate date/name breadth in at least three folds, positive median
-alpha and at least three positive folds, plus a second Bonferroni correction over combined
+an aggregate candidate needs adequate date/name breadth in at least three folds, positive raw and
+beta-neutral median alpha and at least three folds positive on both measures, plus a second Bonferroni correction over combined
 one-sided Stouffer p-values. It writes only an offline report under
 `state/historical-validation/`, cannot replace `discovered_mechanisms`, and has
 `promotion_authority=none`. These years have influenced system design, so even a survivor is a
 stable historical development candidate—not untouched proof of edge. The separate locked forward
-window remains the production-evidence lane. Canonical replay requires an immutable input directory
+window remains the production-evidence lane. A completed replay freezes the exact conditions,
+direction, horizon, universe digest, and chronologically latest pre-test threshold definition into
+a content-addressed candidate set. `forward_shadow.py`, owned by the post-close learning chain,
+records every eligible signal and later resolves raw-SPY and beta-neutral cost-net outcomes; it
+cannot author intents or mutate live mechanism state. Missing more than two recording sessions
+fails closed instead of reconstructing the holdout retrospectively. Canonical replay requires an immutable input directory
 created by `historical_snapshot.py`: one SQLite backup plus only the exact frozen price/FRED cache
 files the engine consumes, all content-hashed in a manifest. A report fingerprints that snapshot,
-the engine, aggregation runner, evaluation policy, and frozen universe. Each fold also holds one
+the engine, aggregation runner, exact historical-policy subsection, full policy file for
+information, and frozen universe. Each fold also holds one
 SQLite read snapshot across both passes, and any changed snapshot byte invalidates the run before
-aggregation. Live cache mtimes/WAL state are never used as research identity. Canonical execution
+aggregation. Coverage records every loaded, empty, and failed symbol independently on both passes
+and rejects pass drift. Snapshot creation exercises the engine's exact ordered feature query for
+every universe member, preventing a damaged secondary index from becoming a silent exclusion.
+Live cache mtimes/WAL state are never used as research identity. Canonical execution
 is single-worker until a resource-bounded parallel implementation proves identical completion;
 failed parallel launches have no checkpoint and therefore no evidentiary status.
 
@@ -758,7 +828,7 @@ Evidence has three operational tiers:
    credit across all linked hypotheses.
 
 `workspaces/trading-intel/config/evaluation_policy.json` labels the reused 2020 holdout as development
-only and locks a forward shadow evaluation beginning 2026-08-03 for at least 60
+only and locks a forward shadow evaluation beginning 2026-08-04 for at least 60
 sessions. No production edge claim is permitted before it completes.
 
 The graph layer is an **evidence graph** despite historical table/file names

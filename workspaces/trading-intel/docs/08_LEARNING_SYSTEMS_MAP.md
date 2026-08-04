@@ -1,6 +1,6 @@
 # 08 — The Learning Systems Map
 
-Status: active. Reconciled 2026-08-02. This is the one-page answer. When a new
+Status: active. Reconciled 2026-08-03. This is the one-page answer. When a new
 learning mechanism ships, ADD IT HERE (doc-lint's Sunday pass + this header are the reminder).
 
 The design has **two speeds** (SYSTEM_ARCHITECTURE §learning): *fast/autonomous* loops move
@@ -19,7 +19,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
    │  feature store (point-in-time)    │        Reddit, macro, valuations
    └──────┬──────────────┬─────────────┘
           │              │
-   GBM ranker (#2)   world model (#3..#5)          [fast, autonomous]
+   GBM ranker (#2)   theme + world models (#3..#5) [fast, autonomous]
    ml_scores         hypotheses → predictions →
    model book        grades → mechanism posteriors,
    earn-trust        episodes, postmortems, patterns,
@@ -74,6 +74,13 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 
 ## #3 The world model — *predictive-belief learning (the core)*
 
+- **Theme model** (`themes`, `theme_observations`): explicit beneficiary/victim
+  baskets turn macro/industry narratives into falsifiable, scored research
+  context. Industry relative-strength scans detect inflections; observations
+  are immutable and point-in-time; active themes go unhealthy when evidence is
+  stale. Theme links flow into hypotheses and intent lineage but never bypass
+  forecasts, Critic, Kelly, Risk, or the current no-edge quarantine.
+
 - **Mechanisms** (`mechanisms` table): falsifiable predictive statements
   ("positive EPS surprise → post-earnings drift") with Beta posteriors and
   expectancy. All 100 retained mechanism rows are currently deprecated after
@@ -97,7 +104,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
   The report is offline, resumable, and has `promotion_authority=none`; it can
   reject fragile ideas quickly but cannot certify production edge because the
   system's feature families have already been informed by those years. The locked
-  2026-08-03 through 2026-10-30 forward shadow window may not be tuned against
+  2026-08-04 through 2026-10-30 forward shadow window may not be tuned against
   and must complete before production-edge claims.
 
 ## #4 Predictions & calibration — *does the desk know what it knows?*
@@ -122,6 +129,10 @@ can see** — that's why the observability organs (#8) exist alongside the learn
   frozen rows, also exposed as `predictionReplay` in the runtime GUI snapshot.
   It detects regressions before Telegram but has no promotion authority; only
   the preregistered forward challenger can earn trust.
+- **Contributor diagnostics** (`brier_contributors.py`): rank Brier drag and
+  inspect point-in-time candidate discriminators without rewriting resolved
+  forecasts. A valuation-confidence split is retrospective research only until
+  a preregistered forward challenger proves an actual improvement.
 
 ## #5 Trade-experience learning — *lessons from every position*
 
@@ -157,6 +168,11 @@ can see** — that's why the observability organs (#8) exist alongside the learn
   well-formed TM issue/day → detached coding-lane run → branch + PR → **Aaron merges** →
   next PM pass verifies the deficiency shrank.
 - Deficiency sources now include the blind-spot table (#8) via the Sunday audit.
+- Operator-facing bot output is also a deficiency source: successful Telegram
+  output is durably observed; explicit WARN/CRIT/FAILED families enter the
+  priority queue and the five-minute deterministic rail reconciles them to the
+  hosted sprint. The human is no longer the transport between a bot page and
+  owned work.
 
 ## #8 Observability organs — *widening what the loops can learn (the "second loop")*
 
@@ -175,7 +191,7 @@ can see** — that's why the observability organs (#8) exist alongside the learn
 
 ## #9 Institutional memory — *what the humans + LLMs remember*
 
-- **DECISION_LOG.md** (through D115): every architectural decision, why, approver. **FINDINGS.md**:
+- **DECISION_LOG.md** (through D125): every architectural decision, why, approver. **FINDINGS.md**:
   the lab notebook — dated claims with `revalidate-by` expiry so quantitative beliefs can't
   silently rot into canon. **Market debriefs:** the daily what-moved-and-why narrative.
   **Evidence graph** (historical table name `causal_edges`, rebuilt nightly):
@@ -200,8 +216,11 @@ what's measured** — it grows the measurement frame from blind spots and unexpl
 5. **#9 is the memory that survives context loss** — for humans, agents, and the next
 Claude session alike.
 
-Known gaps (kept honest): rotation theses grade by single leg, not spread;
-mechanism grades do not yet neutralize sector/factor beta; the reused historical
+Known gaps (kept honest): the prospective blinded validation corpus is still
+below 30 post-cutoff and 60 negative-control cases and must not be backfilled;
+rotation theses grade by single leg, not spread;
+historical candidate tests now neutralize trailing market beta but not sector or
+multi-factor exposures; the reused historical
 holdout is contaminated by development decisions; the locked forward shadow
 window has not completed; simulator realism omits queues/halts/name-specific
 borrow/dividends/options; engagement checks are keyword-level; the episode

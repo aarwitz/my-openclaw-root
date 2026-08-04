@@ -54,7 +54,10 @@ def recent_news(keyword: str, days: int = 14, count: int = 25, cache_h: float = 
     out = []
     for a in (raw.get("articles") or {}).get("results", []):
         out.append({
-            "date": a.get("date"), "title": a.get("title"), "url": a.get("url"),
+            "date": a.get("date"),
+            "published_at": a.get("dateTimePub") or a.get("dateTime") or a.get("date"),
+            "uri": a.get("uri"),
+            "title": a.get("title"), "url": a.get("url"),
             "sentiment": a.get("sentiment"), "source": (a.get("source") or {}).get("title"),
             "concepts": [(c.get("label", {}).get("eng") or c.get("uri"), c.get("type"), c.get("score"))
                          for c in (a.get("concepts") or [])[:8]],

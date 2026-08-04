@@ -223,3 +223,31 @@ def news_articles(symbol: str, gte: str = "2024-06-01", to: str | None = None,
         pages += 1
     cache_write(ck, {"data": out})
     return out
+
+
+def market_news(gte: str, to: str | None = None, max_pages: int = 3,
+                cache_h: float = 0.08) -> list[dict]:
+    """Recent market-wide articles with provider publication timestamps.
+
+    Unlike ``ticker_news`` this intentionally omits the ticker filter.  It is
+    the discovery stream for events whose affected names are not known yet
+    (fund liquidations, portfolio transfers, policy and market-structure
+    shocks).  Cache is minutes, not days: a current-day news cache must not
+    freeze the desk's view for an entire session.
+    """
+    to = to or date.today().isoformat()
+    ck = f"massive_market_news_{gte}_{to}"
+    hit = cache_read(ck, max_age_h=cache_h)
+    if hit is not None and "data" in hit:
+        return hit["data"]
+    url = (f"{BASE}/v2/reference/news?published_utc.gte={gte}"
+           f"&published_utc.lte={to}T23:59:59Z&order=desc&limit=1000")
+    out: list[dict] = []
+    pages = 0
+    while url and pages < max_pages:
+        payload = _get(url)
+        out.extend(payload.get("results", []) or [])
+        url = payload.get("next_url")
+        pages += 1
+    cache_write(ck, {"data": out})
+    return out

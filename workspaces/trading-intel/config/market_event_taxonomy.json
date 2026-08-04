@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "queries": [
+    {"id": "forced_liquidation", "query": "forced liquidation stocks"},
+    {"id": "margin_call", "query": "margin call hedge fund"},
+    {"id": "portfolio_transfer", "query": "hedge fund portfolio sale"},
+    {"id": "hedge_fund", "query": "hedge fund"},
+    {"id": "portfolio_sale", "query": "portfolio sale"},
+    {"id": "fund_liquidation", "query": "fund liquidation"},
+    {"id": "block_sale", "query": "block sale equities"},
+    {"id": "deleveraging", "query": "deleveraging crowded trade"},
+    {"id": "fund_distress", "query": "fund losses forced selling"},
+    {"id": "market_dislocation", "query": "market selloff forced selling rebound"}
+  ],
+  "classes": {
+    "forced_flow": [
+      "forced liquidation", "forced selling", "margin call", "margin calls",
+      "liquidated", "deleveraging", "deleverage", "fire sale", "distressed sale",
+      "forced to sell", "forced to unwind", "collateral call"
+    ],
+    "portfolio_transfer": [
+      "portfolio sale", "sold its portfolio", "sold the bulk", "sold all of its",
+      "bought the portfolio", "bought its portfolio", "acquired the portfolio",
+      "buys the holdings", "bought the holdings", "acquires the holdings",
+      "acquired the holdings", "scoops up", "block sale"
+    ],
+    "crowding_unwind": [
+      "crowded trade", "crowding", "position unwind", "positions unwind",
+      "unwind in", "trade comes undone", "rush for the exits", "capitulation"
+    ],
+    "fund_distress": [
+      "heavy losses", "steep losses", "fresh capital",
+      "liquidity crisis", "fund distress", "crisis mode", "prime broker"
+    ],
+    "fear_dislocation": [
+      "panic selling", "capitulation", "market rout", "forced selling",
+      "rush for the exits", "disorderly unwind"
+    ],
+    "corporate_positive": [
+      "raises guidance", "raised guidance", "wins contract", "won contract",
+      "awarded a contract", "regulatory approval", "share buyback",
+      "accelerated share repurchase", "beats estimates", "beat estimates"
+    ],
+    "corporate_negative": [
+      "cuts guidance", "cut guidance", "misses estimates", "missed estimates",
+      "fraud investigation", "regulatory investigation", "product recall",
+      "credit downgrade", "trading halt", "accounting probe"
+    ]
+  },
+  "flow_phases": {
+    "transfer_complete": [
+      "sold all of its", "sold the bulk", "sold its portfolio", "bought the portfolio",
+      "bought its portfolio", "acquired the portfolio", "buys the holdings",
+      "bought the holdings", "acquires the holdings", "acquired the holdings",
+      "scoops up", "deal completed", "sale completed"
+    ],
+    "active_unwind": [
+      "forced liquidation", "forced selling", "margin call", "forced to sell",
+      "forced to unwind", "liquidating positions", "unwinding positions"
+    ],
+    "distress": [
+      "seeking fresh capital", "sought to raise fresh capital", "heavy losses",
+      "steep losses", "liquidity crisis", "crisis mode"
+    ]
+  },
+  "exclude_if_any": [
+    "class action", "investor alert", "investor news", "law firm",
+    "contact the firm", "contact the rosen", "contact bronstein",
+    "securities law violations", "if you have suffered losses",
+    "urges investors to act", "lead plaintiff"
+  ]
+}

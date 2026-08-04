@@ -403,6 +403,7 @@ def _episode_sizing_multiplier(direction: str, episode: dict | None) -> tuple[fl
 
 def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool) -> dict:
     hid = hyp_row["id"]
+    theme_id = hyp_row["theme_id"] if "theme_id" in hyp_row.keys() else None
     try:
         tickers = json.loads(hyp_row["tickers"] or "[]")
     except json.JSONDecodeError:
@@ -510,6 +511,7 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         "episode_signal": episode_flag,
         "horizon": horizon,
         "horizon_sizing_multiplier": horizon_mult,
+        "theme_id": theme_id,
         "return_band_pct": (
             None if pred is None else
             [pred["return_p10"], pred["return_p50"], pred["return_p90"]]
@@ -548,12 +550,12 @@ def author(conn, hyp_row, *, equity: float, cash_remaining: float, dry_run: bool
         "id, hypothesis_id, expression_candidate_id, created_by, created_at, "
         "action, tranche_type, ticker, vehicle, size, entry_price_target, stop_rule, "
         "time_horizon, triggered_by, edge_scorecard_json, "
-        "modeled_slippage_bps, state, direction) "
+        "modeled_slippage_bps, state, direction, theme_id) "
         "VALUES (?, ?, ?, 'trader', ?, 'open', 'starter', ?, 'direct_equity', ?, ?, ?, "
-        "?, 'trader_baseline_v1', ?, ?, 'proposed', ?)",
+        "?, 'trader_baseline_v1', ?, ?, 'proposed', ?, ?)",
         (intent_id, hid, ec_id, _now_iso(), ticker, float(qty), last, STOP_RULE,
          hyp_row["time_horizon"] or "position_1_4w",
-         json.dumps(edge_scorecard), MODELED_SLIPPAGE_BPS, direction),
+         json.dumps(edge_scorecard), MODELED_SLIPPAGE_BPS, direction, theme_id),
     )
     _audit(conn, entity_id=intent_id, action="author",
            before_state=None, after_state="proposed",
@@ -672,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     rows = conn.execute(
-        "SELECT id, tickers, state, quant_score, time_horizon, thesis_summary "
+        "SELECT id, tickers, state, quant_score, time_horizon, thesis_summary, theme_id "
         "FROM hypotheses WHERE state='ready' "
         "ORDER BY quant_score DESC NULLS LAST, scored_at DESC NULLS LAST"
     ).fetchall()

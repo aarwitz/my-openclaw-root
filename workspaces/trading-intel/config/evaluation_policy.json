@@ -44,7 +44,8 @@
       "price_floor": 5.0,
       "dollar_volume_floor": 5000000,
       "candidate_thresholds": "training-fold quintiles only",
-      "inference": "equal-weight entry-date clusters with horizon-aware Newey-West HAC",
+      "market_adjustment": "a candidate must survive both raw SPY-relative and trailing 252-session beta-adjusted SPY-relative net returns; beta requires 126 prior observations and is clipped to [0,3]",
+      "inference": "equal-weight entry-date clusters with horizon-aware Newey-West HAC; the per-cell p-value is the conservative maximum of raw-SPY and beta-adjusted tests",
       "within_fold_multiplicity": "BH FDR and Bonferroni over every eligible mechanism-horizon cell"
     },
     "aggregate_gate": {
@@ -59,12 +60,12 @@
     }
   },
   "forward_shadow_holdout": {
-    "start": "2026-08-03",
+    "start": "2026-08-04",
     "minimum_end": "2026-10-30",
     "minimum_sessions": 60,
     "status": "locked_future_window",
     "rules": [
-      "Freeze the evaluated mechanism set and thresholds before the first session.",
+      "Freeze the evaluated mechanism set and thresholds before the first session; 2026-08-03 was excluded because the beta-robust architecture and candidate set were not locked before its open.",
       "Do not tune from outcomes inside the window.",
       "Score every eligible signal, including no-trades and blocked trades.",
       "Report date-clustered cost-net alpha, calibration, drawdown, and turnover.",

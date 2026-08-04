@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path("/home/aaron/.openclaw")
 DEFAULT_SOURCE_DB = ROOT / "state/features.sqlite"
 DEFAULT_CACHE_DIR = ROOT / "state/market-data-cache"
-DEFAULT_OUTPUT = ROOT / "state/research-snapshots/purged_walkforward_v1"
+DEFAULT_OUTPUT = ROOT / "state/research-snapshots/purged_walkforward_v2"
 SCHEMA_VERSION = 1
 SQLITE_TRANSIENT_SUFFIXES = ("-wal", "-shm", "-journal")
 
@@ -60,6 +60,32 @@ def _copy_stable(source: Path, target: Path) -> None:
         raise RuntimeError(f"source changed while snapshotting: {source}")
     if _sha256_file(source) != _sha256_file(target):
         raise RuntimeError(f"snapshot copy digest mismatch: {source}")
+
+
+def _validate_replay_feature_reads(
+    conn: sqlite3.Connection,
+    universe: list[str],
+) -> None:
+    """Exercise the engine's exact indexed query before freezing a snapshot.
+
+    ``PRAGMA quick_check`` and aggregate counts can miss a damaged secondary
+    index path. The 2026-08-03 source DB returned counts for PEG but raised
+    ``database disk image is malformed`` only for the engine's ordered row
+    read. A snapshot with that defect is reproducible but incomplete, so new
+    snapshots fail before publication rather than excluding the name later.
+    """
+    for ticker in universe:
+        try:
+            for _row in conn.execute(
+                "SELECT name,as_of,value FROM features "
+                "WHERE ticker=? ORDER BY as_of",
+                (ticker,),
+            ):
+                pass
+        except sqlite3.DatabaseError as exc:
+            raise RuntimeError(
+                f"feature DB replay query failed for {ticker}: {exc}"
+            ) from exc
 
 
 def _write_manifest(snapshot_dir: Path, *, missing_symbols: list[str]) -> dict:
@@ -165,6 +191,7 @@ def create_snapshot(
                     "SELECT DISTINCT ticker FROM features WHERE source='price'"
                 )
             )
+            _validate_replay_feature_reads(frozen, universe)
         finally:
             frozen.close()
 

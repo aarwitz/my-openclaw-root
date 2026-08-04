@@ -2,18 +2,19 @@
 source "/home/aaron/.openclaw/scripts/lib/require-wrapper.sh"
 set -uo pipefail
 
-# learning-rediscovery.sh — deterministic, ZERO-CODEX weekly re-discovery of the
-# world-model research set over the FULL universe, then a READ-ONLY live-
-# integration eligibility check. Development/reused holdouts may generate
-# research candidates but never enter the live mechanism ledger automatically.
-# Replaces the gateway agentTurn job. No LLM/Codex. Paired host crontab entry:
-# `18 2 * * 0` (Sun 02:18 ET).
+# learning-rediscovery.sh — deterministic, ZERO-CODEX weekly integrity check of
+# the canonical immutable historical replay. It deliberately does not rerun the
+# reused single split, rewrite discovered/calibrated tables, or execute the old
+# promote -> correlation -> regime chain. Candidate discovery is an offline,
+# fingerprinted walk-forward run; live promotion remains a separate human gate.
+# Paired host crontab entry: `18 2 * * 0` (Sun 02:18 ET).
 
 OC="$HOME/.openclaw"
 TI="$OC/workspaces/trading-intel/scripts"
 PY="/usr/bin/python3"                 # pinned: has pandas/numpy/sklearn for cron
 LOG="$OC/logs/learning-rediscovery.log"
-FEAT="$OC/state/features.sqlite"
+REPORT="$OC/state/historical-validation/purged_walkforward_v2.json"
+SNAPSHOT="$OC/state/research-snapshots/purged_walkforward_v2"
 TG_ACCOUNT="druck"; TG_TARGET="6043080629"
 OPENCLAW_BIN="$("$OC/scripts/resolve-openclaw-bin.sh" 2>/dev/null || command -v openclaw || echo openclaw)"
 
@@ -32,24 +33,21 @@ mkdir -p "$(dirname "$LOG")"
 log "===== rediscovery start (pid $$) ====="
 
 FAILED=""
-run "backtest ALL" "$PY" "$TI/mechanism_backtest.py" --universe ALL --test-start 2020-06-18 \
- && run "promote"      "$PY" "$TI/promote_mechanisms.py" \
- && run "correlation"  "$PY" "$TI/mechanism_correlation.py" \
- && run "regime"       "$PY" "$TI/mechanism_regime.py" \
- && run "eligibility"  "$PY" "$TI/integrate_calibrated.py" --check-only
+run "frozen historical evidence gate" "$PY" "$TI/historical_report_check.py" \
+  --report "$REPORT" --snapshot-dir "$SNAPSHOT"
 rc=$?
 
-surv="$("$PY" - "$FEAT" <<'PYEOF'
-import sqlite3,sys
-try: print(sqlite3.connect(sys.argv[1]).execute("select count(*) from calibrated_mechanisms").fetchone()[0])
+surv="$("$PY" - "$REPORT" <<'PYEOF'
+import json,sys
+try: print(len(json.load(open(sys.argv[1]))["stable_development_candidates"]))
 except Exception: print("?")
 PYEOF
 )"
-log "===== rediscovery end rc=$rc calibrated=$surv ====="
+log "===== frozen evidence check end rc=$rc stable_development_candidates=$surv ====="
 
 if [[ $rc -ne 0 ]]; then
-  tg notify "⚠️ Weekly mechanism rediscovery FAILED at: ${FAILED:-unknown} (rc=$rc). Log: $LOG"
+  tg notify "⚠️ Weekly frozen historical evidence check FAILED at: ${FAILED:-unknown} (rc=$rc). No research or live tables were changed. Log: $LOG"
   exit 1
 fi
-tg silent "🔬 Weekly rediscovery done — $surv development survivor(s); live eligibility checked, live mechanism ledger unchanged."
+tg silent "🔬 Weekly frozen replay verified — $surv historical development candidate(s); promotion authority remains none and live state was untouched."
 exit 0

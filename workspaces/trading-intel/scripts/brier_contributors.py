@@ -141,6 +141,77 @@ def dimension_breakdown(rows: list[dict]) -> dict[str, list[dict]]:
     return out
 
 
+def valuation_confidence_discriminator(conn: sqlite3.Connection, rows: list[dict],
+                                       threshold: float = 0.5) -> dict:
+    """Discover a forward-available error separator without rewriting history.
+
+    The only eligible valuation is the newest row whose ``as_of`` is no later
+    than the prediction timestamp. This is retrospective feature discovery,
+    not an actual Brier improvement; it must be frozen and validated forward
+    before it can affect prediction math or sizing.
+    """
+    buckets = {
+        "valuation_confidence_gt_0_5": [],
+        "valuation_confidence_le_0_5": [],
+    }
+    missing = 0
+    for row in rows:
+        try:
+            tickers = json.loads(row.get("tickers") or "[]")
+        except (ValueError, TypeError):
+            tickers = []
+        if not tickers:
+            missing += 1
+            continue
+        try:
+            valuation = conn.execute(
+                "SELECT confidence,as_of FROM valuations WHERE UPPER(ticker)=UPPER(?) "
+                "AND confidence IS NOT NULL AND as_of<=? ORDER BY as_of DESC LIMIT 1",
+                (str(tickers[0]), row["predicted_at"]),
+            ).fetchone()
+        except sqlite3.Error:
+            valuation = None
+        if not valuation:
+            missing += 1
+            continue
+        key = (
+            "valuation_confidence_gt_0_5"
+            if float(valuation["confidence"]) > threshold
+            else "valuation_confidence_le_0_5"
+        )
+        buckets[key].append(float(row["brier_component"]))
+    summary = {
+        key: {
+            "n": len(values),
+            "mean_brier": None if not values else round(sum(values) / len(values), 6),
+        }
+        for key, values in buckets.items()
+    }
+    lower = summary["valuation_confidence_gt_0_5"]
+    higher = summary["valuation_confidence_le_0_5"]
+    gap = (
+        None if lower["mean_brier"] is None or higher["mean_brier"] is None
+        else round(higher["mean_brier"] - lower["mean_brier"], 6)
+    )
+    return {
+        "feature": "valuation_confidence",
+        "threshold": threshold,
+        "availability_rule": "latest valuations.as_of <= predictions.predicted_at",
+        "source_semantics": "point_in_time_feature_retrospective_discovery_requires_forward_validation",
+        "buckets": summary,
+        "high_minus_low_error_gap": gap,
+        "covered": sum(item["n"] for item in summary.values()),
+        "missing": missing,
+        "candidate_discriminates": bool(
+            gap is not None and gap > 0
+            and lower["n"] >= 20 and higher["n"] >= 20
+        ),
+        "actual_improvement_claimed": False,
+        "resolved_history_mutation_allowed": False,
+        "next_action": "freeze this feature in a prospective shadow protocol before any scoring or sizing change",
+    }
+
+
 def replay_mean_brier(
     conn: sqlite3.Connection,
     rows: list[dict],
@@ -306,6 +377,7 @@ def build_report(conn: sqlite3.Connection, days: int) -> dict:
         "worst_linked": worst_linked,
         "selected_contributor": selected,
         "selection_reason": selection_reason,
+        "forward_discriminator_candidate": valuation_confidence_discriminator(conn, rows),
         "replay": {
             "semantics": (
                 "retrospective_current_policy_counterfactual; uses today's active "

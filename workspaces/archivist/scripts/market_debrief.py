@@ -51,6 +51,8 @@ except Exception:  # pragma: no cover - connectors optional in dry contexts
     def daily_bars(*_a, **_k):  # type: ignore
         raise ConnectorError("connectors unavailable")
 
+import theme_model as tm  # noqa: E402
+
 EXPERIMENT_DEFAULT = "world_model_v1"
 INDEX_PROXIES = ("SPY", "QQQ")
 VALID_OUTCOMES = ("hit", "miss", "partial")
@@ -207,6 +209,8 @@ def main(argv=None) -> int:
                         "'{\"NVDA\":-5.1,\"AVGO\":-4.2}'")
     p.add_argument("--mechanisms", default=None,
                    help="comma list id:outcome[:weight] (outcome hit|miss|partial)")
+    p.add_argument("--themes", default=None,
+                   help="comma list theme-id[:support|contradict|mixed|context]")
     p.add_argument("--alignment", default=None,
                    choices=("benefited", "suffered", "neutral", "flat"))
     p.add_argument("--sources", default=None, help="JSON array of source URLs/refs")
@@ -221,6 +225,7 @@ def main(argv=None) -> int:
 
     try:
         mechs = _parse_mechanisms(args.mechanisms)
+        themes = tm.parse_theme_tags(args.themes)
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return EXIT_FAIL_LOUD
@@ -279,6 +284,7 @@ def main(argv=None) -> int:
             "exposure_alignment": alignment, "regime": regime,
             "attributed_mechanisms": attributed,
             "observations_would_emit": len(mechs),
+            "theme_observations_would_emit": len(themes),
         }, indent=2))
         return EXIT_OK
 
@@ -310,6 +316,18 @@ def main(argv=None) -> int:
         )
         obs_emitted += 1
 
+    theme_obs_emitted = 0
+    for theme_id, outcome in themes:
+        emitted = tm.append_observation(
+            conn, theme_id=theme_id, source_type="market_event",
+            source_id=event_id, outcome=outcome, as_of=args.date,
+            evidence={"event_id": event_id, "event_date": args.date,
+                      "headline": args.headline,
+                      "observed_moves": observed_moves},
+            notes=f"market_debrief {args.date}: {args.headline[:180]}",
+        )
+        theme_obs_emitted += int(emitted)
+
     aid = "AUDIT-" + _now_iso().replace(":", "").replace("-", "") + "-" + event_id[:20]
     conn.execute(
         "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, "
@@ -325,6 +343,7 @@ def main(argv=None) -> int:
         "observed_moves": observed_moves, "our_pnl_that_day": day_pl,
         "exposure_alignment": alignment, "regime": regime,
         "attributed_mechanisms": attributed, "observations_emitted": obs_emitted,
+        "theme_observations_emitted": theme_obs_emitted,
     }, indent=2))
     return EXIT_OK
 

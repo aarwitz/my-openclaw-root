@@ -82,6 +82,20 @@ def _config_contract() -> dict:
         jobs = json.loads((ROOT / "cron/jobs.json").read_text())
         if not isinstance(jobs.get("jobs"), list):
             errors.append("cron/jobs.json has no jobs list")
+        else:
+            for job in jobs["jobs"]:
+                payload = job.get("payload") or {}
+                if not job.get("enabled") or payload.get("kind") != "agentTurn":
+                    continue
+                name = job.get("name") or job.get("id") or "unnamed"
+                if job.get("sessionTarget") != "isolated":
+                    errors.append(
+                        f"{name}: agent cron must use a fresh isolated session"
+                    )
+                if job.get("sessionKey"):
+                    errors.append(
+                        f"{name}: isolated cron must not retain a chat sessionKey"
+                    )
     except (OSError, ValueError) as exc:
         errors.append(str(exc))
     return {
@@ -146,6 +160,11 @@ def main() -> int:
     shell_files = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "scripts").glob("*.sh"))
     checks = [
         _config_contract(),
+        _run(
+            "codex-oauth-fleet",
+            [py, "scripts/enforce-codex-oauth.py"],
+            json_ok=True,
+        ),
         _test_discovery_contract(),
         _run(
             "python-syntax",

@@ -48,6 +48,7 @@ OPENCLAW="${OPENCLAW:-$HOME/.openclaw}"
 LIDI_REPO="${TRADER_INTEL_REPO:-${LIDI:-$HOME/repos/lidi-solutions}}"
 SNAPSHOT_DIR="${TRADER_INTEL_RUNTIME_DIR:-$OPENCLAW/state/trader-intel-snapshot}"
 APP_DATA_JSON="$SNAPSHOT_DIR/data.json"
+CANONICAL_STATE_JSON="$SNAPSHOT_DIR/canonical-state.json"
 SKIP_EXECUTE=0
 SKIP_SNAPSHOT=0
 PUBLISH=0
@@ -155,6 +156,11 @@ try:
 except Exception:
     print('1')" 2>/dev/null)
 fi
+
+# Durable narrative context is rendered deterministically before any new
+# hypothesis origination.  It is research memory only and cannot authorize an
+# intent or alter a risk decision.
+run_step "theme_context" 20 python3 workspaces/trading-intel/scripts/theme_context.py --write
 [[ "$TRADING_DAY" == "0" ]] || TRADING_DAY=1
 printf ',\n  "market_today": {"trading_day": %s}' "$([[ "$TRADING_DAY" == "1" ]] && echo true || echo false)"
 
@@ -213,7 +219,10 @@ else
   printf ',\n  "reconcile_preflight": {"rc": 0, "skipped": "non-trading day"}'
 fi
 if [[ "$SKIP_EXECUTE" -eq 0 && "$TRADING_DAY" == "1" && "${#EXECUTION_BLOCKERS[@]}" -eq 0 ]]; then
-  run_step "execute_intent" 60 python3 workspaces/executor/scripts/execute_intent.py
+  # Bulk risk-reduction passes can legitimately contain dozens of legacy exits.
+  # The executor is idempotent, but a 60s orchestration timeout used to stop
+  # after roughly ten quote/fill cycles and leave the remainder approved.
+  run_step "execute_intent" 300 python3 workspaces/executor/scripts/execute_intent.py --max 48
 else
   printf ',\n  "execute_intent": {"rc": 0, "skipped": true, "reason": %s, "blockers": %s}' \
     "$(if [[ "${#EXECUTION_BLOCKERS[@]}" -gt 0 ]]; then printf '%s' 'critical pre-execution dependency failed'; elif [[ "$TRADING_DAY" != "1" ]]; then printf '%s' 'non-trading day'; else printf '%s' 'requested'; fi | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
@@ -266,19 +275,21 @@ if [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
   if [[ "$SCENARIO" -eq 0 ]]; then
     mkdir -p "$SNAPSHOT_DIR"
   fi
-  run_step "snapshot" 60 python3 workspaces/developer/scripts/snapshot_builder.py --out "$APP_DATA_JSON"
-  # Runtime jobs write only ignored state. Cron must never mutate the tracked
-  # website checkout: that recreated a dirty repo every ten minutes, blocked
-  # launches, and let stale generated files hitchhike in code commits.
+  # The Python builder owns canonical ledger/safety state. The Node projector
+  # consumes that immutable input and owns the public v4 presentation contract.
+  # They never overwrite the same path: a partial projection cannot destroy the
+  # canonical input, and the final file is replaced atomically only on success.
+  run_step "snapshot_state" 60 python3 workspaces/developer/scripts/snapshot_builder.py --out "$CANONICAL_STATE_JSON"
   if command -v node >/dev/null 2>&1 && [[ -f "$LIDI_REPO/scripts/snapshot-trader-intel.mjs" ]]; then
-    run_step "snapshot_overlay" 60 env \
+    run_step "snapshot_project" 60 env \
       TRADER_INTEL_OUT_DIR="$SNAPSHOT_DIR" \
       TRADER_INTEL_SKIP_DIST=1 \
+      TRADER_INTEL_BASE_FILE="$CANONICAL_STATE_JSON" \
       node "$LIDI_REPO/scripts/snapshot-trader-intel.mjs"
   else
     PIPELINE_RC=1
-    PIPELINE_FAILURES+=("snapshot_overlay:missing")
-    printf ',\n  "snapshot_overlay": {"rc": 2, "out": "node or snapshot overlay missing"}'
+    PIPELINE_FAILURES+=("snapshot_project:missing")
+    printf ',\n  "snapshot_project": {"rc": 2, "out": "node or snapshot projector missing"}'
   fi
   printf ',\n  "snapshot_path": %s' "$(printf '%s' "$APP_DATA_JSON" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')"
 fi

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cutover_at": "2026-08-03T18:30:00Z",
+  "cases": [
+    {
+      "id": "situational-awareness-citadel-portfolio-transfer-20260730",
+      "known_at": "2026-07-30T16:18:39Z",
+      "deadline_minutes": 60,
+      "terms_any": ["situational awareness", "aschenbrenner"],
+      "terms_all": ["citadel"],
+      "required_classes_any": ["portfolio_transfer", "fund_distress"],
+      "source_refs": ["https://www.axios.com/2026/07/30/ai-hedge-fund-situational-awareness-citadel"],
+      "pre_cutover_expected_miss": true,
+      "lesson": "A market-wide fund-flow event was invisible to the ticker-only catalyst scan."
+    }
+  ]
+}

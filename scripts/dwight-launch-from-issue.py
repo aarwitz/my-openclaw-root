@@ -178,8 +178,9 @@ def prepare_launch_repo(
 ) -> tuple[str, Optional[str], Optional[str]]:
     """Return (launch_repo, original_branch, isolated_worktree).
 
-    A clean base checkout is used directly. A dirty base checkout is preserved
-    untouched and the coding task runs in a new issue-branch worktree.
+    The live checkout is never used for coding, even when clean. Every task runs
+    in a dedicated issue-branch worktree so the fleet stays on its base branch
+    for the entire launch.
     """
     original_branch = git_current_branch(repo)
     expected = expected_base_branch(repo)
@@ -198,8 +199,6 @@ def prepare_launch_repo(
             f"{(dirty.stderr or dirty.stdout).strip()[:300]}"
         )
     dirt = dirty.stdout.strip()
-    if not dirt:
-        return repo, original_branch, None
 
     raw_branch = get_first_nonempty(
         issue, ["branch", "branch_name", "branchName", "git_branch"]
@@ -213,6 +212,12 @@ def prepare_launch_repo(
     branch = re.sub(r"[^A-Za-z0-9._/-]+", "-", raw_branch).strip("/-")
     parent = Path("/tmp/openclaw-coding-worktrees")
     parent.mkdir(parents=True, exist_ok=True)
+    # Interrupted processes can delete a /tmp worktree while leaving git's
+    # administrative registration behind. Prune before testing branch checkout.
+    subprocess.run(
+        ["git", "-C", repo, "worktree", "prune"],
+        capture_output=True, text=True, check=False,
+    )
     wt_path = parent / f"{Path(repo).name}-{task_id}-{os.getpid()}"
     branch_exists = subprocess.run(
         ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
@@ -228,10 +233,8 @@ def prepare_launch_repo(
             "could not create isolated worktree for dirty live repo: "
             f"{(added.stderr or added.stdout).strip()[:300]}"
         )
-    print(
-        f"Live repo has {len(dirt.splitlines())} dirty tracked file(s); "
-        f"isolated launch in {wt_path} on {branch}."
-    )
+    state = f"{len(dirt.splitlines())} dirty tracked file(s)" if dirt else "clean"
+    print(f"Live repo is {state}; isolated launch in {wt_path} on {branch}.")
     return str(wt_path), original_branch, str(wt_path)
 
 
@@ -1054,11 +1057,18 @@ def run(argv: List[str]) -> int:
                     print(f"WARNING: could not release launch claim: {release_exc}", file=sys.stderr)
 
         if isolated_worktree:
-            wt_dirty = subprocess.run(
-                ["git", "-C", isolated_worktree, "status", "--porcelain"],
-                capture_output=True, text=True, check=False,
-            ).stdout.strip()
-            if completed.returncode == 0 and not wt_dirty:
+            if not Path(isolated_worktree).exists():
+                subprocess.run(
+                    ["git", "-C", repo, "worktree", "prune"],
+                    capture_output=True, text=True, check=False,
+                )
+                print(f"Pruned vanished isolated worktree registration {isolated_worktree}")
+            else:
+                wt_dirty = subprocess.run(
+                    ["git", "-C", isolated_worktree, "status", "--porcelain"],
+                    capture_output=True, text=True, check=False,
+                ).stdout.strip()
+            if Path(isolated_worktree).exists() and completed.returncode == 0 and not wt_dirty:
                 removed = subprocess.run(
                     ["git", "-C", repo, "worktree", "remove", isolated_worktree],
                     capture_output=True, text=True, check=False,
@@ -1071,7 +1081,7 @@ def run(argv: List[str]) -> int:
                         f"{(removed.stderr or '').strip()[:200]}",
                         file=sys.stderr,
                     )
-            else:
+            elif Path(isolated_worktree).exists():
                 print(
                     f"Preserved isolated worktree for recovery: {isolated_worktree} "
                     f"(rc={completed.returncode}, dirty_files={len(wt_dirty.splitlines()) if wt_dirty else 0})"

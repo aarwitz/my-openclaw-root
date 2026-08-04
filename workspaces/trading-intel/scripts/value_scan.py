@@ -92,6 +92,53 @@ def _pt_rev(feat_conn, ticker: str) -> float | None:
         return None
 
 
+def _live_hypotheses(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return every ticker protected by the canonical live-thesis trigger."""
+    rows = conn.execute(
+        "SELECT h.id,UPPER(CAST(j.value AS TEXT)) ticker FROM hypotheses h "
+        "JOIN json_each(h.tickers) j "
+        "WHERE h.state IN ('raw','scored','challenged','ready','active')"
+    ).fetchall()
+    return {str(row[1]): str(row[0]) for row in rows if str(row[1]).strip()}
+
+
+def _upsert_evidence(
+    conn: sqlite3.Connection, hypothesis_id: str, indicator: str, value: str,
+    *, source: str = "valuation.py universe",
+) -> None:
+    """Refresh one named evidence fact without accumulating daily duplicates."""
+    existing = conn.execute(
+        "SELECT id FROM hypothesis_evidence WHERE hypothesis_id=? AND indicator=? "
+        "AND source=? ORDER BY retrieved_at DESC LIMIT 1",
+        (hypothesis_id, indicator, source),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE hypothesis_evidence SET value=?,retrieved_at=?,signal_type='fundamental' "
+            "WHERE id=?",
+            (value, _now(), existing[0]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO hypothesis_evidence (id, hypothesis_id, indicator, value, source, "
+            "retrieved_at, signal_type) VALUES (?, ?, ?, ?, ?, ?, 'fundamental')",
+            (f"ev-{uuid.uuid4().hex[:12]}", hypothesis_id, indicator, value, source, _now()),
+        )
+
+
+def _ensure_falsifier(conn: sqlite3.Connection, hypothesis_id: str, condition: str) -> None:
+    if conn.execute(
+        "SELECT 1 FROM falsifier_signals WHERE hypothesis_id=? AND condition=? LIMIT 1",
+        (hypothesis_id, condition),
+    ).fetchone():
+        return
+    conn.execute(
+        "INSERT INTO falsifier_signals (id, hypothesis_id, condition, monitor_frequency, "
+        "current_status, updated_at, source_ref) VALUES (?, ?, ?, 'daily', 'monitoring', ?, 'value_scan')",
+        (f"fals-{uuid.uuid4().hex[:12]}", hypothesis_id, condition, _now()),
+    )
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -114,6 +161,7 @@ def main(argv=None) -> int:
     recent = {t.upper() for row in conn.execute(
         f"SELECT tickers FROM hypotheses WHERE created_at >= datetime('now','-{COOLDOWN_DAYS} days')")
         for t in json.loads(row[0] or "[]")}
+    live = _live_hypotheses(conn)
 
     cands = conn.execute(
         "SELECT ticker, price, fair_value, margin_of_safety, confidence, zone, pe, p_fcf, "
@@ -122,12 +170,12 @@ def main(argv=None) -> int:
         "AND margin_of_safety >= ? AND confidence >= ? "
         "ORDER BY margin_of_safety * confidence DESC LIMIT 40", (MIN_MOS, MIN_CONF)).fetchall()
 
-    out, authored = [], 0
+    out, authored, processed = [], 0, 0
     for v in cands:
-        if authored >= a.max:
+        if processed >= a.max:
             break
         t = v["ticker"].upper()
-        if t in busy or t in recent:
+        if t in busy or (t in recent and t not in live):
             continue
         sma = _sma50_state(feat, t)
         if not sma:
@@ -152,40 +200,40 @@ def main(argv=None) -> int:
                   f"{(v['implied_growth'] or 0)*100:.1f}% growth vs {(v['growth_assumed'] or 0)*100:.1f}% assumed). "
                   f"Inflection: {'; '.join(inflection_bits)}. "
                   f"Mechanisms: {MECHANISMS[0]['name']}; {mech_names}.")
+        existing_hid = live.get(t)
         rec = {"ticker": t, "mos": round(v["margin_of_safety"], 2), "conf": round(v["confidence"], 2),
-               "inflection": inflection_bits, "authored": not a.dry_run}
+               "inflection": inflection_bits, "authored": bool(not a.dry_run and not existing_hid),
+               "updated_hypothesis": existing_hid}
         out.append(rec)
-        authored += 1
+        processed += 1
+        if not existing_hid:
+            authored += 1
         if a.dry_run:
             continue
 
-        hid = f"hyp-val-{uuid.uuid4().hex[:16]}"
-        conn.execute(
-            "INSERT INTO hypotheses (id, created_at, created_by, tickers, thesis_summary, state, "
-            "confidence, time_horizon) VALUES (?, ?, 'quant', ?, ?, 'raw', ?, 'trend_1_3m')",
-            (hid, _now(), json.dumps([t]), thesis,
-             "medium" if v["confidence"] >= 0.3 else "low"))
+        hid = existing_hid or f"hyp-val-{uuid.uuid4().hex[:16]}"
+        if not existing_hid:
+            conn.execute(
+                "INSERT INTO hypotheses (id, created_at, created_by, tickers, thesis_summary, state, "
+                "confidence, time_horizon) VALUES (?, ?, 'quant', ?, ?, 'raw', ?, 'trend_1_3m')",
+                (hid, _now(), json.dumps([t]), thesis,
+                 "medium" if v["confidence"] >= 0.3 else "low"))
         ev = [("margin_of_safety", f"{v['margin_of_safety']:.3f}"),
               ("fair_value_blend", f"{v['fair_value']:.2f}"),
               ("pe_ttm", str(v["pe"])), ("p_fcf", str(v["p_fcf"])),
               ("implied_vs_assumed_growth", f"{v['implied_growth']}/{v['growth_assumed']}")]
         for ind, val in ev:
-            conn.execute(
-                "INSERT INTO hypothesis_evidence (id, hypothesis_id, indicator, value, source, "
-                "retrieved_at, signal_type) VALUES (?, ?, ?, ?, 'valuation.py universe', ?, 'fundamental')",
-                (f"ev-{uuid.uuid4().hex[:12]}", hid, ind, val, _now()))
+            _upsert_evidence(conn, hid, ind, val)
         for cond in (f"latest valuations row for {t} shows margin_of_safety < 0.05 (gap closed or thesis wrong)",
                      f"{t} closes below its 50d SMA by >5% (inflection failed)"):
-            conn.execute(
-                "INSERT INTO falsifier_signals (id, hypothesis_id, condition, monitor_frequency, "
-                "current_status, updated_at, source_ref) VALUES (?, ?, ?, 'daily', 'monitoring', ?, 'value_scan')",
-                (f"fals-{uuid.uuid4().hex[:12]}", hid, cond, _now()))
+            _ensure_falsifier(conn, hid, cond)
         conn.execute(
             "INSERT INTO audits (id, timestamp, actor, entity_type, entity_id, action, before_state, "
             "after_state, rationale_concise) VALUES (?, ?, 'quant', 'hypothesis', ?, 'author_value_scan', "
             "NULL, 'raw', ?)",
             (f"AUDIT-{_now().replace(':','').replace('-','')}-{uuid.uuid4().hex[:8]}", _now(), hid,
-             f"value_scan: {t} mos={v['margin_of_safety']:.2f} conf={v['confidence']:.2f} "
+             f"value_scan {'refreshed existing live thesis' if existing_hid else 'authored'}: "
+             f"{t} mos={v['margin_of_safety']:.2f} conf={v['confidence']:.2f} "
              f"inflection={'trend' if inflect_trend else ''}{'+analyst' if inflect_analyst else ''}"))
         conn.commit()
 

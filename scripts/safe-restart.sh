@@ -18,7 +18,7 @@ set -euo pipefail
 #   7. If tokens are broken, restores from backup and does one retry
 #   8. Re-enables cron jobs
 #
-# Usage: safe-restart.sh [--force] [--skip-cron]
+# Usage: safe-restart.sh [--force] [--skip-cron] [--restore-cron-only]
 #
 # PREFER hot reload (openclaw config set) for config changes — no restart needed.
 # Only use this script when a restart is truly necessary (e.g., binary update).
@@ -33,7 +33,8 @@ CRON_ENABLED_MANIFEST="${CRON_JOBS}.pre-restart-enabled-ids"
 CRON_SAFETY_BAK="${CRON_JOBS}.pre-restart-bak"
 SAFE_RESTART_LOG="${HOME}/.openclaw/logs/safe-restart.log"
 OPENCLAW_BIN="${OPENCLAW_BIN:-}"
-MAX_WAIT=30  # seconds to wait for gateway to stop
+STOP_WAIT=30   # seconds to wait for the old gateway to stop
+START_WAIT=120 # model/plugin startup can legitimately exceed 30 seconds
 RUN_ID="$(date -u +"%Y%m%dT%H%M%SZ")-$$"
 REASON="manual"
 ROOT="${HOME}/.openclaw"
@@ -43,10 +44,13 @@ DOCKER_CONTAINER="openclaw-gateway"
 
 force=false
 skip_cron=false
+restore_cron_only=false
+CRON_RESTORE_OK=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) force=true; shift ;;
     --skip-cron) skip_cron=true; shift ;;
+    --restore-cron-only) restore_cron_only=true; shift ;;
     --reason)
       REASON="${2:-manual}"
       shift 2
@@ -89,7 +93,9 @@ gateway_healthy() {
     local health
     status="$(docker inspect --format '{{.State.Status}}' "${DOCKER_CONTAINER}" 2>/dev/null || true)"
     health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${DOCKER_CONTAINER}" 2>/dev/null || true)"
-    [[ "${status}" == "running" ]] && [[ "${health}" == "healthy" || "${health}" == "none" ]]
+    [[ "${status}" == "running" ]] \
+      && [[ "${health}" == "healthy" || "${health}" == "none" ]] \
+      && "${OPENCLAW_BIN}" health &>/dev/null
   else
     "${OPENCLAW_BIN}" health &>/dev/null
   fi
@@ -98,19 +104,22 @@ gateway_healthy() {
 restart_gateway() {
   if [[ "${runtime_mode}" == "docker" ]]; then
     docker compose -f "${COMPOSE_FILE}" stop "${DOCKER_SERVICE}" || true
-    docker compose -f "${COMPOSE_FILE}" up -d "${DOCKER_SERVICE}"
+    # A plain restart retains the old container environment. Recreate so a
+    # removed credential (notably the forbidden OPENAI_API_KEY fallback) is
+    # actually absent from the running process.
+    docker compose -f "${COMPOSE_FILE}" up -d --force-recreate "${DOCKER_SERVICE}"
   else
     "${OPENCLAW_BIN}" gateway stop 2>&1 || true
 
     # Wait for the process to actually exit
     local waited=0
-    while "${OPENCLAW_BIN}" health &>/dev/null 2>&1 && [[ ${waited} -lt ${MAX_WAIT} ]]; do
+    while "${OPENCLAW_BIN}" health &>/dev/null 2>&1 && [[ ${waited} -lt ${STOP_WAIT} ]]; do
       sleep 1
       waited=$((waited + 1))
     done
 
     if "${OPENCLAW_BIN}" health &>/dev/null 2>&1; then
-      warn "Gateway still responding after ${MAX_WAIT}s. Forcing stop..."
+      warn "Gateway still responding after ${STOP_WAIT}s. Forcing stop..."
       systemctl --user stop openclaw-gateway 2>/dev/null || true
       sleep 2
     fi
@@ -122,13 +131,20 @@ restart_gateway() {
 }
 
 wait_for_gateway_healthy() {
-  local waited=0
-  while [[ ${waited} -lt ${MAX_WAIT} ]]; do
+  local deadline=$((SECONDS + START_WAIT))
+  local consecutive=0
+  while (( SECONDS < deadline )); do
     if gateway_healthy; then
-      return 0
+      consecutive=$((consecutive + 1))
+      # Avoid accepting a single lucky probe while plugins/scheduler are still
+      # converging after container recreation.
+      if (( consecutive >= 2 )); then
+        return 0
+      fi
+    else
+      consecutive=0
     fi
     sleep 1
-    waited=$((waited + 1))
   done
   return 1
 }
@@ -153,7 +169,7 @@ check_models_auth() {
 
 # --- Pre-flight ---
 log "Starting safe gateway restart..."
-log "Run context: force=${force} skip_cron=${skip_cron}"
+log "Run context: force=${force} skip_cron=${skip_cron} restore_cron_only=${restore_cron_only}"
 
 if [[ -z "$OPENCLAW_BIN" ]]; then
   OPENCLAW_BIN="$("$SCRIPTS_DIR/resolve-openclaw-bin.sh")" || fail "openclaw CLI not found via resolver"
@@ -181,8 +197,12 @@ if ! gateway_healthy; then
 fi
 
 # --- Step 1: Backup tokens ---
-log "Step 1/6: Backing up auth tokens..."
-bash "$SCRIPTS_DIR/token-backup.sh" --label "pre-restart"
+if [[ "$restore_cron_only" == "false" ]]; then
+  log "Step 1/6: Backing up auth tokens..."
+  /usr/bin/python3 "${SCRIPTS_DIR}/enforce-codex-oauth.py" --apply \
+    || fail "Codex OAuth-only fleet enforcement failed before token backup"
+  bash "$SCRIPTS_DIR/token-backup.sh" --label "pre-restart"
+fi
 
 # --- Step 2: Disable cron jobs (prevent concurrent token use) ---
 # Restore re-applies the manifest's enabled job-IDs onto the CURRENT job
@@ -206,7 +226,7 @@ restore_cron_jobs() {
     # (incidents 2026-06-11, 2026-06-20, 2026-06-24). Re-arm the enabled set
     # THROUGH the gateway so the live registry matches the file.
     if gateway_healthy; then
-      local _id _armed=0 _failed=0
+      local _id _armed=0 _failed=0 _status_json="" _next_wake=""
       while IFS= read -r _id; do
         [[ -n "$_id" ]] || continue
         if "${OPENCLAW_BIN}" cron enable "$_id" >/dev/null 2>&1; then
@@ -221,19 +241,37 @@ restore_cron_jobs() {
       else
         log "  Re-armed ${_armed} cron job(s) in the live gateway scheduler."
       fi
-      if "${OPENCLAW_BIN}" cron status 2>/dev/null | jq -e '.nextWakeAtMs == null' >/dev/null 2>&1; then
-        warn "  Scheduler still reports nextWakeAtMs=null after re-arm — verify: openclaw cron status"
+      if _status_json="$("${OPENCLAW_BIN}" cron status 2>/dev/null)"; then
+        _next_wake="$(printf '%s\n' "${_status_json}" | jq -r '.nextWakeAtMs // empty' 2>/dev/null || true)"
       fi
-      rm -f "$CRON_ENABLED_MANIFEST" "$CRON_SAFETY_BAK"
+      if (( _failed == 0 )) && [[ -n "${_next_wake}" ]]; then
+        log "  Scheduler wake verified (${_next_wake}); restart manifest retired."
+        rm -f "$CRON_ENABLED_MANIFEST" "$CRON_SAFETY_BAK"
+        CRON_RESTORE_OK=true
+      else
+        CRON_RESTORE_OK=false
+        warn "  Scheduler restore is not verified (failed=${_failed}, nextWakeAtMs=${_next_wake:-null}); recovery manifests retained."
+      fi
     else
+      CRON_RESTORE_OK=false
       warn "  Gateway not healthy during cron restore; live scheduler NOT re-armed (jobs.json is correct on disk)."
       warn "  Recover once the gateway is up: while read id; do openclaw cron enable \"\$id\"; done < ${CRON_ENABLED_MANIFEST}"
     fi
   else
     rm -f "$CRON_JOBS.tmp"
+    CRON_RESTORE_OK=false
     warn "Cron restore FAILED; kept manifest ($CRON_ENABLED_MANIFEST) and snapshot ($CRON_SAFETY_BAK) for manual recovery."
   fi
 }
+if [[ "$restore_cron_only" == "true" ]]; then
+  log "Restore-only: verifying and re-arming the retained cron manifest..."
+  restore_cron_jobs
+  if [[ "$CRON_RESTORE_OK" != "true" ]]; then
+    fail "Cron restore was not verified; recovery manifests were retained."
+  fi
+  log "Restore-only cron recovery complete."
+  exit 0
+fi
 if [[ "$skip_cron" == "false" && -f "$CRON_JOBS" ]]; then
   log "Step 2/6: Capturing cron enabled-state and disabling jobs..."
   cur_enabled="$(cron_enabled_count "$CRON_JOBS")"
@@ -276,7 +314,7 @@ restart_gateway
 if wait_for_gateway_healthy; then
   log "  Gateway runtime healthy after restart."
 else
-  warn "Gateway did not reach healthy state within ${MAX_WAIT}s."
+  warn "Gateway did not reach two consecutive healthy probes within ${START_WAIT}s."
 fi
 
 # --- Step 5: Validate tokens ---
@@ -292,6 +330,8 @@ else
   # Try restoring from backup
   log "  Attempting token restore from pre-restart backup..."
   bash "$SCRIPTS_DIR/token-restore.sh"
+  /usr/bin/python3 "${SCRIPTS_DIR}/enforce-codex-oauth.py" --apply \
+    || warn "Codex OAuth-only fleet enforcement failed after token restore"
 
   # Give the gateway a moment to pick up the restored file
   sleep 2
@@ -312,6 +352,10 @@ if [[ "$skip_cron" == "false" ]]; then
   restore_cron_jobs
 else
   log "Step 6/6: Skipping cron restore."
+fi
+
+if [[ "$skip_cron" == "false" && "$CRON_RESTORE_OK" != "true" ]]; then
+  fail "Cron restore was not verified; recovery manifests were retained."
 fi
 
 # --- Summary ---

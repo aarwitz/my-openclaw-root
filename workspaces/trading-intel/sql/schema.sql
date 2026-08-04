@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '12');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('_schema_version', '30');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_effective_date', '2026-05-28');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('_prediction_lineage_cutover', '2026-08-02T10:13:58Z');
 
@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS hypotheses (
   resolved_state            TEXT CHECK (resolved_state IN ('correct_right_reasons','correct_wrong_reasons','wrong') OR resolved_state IS NULL),
   archivist_grade           TEXT,
   rationale_concise         TEXT CHECK (rationale_concise IS NULL OR length(rationale_concise) <= 500),
-  journal_ref               TEXT
+  journal_ref               TEXT,
+  theme_id                  TEXT REFERENCES themes(id)
 );
 CREATE INDEX IF NOT EXISTS idx_hypotheses_state       ON hypotheses(state);
 CREATE INDEX IF NOT EXISTS idx_hypotheses_resolved_at ON hypotheses(resolved_at);
@@ -170,7 +171,8 @@ CREATE TABLE IF NOT EXISTS trade_intents (
   actual_price             REAL,
   actual_size              REAL,
   broker_order_id          TEXT,
-  direction                TEXT NOT NULL DEFAULT 'long'  -- long|short (migration 0013)
+  direction                TEXT NOT NULL DEFAULT 'long',  -- long|short (migration 0013)
+  theme_id                 TEXT REFERENCES themes(id)
 );
 CREATE INDEX IF NOT EXISTS idx_intent_state ON trade_intents(state);
 CREATE INDEX IF NOT EXISTS idx_intent_hyp   ON trade_intents(hypothesis_id);
@@ -655,6 +657,57 @@ CREATE TABLE IF NOT EXISTS market_events (
   experiment_id                 TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_market_events_date ON market_events(event_date);
+
+-- ----------------------------------------------------------------------------
+-- Themes: durable cross-name narratives.  This is an evidence/retrieval layer,
+-- never a risk authority.  Price scripts grade the baskets; LLMs do not.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS themes (
+  id                    TEXT PRIMARY KEY,
+  statement             TEXT NOT NULL CHECK (length(statement) <= 1000),
+  beneficiaries_json    TEXT NOT NULL DEFAULT '[]',
+  victims_json          TEXT NOT NULL DEFAULT '[]',
+  status                TEXT NOT NULL CHECK (status IN ('watch','active','fading','dead')),
+  source                TEXT NOT NULL CHECK (source IN ('operator','debrief','scanner')),
+  created_at            TEXT NOT NULL,
+  updated_at            TEXT NOT NULL,
+  score                 REAL,
+  score_as_of           TEXT,
+  last_evidence_at      TEXT,
+  evidence_refs_json    TEXT NOT NULL DEFAULT '[]',
+  created_by            TEXT NOT NULL DEFAULT 'system',
+  experiment_id         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_themes_status_evidence
+  ON themes(status, last_evidence_at);
+
+CREATE TABLE IF NOT EXISTS theme_observations (
+  id                       TEXT PRIMARY KEY,
+  theme_id                 TEXT NOT NULL REFERENCES themes(id),
+  observed_at              TEXT NOT NULL,
+  source_type              TEXT NOT NULL CHECK (source_type IN ('operator','debrief','scanner','market_event','bar_move','manual')),
+  source_id                TEXT,
+  ticker                   TEXT,
+  move_pct                 REAL,
+  outcome                  TEXT NOT NULL CHECK (outcome IN ('support','contradict','mixed','context')),
+  beneficiary_return_pct   REAL,
+  victim_return_pct        REAL,
+  spread_pct               REAL,
+  breadth_pct              REAL,
+  as_of                    TEXT,
+  evidence_ref_json        TEXT NOT NULL DEFAULT '{}',
+  notes                    TEXT,
+  experiment_id            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_theme_obs_theme
+  ON theme_observations(theme_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_theme_obs_source
+  ON theme_observations(source_type, source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_theme_obs_unique_source
+  ON theme_observations(theme_id, source_type, source_id, IFNULL(ticker,''))
+  WHERE source_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_hypotheses_theme ON hypotheses(theme_id, state);
+CREATE INDEX IF NOT EXISTS idx_trade_intents_theme ON trade_intents(theme_id, state);
 
 -- ----------------------------------------------------------------------------
 -- Internal paper engine (0014, docs/07): parallel books, own equity curve,

@@ -37,6 +37,7 @@ Status: active. Authoritative entity model. The implementing DDL lives in `sql/s
 | `archivist_grade` | TEXT | nullable, short letter or score |
 | `rationale_concise` | TEXT | <= 500 chars |
 | `journal_ref` | TEXT | path to long-form reasoning if any |
+| `theme_id` | TEXT FK | nullable research-context lineage to `themes` |
 
 ### 3.2 `hypothesis_evidence`
 
@@ -134,6 +135,7 @@ Convention: live `regime.current` is the latest snapshot by `determined_at`.
 | `actual_price` | REAL | nullable |
 | `actual_size` | REAL | nullable |
 | `broker_order_id` | TEXT | nullable |
+| `theme_id` | TEXT FK | nullable; copied from the originating hypothesis |
 
 ### 3.7 `critic_reviews`
 
@@ -177,7 +179,6 @@ Add P&L realism fields on `positions`: `pnl_ideal`, `pnl_slippage_adjusted`.
 Position rows do not prove their own decision provenance. For each open desk
 position, the canonical lineage audit joins the earliest filled `open`/`add`
 order back to its `trade_intent`, then requires a prediction and substantive
-Critic pass at or before intent creation and Risk approval at or before fill.
 Every later post-cutover add is checked against the same temporal contract.
 `opened_at` may classify an orphaned row as pre-cutover legacy, but may never
 satisfy modern lineage. Pre-cutover gaps remain visible and risk-reducing/fresh-
@@ -285,6 +286,24 @@ grade. These rows never feed intent authoring, sizing, or mechanism calibration.
 The `experiments` row and source-controlled protocol define the minimum sample,
 time window, and promotion rule before collection begins.
 
+### 3.19 `themes` and `theme_observations`
+
+`themes` is the canonical relational theme registry. Each row contains a
+falsifiable thesis, explicit `beneficiaries_json` and `victims_json` baskets,
+status (`watch`, `active`, `challenged`, or `dead`), point-in-time source/evidence
+fields, the current deterministic score/breadth, and timestamps. A CHECK rejects
+an active theme without both a thesis and falsifier. Theme rows are audited on
+create and transition.
+
+`theme_observations` is append-only measured evidence keyed to `theme_id` and
+`as_of`. It stores beneficiary return, victim/benchmark return, spread, breadth,
+source, and whether the observation was live or backfilled. Re-running an
+identical observation is idempotent; changing the same point-in-time
+observation is refused and audited rather than silently rewriting history.
+
+Themes are research context only. Optional `hypotheses.theme_id` and
+`trade_intents.theme_id` fields preserve lineage but confer no trade authority.
+
 ## 4. Required indexes
 
 - `hypotheses(state)`, `hypotheses(resolved_at)`
@@ -300,6 +319,9 @@ time window, and promotion rule before collection begins.
 - `selection_funnel_outcomes(evaluation_horizon, outcome_status, entry_date)`
 - `selection_funnel_outcomes(hypothesis_id)`
 - `prediction_challengers(experiment_id, variant, resolved_at)`
+- `themes(status, updated_at)`, `themes(last_evidence_at)`
+- `theme_observations(theme_id, as_of)` (unique)
+- `hypotheses(theme_id)`, `trade_intents(theme_id)`
 
 ## 5. Mapping notes (retired prototypes)
 
@@ -316,4 +338,5 @@ time window, and promotion rule before collection begins.
 
 - Schema changes are additive when possible. Breaking changes require a numbered migration file under `sql/migrations/` and an entry in `DECISION_LOG.md`.
 - The DB always carries a `_schema_version` row in a `meta` table.
+- Current live migration level is 30 (`0030_themes_market_graded.sql`).
 - SQLite writer policy: configure `busy_timeout`, keep write transactions short, and avoid holding write transactions across model calls. If write contention appears, use a single serialized writer queue.

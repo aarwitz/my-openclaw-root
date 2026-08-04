@@ -36,6 +36,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = "/home/aaron/.openclaw"
 SEV = {"ok": 0, "warn": 1, "crit": 2}
@@ -203,6 +204,20 @@ def check_cron():
         if sev == "ok":
             sev = "warn"
         notes.append("interrupted-restart artifact present: " + ", ".join(os.path.basename(p) for p in leftovers))
+    history_bound = [
+        str(j.get("name") or j.get("id"))
+        for j in jobs
+        if j.get("enabled")
+        and (j.get("payload") or {}).get("kind") == "agentTurn"
+        and (j.get("sessionTarget") != "isolated" or j.get("sessionKey"))
+    ]
+    if history_bound:
+        if sev == "ok":
+            sev = "warn"
+        notes.append(
+            f"{len(history_bound)} agent job(s) reuse chat history instead of fresh isolation: "
+            + ", ".join(history_bound[:3])
+        )
     detail = f"{len(jobs)} jobs, {enabled} enabled" + (" — " + "; ".join(notes) if notes else "")
     return finding("cron", sev, detail)
 
@@ -304,10 +319,22 @@ def check_internal_paper_only():
 
 
 def check_tokens():
+    fleet_errors = audit_codex_oauth_fleet(Path(ROOT))
+    if fleet_errors:
+        return finding(
+            "tokens", "crit",
+            "Codex OAuth-only fleet policy violated: " + "; ".join(fleet_errors[:4]),
+        )
     ocl = _resolve_openclaw()
     if not ocl:
         return finding("tokens", "warn", "openclaw CLI not found; cannot check model auth")
-    rc, out = _run([ocl, "models", "status", "--json"], timeout=40)
+    # Check the gateway's actual cron owner. The foreground/default CLI can
+    # report plugin-owned synthetic auth that is unavailable inside a detached
+    # Overseer cron run, producing a false green while every pass fails.
+    rc, out = _run(
+        [ocl, "models", "--agent", "overseer", "status", "--json"],
+        timeout=40,
+    )
     if rc != 0:
         return finding("tokens", "warn", f"model auth status json failed (exit={rc}): {out.strip()[:160]}")
     try:
@@ -329,10 +356,11 @@ def check_tokens():
     oauth_providers = data.get("auth", {}).get("oauth", {}).get("providers", [])
     codex_provider = next((p for p in oauth_providers if p.get("provider") == "openai-codex"), None)
     if not codex_provider:
-        effective = openai_route.get("effective", {})
-        if effective.get("kind") == "synthetic" and effective.get("detail") == "codex-app-server":
-            return finding("tokens", "ok", "fleet auth healthy via plugin-owned codex-app-server")
-        return finding("tokens", "crit", "openai-codex auth provider missing from oauth status")
+        return finding(
+            "tokens",
+            "crit",
+            "Overseer cron auth profile missing from openai-codex oauth status",
+        )
     status = codex_provider.get("status")
     if status == "expired":
         return finding("tokens", "crit", "fleet auth (openai-codex) expired")
@@ -343,6 +371,84 @@ def check_tokens():
             return finding("tokens", "warn", f"fleet auth (openai-codex) expiring in {remaining_h}h")
         return finding("tokens", "warn", "fleet auth (openai-codex) expiring soon")
     return finding("tokens", "ok", "fleet auth (openai-codex) healthy")
+
+
+def audit_codex_oauth_fleet(root: Path) -> list[str]:
+    """Reject API-token fallbacks and missing per-agent Codex OAuth stores."""
+    errors: list[str] = []
+    try:
+        config = json.loads((root / "openclaw.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"openclaw.json unreadable: {exc}"]
+
+    configured_profiles = config.get("auth", {}).get("profiles", {})
+    if any(
+        value.get("provider") == "openai"
+        for value in configured_profiles.values()
+        if isinstance(value, dict)
+    ):
+        errors.append("openclaw.json contains a direct OpenAI token profile")
+    openai_order = config.get("auth", {}).get("order", {}).get("openai", [])
+    for profile_id in openai_order:
+        profile = configured_profiles.get(profile_id) or {}
+        if profile.get("provider") != "openai-codex" or profile.get("mode") != "oauth":
+            errors.append(f"OpenAI auth order permits non-Codex profile {profile_id}")
+
+    gateway_env = root / "credentials/openclaw-gateway.env"
+    try:
+        env_names = {
+            line.split("=", 1)[0].strip()
+            for line in gateway_env.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#") and "=" in line
+        }
+    except OSError as exc:
+        errors.append(f"gateway env unreadable: {exc}")
+        env_names = set()
+    if "OPENAI_API_KEY" in env_names:
+        errors.append("gateway environment contains OPENAI_API_KEY")
+
+    agent_ids = {
+        str(row.get("id"))
+        for row in config.get("agents", {}).get("list", [])
+        if row.get("id")
+    }
+    cron_path = root / "cron/jobs.json"
+    try:
+        cron = json.loads(cron_path.read_text())
+        agent_ids.update(
+            str(row.get("agentId"))
+            for row in cron.get("jobs", [])
+            if row.get("enabled") and row.get("agentId")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"cron auth inventory unreadable: {exc}")
+    agent_ids.update(
+        path.parents[1].name
+        for path in (root / "agents").glob("*/agent/auth-profiles.json")
+    )
+    for agent_id in sorted(agent_ids):
+        path = root / "agents" / agent_id / "agent/auth-profiles.json"
+        try:
+            store = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            errors.append(f"{agent_id}: auth profile store missing or invalid")
+            continue
+        profiles = store.get("profiles") or {}
+        if any(
+            value.get("provider") == "openai"
+            for value in profiles.values()
+            if isinstance(value, dict)
+        ):
+            errors.append(f"{agent_id}: direct OpenAI token profile present")
+        codex = [
+            value for value in profiles.values()
+            if isinstance(value, dict)
+            and value.get("provider") == "openai-codex"
+            and value.get("type") == "oauth"
+        ]
+        if not codex:
+            errors.append(f"{agent_id}: openai-codex OAuth profile missing")
+    return errors
 
 
 def check_taskmanager():
@@ -477,6 +583,67 @@ def check_data_freshness():
     if missing:
         bits.append("MISSING: " + ",".join(sorted(missing)))
     return finding("data_freshness", sev, "STALE intake — " + "; ".join(bits))
+
+
+def check_market_event_intake():
+    """Market-wide discovery must be fresh independently of ticker features.
+
+    A healthy ticker news table can still miss the market's causal event when
+    the affected names are not known in advance.  During the trading session a
+    30-minute stale intake is critical; outside the session it is advisory.
+    Structured operator-known cases make semantic misses measurable too.
+    """
+    script = f"{ROOT}/workspaces/trading-intel/scripts/market_event_intake.py"
+    db = f"{ROOT}/state/event-intel.sqlite"
+    if not os.path.exists(db):
+        et = datetime.now(ZoneInfo("America/New_York"))
+        in_session = et.weekday() < 5 and (8 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
+        return finding(
+            "market_event_intake", "crit" if in_session else "warn",
+            "event-intel.sqlite missing — market-wide event discovery has never completed",
+        )
+    rc, out = _run(["python3", script, "status"], timeout=30)
+    try:
+        report = _first_json_object(out)
+        latest = report.get("latest_run") or {}
+        completed = datetime.fromisoformat(str(latest["completed_at"]).replace("Z", "+00:00"))
+    except Exception as exc:
+        return finding("market_event_intake", "crit", f"intake status unreadable (rc={rc}): {exc}")
+    age_min = (datetime.now(timezone.utc) - completed).total_seconds() / 60.0
+    et = datetime.now(ZoneInfo("America/New_York"))
+    in_session = et.weekday() < 5 and (8 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
+    run_status = latest.get("status")
+
+    audit_rc, audit_out = _run(["python3", script, "audit", "--fail-on-enforced-miss"], timeout=30)
+    try:
+        audit = _first_json_object(audit_out)
+        misses = int(audit.get("enforced_misses", 0))
+    except Exception:
+        misses = 1
+    if audit_rc != 0 or misses:
+        return finding(
+            "market_event_intake", "crit",
+            f"{misses or 'unknown'} enforced human-known event coverage miss(es); "
+            "the system is semantically behind its operator",
+        )
+    if in_session and age_min > 30:
+        return finding(
+            "market_event_intake", "crit",
+            f"market-wide intake {age_min:.0f}m stale during trading session (SLA <=30m)",
+        )
+    if run_status == "failed_empty":
+        return finding("market_event_intake", "crit", "latest intake returned zero articles")
+    if run_status == "degraded":
+        return finding(
+            "market_event_intake", "warn",
+            f"latest intake degraded; age={age_min:.0f}m, articles={report.get('articles', 0)}",
+        )
+    if age_min > 26 * 60:
+        return finding("market_event_intake", "warn", f"market-wide intake {age_min / 60:.1f}h stale")
+    return finding(
+        "market_event_intake", "ok",
+        f"market-wide intake age={age_min:.0f}m, articles={report.get('articles', 0)}, coverage SLA clear",
+    )
 
 
 def check_debrief_coverage():
@@ -923,6 +1090,7 @@ CHECKS = [
     check_gateway, check_telegram, check_cron, check_config_drift, check_model_policy,
     check_internal_paper_only, check_tokens,
     check_taskmanager, check_project_registry, check_disk, check_pipeline, check_data_freshness,
+    check_market_event_intake,
     check_debrief_coverage, check_intent_flow, check_kv_push, check_jerry_poll,
     check_ledger_backup, check_offsite_backup, check_options_freshness, check_learning_loop,
     check_trading_accounting, check_integrity, check_dev_lane, check_provenance,

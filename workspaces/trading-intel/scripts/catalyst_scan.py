@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(os.path.expanduser("~/.openclaw/workspaces/trading-intel/scripts"))))
 from connectors import eventregistry, fmp, x as xsocial   # noqa: E402
 import signal_scan                          # noqa: E402
+import market_event_intake                  # noqa: E402
 
 OUT = os.path.expanduser("~/.openclaw/state/catalyst_brief.json")
 FEAT = os.path.expanduser("~/.openclaw/state/features.sqlite")
@@ -102,6 +103,27 @@ def main():
     a = ap.parse_args()
     names = [s.strip().upper() for s in a.watchlist.split(",") if s.strip()]
 
+    # Market-wide discovery is a separate deterministic lane because a fund
+    # liquidation or portfolio transfer may not have a known ticker yet. The
+    # brief retains those global events and also adds flags to tagged names.
+    try:
+        market_events = market_event_intake.rows_for_brief(
+            market_event_intake.DEFAULT_DB, hours=168, limit=60
+        )
+    except Exception:
+        market_events = []
+    event_flags = {
+        "forced_flow": "FORCED_FLOW",
+        "portfolio_transfer": "PORTFOLIO_TRANSFER",
+        "crowding_unwind": "CROWDING_UNWIND",
+        "fund_distress": "FUND_DISTRESS",
+        "fear_dislocation": "FEAR_DISLOCATION",
+    }
+    events_by_ticker = {}
+    for event in market_events:
+        for ticker in event.get("tickers", []):
+            events_by_ticker.setdefault(str(ticker).upper(), []).append(event)
+
     # Discovery channel: the ranker scores ~600 names nightly; the watchlist is
     # static. The model's current top names join the scan so a high-rank name
     # the desk isn't watching still gets researched (advisory, never auto-traded).
@@ -161,6 +183,12 @@ def main():
             flags.append("QUANT_CONVICTION")
         if x_z is not None and x_z >= 2.5:
             flags.append("SOCIAL_SPIKE")               # abnormal X attention — investigate catalyst
+        ticker_events = events_by_ticker.get(t, [])
+        for event in ticker_events:
+            for event_class in event.get("classes", []):
+                flag = event_flags.get(event_class)
+                if flag and flag not in flags:
+                    flags.append(flag)
         m = ml.get(t)
         if m and m["n"]:
             pct = m["rank"] / m["n"]
@@ -182,13 +210,15 @@ def main():
                      "neg_catalysts": neg_hit, "themes": themes,
                      "headlines": [x.get("title") for x in arts[:3]]},
             "social": {"x_attention_z": x_z, "x_mentions_today": x_count},
+            "market_events": ticker_events[:5],
             "model": ({"rank": m["rank"], "of": m["n"], "as_of": ml_as_of} if m else None),
         })
     conn.close()
     order = {"OVERREACTION_LONG": 0, "CATALYST_POS": 1, "CATALYST_NEG": 2, "QUANT_CONVICTION": 3,
              "MODEL_TOP_DECILE": 4, "SOCIAL_SPIKE": 5, "MODEL_BOTTOM_DECILE": 6}
     brief.sort(key=lambda b: min(order.get(f, 9) for f in b["flags"]))
-    json.dump({"generated": __import__("datetime").datetime.utcnow().isoformat() + "Z", "brief": brief},
+    json.dump({"generated": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+               "brief": brief, "market_events": market_events},
               open(OUT, "w"), indent=2)
 
     print(f"CATALYST BRIEF — {len(brief)} flagged names (quant x news), -> {OUT}\n")
@@ -206,6 +236,11 @@ def main():
             print(f"         social: X attention z={soc['x_attention_z']} ({soc.get('x_mentions_today')} mentions today)")
         if b.get("model"):
             print(f"         model : rank {b['model']['rank']}/{b['model']['of']} (nightly GBM, {b['model']['as_of']})")
+    if market_events:
+        print(f"\n  MARKET-WIDE EVENTS ({len(market_events)} classified, advisory):")
+        for event in market_events[:8]:
+            print(f"    {event['published_at']} {','.join(event['classes'])} "
+                  f"phase={event['flow_phase']}: {event['title'][:140]}")
     print("\n(advisory — the research agent reasons over this brief to judge over/under-reaction and emit hypotheses)")
 
 

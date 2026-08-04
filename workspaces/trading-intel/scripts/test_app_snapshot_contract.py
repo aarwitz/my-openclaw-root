@@ -43,7 +43,11 @@ def _snapshot() -> dict:
     return {
         "generated_at": "2099-08-02T12:00:00Z",
         "retail_insights": {}, "system_health": {"color": "green", "issues": []},
-        "agents": agents, "topology": [row["id"] for row in agents],
+        "agents": agents,
+        "topology": {
+            "topology_version": "v5",
+            "agents_order": [row["id"] for row in agents],
+        },
         "regime": {"id": "rg", "current": "caution"},
         "counts": {"hypotheses_total": 1},
         "broker": {
@@ -80,7 +84,7 @@ class AppSnapshotContractTests(unittest.TestCase):
         self.addCleanup(path.unlink, missing_ok=True)
         return path
 
-    def test_current_v2_contract_reconciles_without_retired_blocks(self) -> None:
+    def test_current_v4_projection_reconciles_canonical_safety_fields(self) -> None:
         report = auditor.check(
             _conn(), self._path(_snapshot()), health_checker=lambda _conn: [],
             inventory_checker=self.INVENTORY,
@@ -88,9 +92,9 @@ class AppSnapshotContractTests(unittest.TestCase):
         self.assertEqual(report["color"], "green")
         self.assertEqual(report["issues"], [])
 
-    def test_legacy_topology_object_is_red_not_a_crash(self) -> None:
+    def test_retired_topology_list_is_red_not_a_crash(self) -> None:
         payload = _snapshot()
-        payload["topology"] = {"broker": "Internal paper"}
+        payload["topology"] = ["executor", "developer", "overseer"]
         report = auditor.check(
             _conn(), self._path(payload), health_checker=lambda _conn: [],
             inventory_checker=self.INVENTORY,

@@ -14,10 +14,12 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-DEFAULT_REPO = "/home/aaron/repos/AutoTap-iosApp"
+ROOT = Path("/home/aaron/.openclaw")
+PROJECTS = ROOT / "projects.json"
 CANONICAL_TM_BASE = "https://tm.lidisolutions.ai"
 
 
@@ -66,6 +68,13 @@ TM_USER_AGENT = os.environ.get("TM_USER_AGENT", "Mozilla/5.0 (compatible; LIDI-A
 def http_json(url: str, method: str = "GET", payload: Optional[Dict[str, Any]] = None) -> Any:
     body = None
     headers = {"Accept": "application/json", "User-Agent": TM_USER_AGENT}
+    token_path = ROOT / "credentials/task-manager-agent.json"
+    try:
+        token = str(json.loads(token_path.read_text()).get("session_token") or "").strip()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        token = ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -80,8 +89,10 @@ def http_json(url: str, method: str = "GET", payload: Optional[Dict[str, Any]] =
         raise RuntimeError(f"Request failed for {method} {url}: {exc.reason}") from exc
 
 
-def fetch_open_issues(tm_base: str, assignee: Optional[str]) -> List[Dict[str, Any]]:
-    issues = http_json(f"{tm_base}/api/issues")
+def fetch_open_issues(
+    tm_base: str, assignee: Optional[str], sprint_id: int,
+) -> List[Dict[str, Any]]:
+    issues = http_json(f"{tm_base}/api/issues?sprint_id={sprint_id}")
     filtered: List[Dict[str, Any]] = []
     for issue in issues:
         if issue.get("status") == "done":
@@ -95,6 +106,26 @@ def fetch_open_issues(tm_base: str, assignee: Optional[str]) -> List[Dict[str, A
     return filtered
 
 
+def project_scope(project: str) -> tuple[int, list[dict]]:
+    data = json.loads(PROJECTS.read_text())
+    wanted = project.strip().lower()
+    matches = [
+        row for row in data.get("products", [])
+        if str(row.get("id") or "").lower() == wanted
+        or str(row.get("name") or "").lower() == wanted
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(f"projects.json must contain exactly one project matching {project!r}")
+    row = matches[0]
+    if row.get("status") != "active":
+        raise RuntimeError(f"project {project!r} is not active")
+    sprint_id = row.get("tm_sprint_id") or row.get("sprint_id")
+    repos = [repo for repo in row.get("repos", []) if repo.get("path")]
+    if not sprint_id or not repos:
+        raise RuntimeError(f"project {project!r} lacks sprint/repository scope")
+    return int(sprint_id), repos
+
+
 def fetch_remote_state(repo: str) -> None:
     run_cmd([
         "git",
@@ -103,7 +134,6 @@ def fetch_remote_state(repo: str) -> None:
         "fetch",
         "--quiet",
         "origin",
-        "main",
         "+refs/heads/*:refs/remotes/origin/*",
         "--prune",
     ])
@@ -117,7 +147,23 @@ def remote_branch_exists(repo: str, branch: str) -> bool:
     return result.returncode == 0
 
 
-def git_detect_merged(repo: str, branch: str) -> Tuple[bool, Optional[str]]:
+def default_branch(repo: str) -> str:
+    symbolic = run_cmd(
+        ["git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        check=False,
+    ).stdout.strip()
+    if symbolic.startswith("origin/"):
+        return symbolic.split("/", 1)[1]
+    for candidate in ("master", "main"):
+        if run_cmd(
+            ["git", "-C", repo, "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{candidate}"],
+            check=False,
+        ).returncode == 0:
+            return candidate
+    raise RuntimeError(f"cannot resolve origin default branch for {repo}")
+
+
+def git_detect_merged(repo: str, branch: str, base: str) -> Tuple[bool, Optional[str]]:
     if not remote_branch_exists(repo, branch):
         return False, None
 
@@ -129,12 +175,12 @@ def git_detect_merged(repo: str, branch: str) -> Tuple[bool, Optional[str]]:
             "merge-base",
             "--is-ancestor",
             f"refs/remotes/origin/{branch}",
-            "refs/remotes/origin/main",
+            f"refs/remotes/origin/{base}",
         ],
         check=False,
     )
     if result.returncode == 0:
-        return True, f"git: origin/{branch} is already contained in origin/main"
+        return True, f"git: origin/{branch} is already contained in origin/{base}"
     if result.returncode == 1:
         return False, None
     stderr = result.stderr.strip()
@@ -145,7 +191,7 @@ def gh_is_available() -> bool:
     return shutil.which("gh") is not None
 
 
-def gh_detect_merged(repo: str, branch: str) -> Tuple[bool, Optional[str]]:
+def gh_detect_merged(repo: str, branch: str, base: str) -> Tuple[bool, Optional[str]]:
     if not gh_is_available():
         return False, None
 
@@ -159,7 +205,7 @@ def gh_detect_merged(repo: str, branch: str) -> Tuple[bool, Optional[str]]:
             "--head",
             branch,
             "--base",
-            "main",
+            base,
             "--json",
             "number,title,url,mergedAt,headRefName,baseRefName",
         ],
@@ -200,8 +246,8 @@ def reconcile_issue(tm_base: str, issue: Dict[str, Any], apply: bool, add_commen
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Reconcile Task Manager issue status against AutoTap git branch merge state.")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help="AutoTap repo path")
+    parser = argparse.ArgumentParser(description="Reconcile one active project's Task Manager sprint against its registered git repositories.")
+    parser.add_argument("--project", default="AutoTrade", help="Active projects.json id or name")
     parser.add_argument("--tm-base", default=DEFAULT_TM_BASE, help="Task Manager base URL")
     parser.add_argument("--assignee", default=None, help="Only reconcile issues assigned to this person")
     parser.add_argument("--apply", action="store_true", help="Patch Task Manager issues to done when their linked branch is merged")
@@ -209,9 +255,16 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        fetch_remote_state(args.repo)
-        issues = fetch_open_issues(args.tm_base, args.assignee)
-    except RuntimeError as exc:
+        sprint_id, registered_repos = project_scope(args.project)
+        repos = []
+        for spec in registered_repos:
+            repo = str(spec["path"])
+            if not Path(repo).is_dir():
+                raise RuntimeError(f"registered repository is missing: {repo}")
+            fetch_remote_state(repo)
+            repos.append({**spec, "base": default_branch(repo)})
+        issues = fetch_open_issues(args.tm_base, args.assignee, sprint_id)
+    except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -227,9 +280,27 @@ def main() -> int:
         reason = None
 
         try:
-            merged, reason = git_detect_merged(args.repo, branch)
-            if not merged:
-                merged, reason = gh_detect_merged(args.repo, branch)
+            merged = False
+            repo_slug = str(issue.get("repo_slug") or "").strip()
+            candidates = [
+                spec for spec in repos
+                if not repo_slug or str(spec.get("slug") or "") == repo_slug
+            ]
+            if not candidates:
+                print(
+                    f"OPEN issue #{issue['id']} [{issue['status']}] branch={branch} :: "
+                    f"repo_slug {repo_slug!r} is outside project registry"
+                )
+                unresolved_count += 1
+                continue
+            for spec in candidates:
+                repo = str(spec["path"])
+                base = str(spec["base"])
+                merged, reason = git_detect_merged(repo, branch, base)
+                if not merged:
+                    merged, reason = gh_detect_merged(repo, branch, base)
+                if merged:
+                    break
         except RuntimeError as exc:
             print(f"ERROR issue #{issue['id']} {branch}: {exc}", file=sys.stderr)
             return 1

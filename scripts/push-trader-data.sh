@@ -22,6 +22,7 @@ LIDI_REPO="${TRADER_INTEL_REPO:-${LIDI:-$HOME/repos/lidi-solutions}}"
 KV_NAMESPACE_ID="bc7ab40d92b04c8f90e9448b4896689a"
 RUNTIME_DIR="${TRADER_INTEL_RUNTIME_DIR:-$HOME/.openclaw/state/trader-intel-snapshot}"
 DATA_JSON="$RUNTIME_DIR/data.json"
+CANONICAL_STATE_JSON="$RUNTIME_DIR/canonical-state.json"
 WRANGLER_OAUTH="$HOME/.config/.wrangler/config/default.toml"
 CRED_DIR="$HOME/.openclaw/credentials/cloudflare"
 TOKEN_FILE="$CRED_DIR/account-token"
@@ -64,15 +65,17 @@ if ! python3 "$HOME/.openclaw/workspaces/executor/scripts/sim_broker.py" mark --
   exit 1
 fi
 
-# Rebuild the Python ledger base every cycle. Failure is fatal: the JS overlay
-# rejects missing/stale bases and must never recycle an old account snapshot.
-if ! python3 "$HOME/.openclaw/workspaces/developer/scripts/snapshot_builder.py" --out "$DATA_JSON"; then
-  echo "FATAL: internal paper base snapshot failed" >&2
+# Rebuild canonical state and then project the public v4 contract. The two
+# stages use different files so the presentation stage cannot erase or launder
+# the canonical safety fields it consumes.
+if ! python3 "$HOME/.openclaw/workspaces/developer/scripts/snapshot_builder.py" --out "$CANONICAL_STATE_JSON"; then
+  echo "FATAL: canonical internal-paper snapshot failed" >&2
   exit 1
 fi
 
-echo "[push-data] snapshot"
+echo "[push-data] project snapshot"
 if ! TRADER_INTEL_OUT_DIR="$RUNTIME_DIR" TRADER_INTEL_SKIP_DIST=1 \
+    TRADER_INTEL_BASE_FILE="$CANONICAL_STATE_JSON" \
     node scripts/snapshot-trader-intel.mjs; then
   echo "FATAL: snapshot-trader-intel.mjs failed" >&2
   exit 1
@@ -97,8 +100,16 @@ bp = d.get('brokerPositions') or []
 # direction is set unconditionally by the canonical enrichment — its absence means
 # the enrichment never ran and Day P&L would render \$0.00 across the app.
 assert (not bp) or all(p.get('direction') for p in bp), 'brokerPositions missing canonical enrichment'
+for key in ('selectionFunnel', 'predictionReplay', 'inventoryLineage'):
+    assert key in d, f'missing canonical safety field: {key}'
 "; then
   echo "FATAL: data.json failed contract sanity check — not pushing" >&2
+  exit 1
+fi
+
+if ! python3 "$HOME/.openclaw/workspaces/developer/scripts/audit_app_snapshot.py" \
+    --path "$DATA_JSON" --no-write >/dev/null; then
+  echo "FATAL: canonical app audit is red; refusing KV publish" >&2
   exit 1
 fi
 

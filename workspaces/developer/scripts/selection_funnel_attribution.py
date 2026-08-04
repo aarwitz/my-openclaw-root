@@ -430,6 +430,7 @@ def _same_outcome(existing: sqlite3.Row, row: dict) -> bool:
 
 def write_rows(conn: sqlite3.Connection, rows: list[dict], *, dry_run: bool = False) -> dict:
     report = defaultdict(int)
+    revision_samples: list[str] = []
     placeholders = ",".join("?" for _ in _WRITE_COLUMNS)
     updates = ",".join(
         f"{column}=excluded.{column}"
@@ -450,16 +451,33 @@ def write_rows(conn: sqlite3.Connection, rows: list[dict], *, dry_run: bool = Fa
         ).fetchone()
         if existing and existing["outcome_status"] == "matured":
             if row["outcome_status"] == "matured" and not _same_outcome(existing, row):
-                raise RuntimeError(
-                    "matured selection outcome revision refused for "
-                    f"{row['hypothesis_id']}:{row['ticker']}:{row['evaluation_horizon']}"
-                )
+                # Corrected/vendor-restated source rows must never rewrite a
+                # frozen counterfactual. Preserve the original and continue
+                # refreshing the rest of the funnel; record the drift instead
+                # of turning one revision into a total learning-loop outage.
+                report["matured_revision_refused"] += 1
+                if len(revision_samples) < 10:
+                    revision_samples.append(
+                        f"{row['hypothesis_id']}:{row['ticker']}:{row['evaluation_horizon']}"
+                    )
+                continue
             report["frozen_matured"] += 1
             continue
         report["would_write" if dry_run else "written"] += 1
         report[row["outcome_status"]] += 1
         if not dry_run:
             conn.execute(sql, tuple(row[column] for column in _WRITE_COLUMNS))
+    if not dry_run and report["matured_revision_refused"]:
+        audit(
+            conn,
+            entity_type="selection_funnel",
+            entity_id="selection-funnel-backfill",
+            action="counterfactual_revision_refused",
+            rationale=(
+                f"preserved {report['matured_revision_refused']} immutable matured rows; "
+                f"source recomputation differed: {','.join(revision_samples)}"
+            ),
+        )
     if not dry_run and report["written"]:
         audit(
             conn,
@@ -471,8 +489,12 @@ def write_rows(conn: sqlite3.Connection, rows: list[dict], *, dry_run: bool = Fa
                 f"pending={report['pending']} data_blocked={report['data_blocked']}"
             ),
         )
+    if not dry_run and (report["written"] or report["matured_revision_refused"]):
         conn.commit()
-    return dict(report)
+    result = dict(report)
+    if revision_samples:
+        result["revision_samples"] = revision_samples
+    return result
 
 
 def _mean(values: list[float]) -> float | None:

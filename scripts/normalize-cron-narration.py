@@ -35,6 +35,9 @@ VALUE_END = "\n\nStep 6 (priority queue):"
 CATALYST_JOB = "catalyst-research-0830-et"
 LEGACY_TRADING_DESK_TARGET = "target topic 641 in group -1003237263898 OR DM 6043080629"
 CANONICAL_TRADING_DESK_TARGET = "target topic 641 in group -1003846579956"
+LEARNING_JOB = "overseer-daily-learning-1630-et"
+LEARNING_STEP_START = "Step 1 (deterministic core):"
+LEARNING_STEP_END = "\n\nStep 2 (what moved + why):"
 
 
 def _replace_section(message: str, start_token: str, end_token: str, replacement: str) -> str:
@@ -56,7 +59,7 @@ def _normalize_drive_prompt(name: str, message: str) -> str:
     )
     if name == CATALYST_JOB:
         stage = """Step 3 (deduplicated daily research, the only routine research spawn):
-  (a) Spawn `researcher` exactly once. Before proposing a name, query every existing hypothesis for that ticker. States raw/scored/challenged/ready/active are the one canonical LIVE thesis. If one exists, UPDATE that thesis and append genuinely new primary-source evidence; do not INSERT another hypothesis. Dormant/resolved/retired rows are history and may inform the work. Author at most 5 net-new, previously unrepresented tickers, and fewer (including zero) is correct when evidence does not clear the bar. Read the macro calendar, rotation snapshot, valuation gaps, and relevant past episodes. Every new row needs primary-source provenance, a falsifier, and a clear horizon. The database rejects same-ticker live duplicates; never work around that guard. Wait for completion.
+  (a) Read `~/.openclaw/state/theme-context.json`, the deterministic active/watch theme snapshot written by Step 1. Spawn `researcher` exactly once and include that exact context. Before proposing a name, query every existing hypothesis for that ticker. States raw/scored/challenged/ready/active are the one canonical LIVE thesis. If one exists, UPDATE that thesis and append genuinely new primary-source evidence; do not INSERT another hypothesis. Dormant/resolved/retired rows are history and may inform the work. Author at most 5 net-new, previously unrepresented tickers, and fewer (including zero) is correct when evidence does not clear the bar. Read the macro calendar, rotation snapshot, valuation gaps, and relevant past episodes. When a name overlaps a theme basket, set `hypotheses.theme_id` and explain why it belongs on that side; explicitly reject irrelevant theme context. A theme is retrieval context, never sufficient evidence or trade authority. Every new row needs primary-source provenance, a falsifier, and a clear horizon. The database rejects same-ticker live duplicates; never work around that guard. Wait for completion.
   (b) Run `python3 ~/.openclaw/workspaces/quant/scripts/score_hypotheses.py`, then `python3 ~/.openclaw/workspaces/critic/scripts/critic_baseline.py`. These are deterministic triage only.
   (c) Run `python3 ~/.openclaw/workspaces/critic/scripts/critic_review_queue.py list --max 10`. If count is nonzero, spawn `critic` exactly once and give it ONLY those candidate IDs and the returned evidence. For every ID, write one `critic_reviews` row with reviewed_by=`critic`, at least two concrete independent counterarguments, a developed response for every resolved challenge, and truthful resolved booleans. Do not review any ID outside the queue and do not update hypothesis state. Wait for completion.
   (d) Run `python3 ~/.openclaw/workspaces/critic/scripts/critic_review_queue.py finalize --apply`. Any invalid review is a hard failure to surface; never promote it manually. The finalizer alone moves a reviewed hypothesis to ready or challenged. Forecasting happens only after ready state."""
@@ -64,7 +67,7 @@ def _normalize_drive_prompt(name: str, message: str) -> str:
   This dedicated research pass may investigate one valuation gap, but cheapness is a question, not evidence. Reconcile share count, per-share units, and primary filings before updating or authoring; do nothing when the valuation inputs are suspect."""
     else:
         stage = """Step 3 (routine-pass boundary):
-  Do not spawn researcher, quant, critic, trader, executor, or archivist from this routine pass. The deterministic core owns scoring, checklist triage, prediction of already Critic-cleared ideas, risk, execution, and reconciliation. The dedicated daily research job owns the single bounded substantive Critic pass. A quiet result is complete."""
+  Read the exact `theme_context` result from Step 1 for market narration, but do not infer a trade from it. Do not spawn researcher, quant, critic, trader, executor, or archivist from this routine pass. The deterministic core owns scoring, checklist triage, prediction of already Critic-cleared ideas, risk, execution, and reconciliation. The dedicated daily research job owns the single bounded substantive Critic pass. A quiet result is complete."""
         value = """Step 5b (valuation boundary):
   Do not originate valuation theses from a routine pass. The deterministic value scan and the dedicated daily research job own that work."""
     for stage_start in (
@@ -77,6 +80,13 @@ def _normalize_drive_prompt(name: str, message: str) -> str:
             break
     message = _replace_section(message, VALUE_START, VALUE_END, value)
     return message
+
+
+def _normalize_learning_prompt(name: str, message: str) -> str:
+    if name != LEARNING_JOB or LEARNING_STEP_START not in message:
+        return message
+    replacement = """Step 1 (read the completed deterministic core; never rerun it): the 16:12 ET host `learning-chain.sh` owns every SQLite/feature write and the full post-close math. Do NOT execute `trader-pass-deterministic.sh`, `learning-chain.sh`, feature refresh, grade_outcomes, calibration, attribution, or any other money-path writer from this agent job. Read the latest completed results from `logs/learning-chain.log`, `state/trader-intel-snapshot/canonical-state.json`, and the live DB. If the chain is still running or failed, report that exact state; do not race or retry it. Capture the regime, portfolio day P&L, alpha-vs-SPY, macro surprise, resolved predictions, calibration, attribution, and proposal counts from those durable outputs."""
+    return _replace_section(message, LEARNING_STEP_START, LEARNING_STEP_END, replacement)
 
 
 def normalize(doc: dict) -> list[str]:
@@ -102,7 +112,9 @@ def normalize(doc: dict) -> list[str]:
             raise ValueError(
                 f"{job.get('name')}: Telegram-authoring job must use delivery.mode=none"
             )
-        replacement = _normalize_drive_prompt(name, message).replace(
+        replacement = _normalize_learning_prompt(
+            name, _normalize_drive_prompt(name, message)
+        ).replace(
             " — the cron delivery handles routing",
             " — send it explicitly once via the messaging tool",
         )
