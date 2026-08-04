@@ -2903,6 +2903,47 @@ class ShellContinuityTests(unittest.TestCase):
                     check=True, capture_output=True,
                 )
 
+    def test_sequential_issue_worktrees_cannot_contaminate_each_other(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+            repo = Path(temp_dir) / "sample"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Guardrail Test"], check=True)
+            (repo / "base.txt").write_text("base\n")
+            subprocess.run(["git", "-C", str(repo), "add", "base.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+
+            first, _, _ = dwight_launch_from_issue.prepare_launch_repo(
+                str(repo), "TM-991", "991", {"title": "First isolated run"},
+            )
+            try:
+                (Path(first) / "first-only.txt").write_text("must not leak\n")
+                subprocess.run(["git", "-C", first, "add", "first-only.txt"], check=True)
+                subprocess.run(["git", "-C", first, "commit", "-m", "first"], check=True, capture_output=True)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(repo), "worktree", "remove", first],
+                    check=True, capture_output=True,
+                )
+
+            second, _, _ = dwight_launch_from_issue.prepare_launch_repo(
+                str(repo), "TM-992", "992", {"title": "Second isolated run"},
+            )
+            try:
+                self.assertFalse((Path(second) / "first-only.txt").exists())
+                self.assertEqual((repo / "base.txt").read_text(), "base\n")
+                self.assertEqual(dwight_launch_from_issue.git_current_branch(str(repo)), "main")
+                self.assertEqual(
+                    dwight_launch_from_issue.git_current_branch(second),
+                    "issue-992-second-isolated-run",
+                )
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(repo), "worktree", "remove", second],
+                    check=True, capture_output=True,
+                )
+
     def test_agent_crons_never_announce_completion_receipts(self) -> None:
         jobs = json.loads((ROOT / "cron/jobs.json").read_text())["jobs"]
         agent_jobs = [
