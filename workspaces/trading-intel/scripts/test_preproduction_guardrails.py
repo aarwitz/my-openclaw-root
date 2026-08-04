@@ -2748,6 +2748,10 @@ class ShellContinuityTests(unittest.TestCase):
         self.assertIn('[[ -n "${_next_wake}" ]]', restart)
         self.assertIn('recovery manifests retained', restart)
         self.assertIn('fail "Cron restore was not verified', restart)
+        self.assertIn("normalize_cron_jobs_eof()", restart)
+        self.assertIn("tail -c 1 \"$CRON_JOBS\"", restart)
+        self.assertIn("done < \"$CRON_ENABLED_MANIFEST\"\n      # The live gateway CLI", restart)
+        self.assertGreaterEqual(restart.count("normalize_cron_jobs_eof"), 4)
 
     def test_token_restore_can_target_a_specific_agent_safely(self) -> None:
         source = (ROOT / "scripts/token-restore.sh").read_text()

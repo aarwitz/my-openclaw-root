@@ -87,6 +87,18 @@ cron_enabled_count() {
   jq '[.jobs[]? | select(.enabled == true)] | length' "$1" 2>/dev/null || echo 0
 }
 
+# Both jq and `openclaw cron enable` serialize jobs.json. Some OpenClaw builds
+# omit the final newline, which is semantically harmless JSON but leaves this
+# tracked runtime manifest dirty after every sanctioned restart. Normalize the
+# byte-level representation after every writer so restart is operationally and
+# git-idempotent.
+normalize_cron_jobs_eof() {
+  [[ -f "$CRON_JOBS" && -s "$CRON_JOBS" ]] || return 0
+  if [[ -n "$(tail -c 1 "$CRON_JOBS")" ]]; then
+    printf '\n' >> "$CRON_JOBS"
+  fi
+}
+
 gateway_healthy() {
   if [[ "${runtime_mode}" == "docker" ]]; then
     local status
@@ -218,6 +230,7 @@ restore_cron_jobs() {
         '.jobs |= map(.id as $i | .enabled = (($ids | index($i)) != null))' \
         "$CRON_JOBS" > "$CRON_JOBS.tmp" 2>/dev/null && [[ -s "$CRON_JOBS.tmp" ]]; then
     mv "$CRON_JOBS.tmp" "$CRON_JOBS"
+    normalize_cron_jobs_eof
     log "  Cron jobs restored ($(cron_enabled_count "$CRON_JOBS") enabled, re-applied from manifest)."
     # The jq edit above fixes jobs.json on disk, but the RUNNING gateway does not
     # reliably reload that write across a restart: the live scheduler can be left
@@ -236,6 +249,9 @@ restore_cron_jobs() {
           warn "  Live re-arm failed for cron job ${_id} (jobs.json edit retained)."
         fi
       done < "$CRON_ENABLED_MANIFEST"
+      # The live gateway CLI is itself a jobs.json writer. Normalize only after
+      # the complete re-arm loop so the last serialization cannot dirty git.
+      normalize_cron_jobs_eof
       if (( _failed > 0 )); then
         warn "  Re-armed ${_armed} cron job(s) in the live gateway; ${_failed} failed."
       else
@@ -300,6 +316,7 @@ if [[ "$skip_cron" == "false" && -f "$CRON_JOBS" ]]; then
   trap restore_cron_jobs EXIT
   if (( cur_enabled > 0 )); then
     jq '.jobs |= map(.enabled = false)' "$CRON_JOBS" > "$CRON_JOBS.tmp" && mv "$CRON_JOBS.tmp" "$CRON_JOBS"
+    normalize_cron_jobs_eof
     log "  Disabled ${cur_enabled} cron job(s); will restore $(grep -c . "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo 0) on completion."
   else
     log "  No active cron jobs to disable; will restore $(grep -c . "$CRON_ENABLED_MANIFEST" 2>/dev/null || echo 0) on completion."
