@@ -597,7 +597,7 @@ def check_market_event_intake():
     db = f"{ROOT}/state/event-intel.sqlite"
     if not os.path.exists(db):
         et = datetime.now(ZoneInfo("America/New_York"))
-        in_session = et.weekday() < 5 and (8 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
+        in_session = et.weekday() < 5 and (4 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
         return finding(
             "market_event_intake", "crit" if in_session else "warn",
             "event-intel.sqlite missing — market-wide event discovery has never completed",
@@ -611,7 +611,7 @@ def check_market_event_intake():
         return finding("market_event_intake", "crit", f"intake status unreadable (rc={rc}): {exc}")
     age_min = (datetime.now(timezone.utc) - completed).total_seconds() / 60.0
     et = datetime.now(ZoneInfo("America/New_York"))
-    in_session = et.weekday() < 5 and (8 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
+    in_session = et.weekday() < 5 and (4 <= et.hour < 16 or (et.hour == 16 and et.minute <= 30))
     run_status = latest.get("status")
 
     audit_rc, audit_out = _run(["python3", script, "audit", "--fail-on-enforced-miss"], timeout=30)

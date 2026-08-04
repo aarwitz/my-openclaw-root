@@ -18,9 +18,9 @@ crontab -l 2>/dev/null | awk -v begin="${BEGIN}" -v end="${END}" '
 
 printf '%s\n' \
   "${BEGIN}" \
-  "# Market-wide event discovery: 15m premarket/session/early after-hours, hourly otherwise." \
-  "*/15 6-20 * * 1-5 /home/aaron/.openclaw/scripts/run-with-trace.sh --tag cron /home/aaron/.openclaw/scripts/market-event-intake.sh >> /home/aaron/.openclaw/logs/market-event-intake-cron.log 2>&1" \
-  "7 0-5,21-23 * * 1-5 /home/aaron/.openclaw/scripts/run-with-trace.sh --tag cron /home/aaron/.openclaw/scripts/market-event-intake.sh >> /home/aaron/.openclaw/logs/market-event-intake-cron.log 2>&1" \
+  "# Market-wide event discovery: 15m from 04:00 ET premarket through early after-hours, hourly otherwise." \
+  "*/15 4-20 * * 1-5 /home/aaron/.openclaw/scripts/run-with-trace.sh --tag cron /home/aaron/.openclaw/scripts/market-event-intake.sh >> /home/aaron/.openclaw/logs/market-event-intake-cron.log 2>&1" \
+  "7 0-3,21-23 * * 1-5 /home/aaron/.openclaw/scripts/run-with-trace.sh --tag cron /home/aaron/.openclaw/scripts/market-event-intake.sh >> /home/aaron/.openclaw/logs/market-event-intake-cron.log 2>&1" \
   "7 * * * 0,6 /home/aaron/.openclaw/scripts/run-with-trace.sh --tag cron /home/aaron/.openclaw/scripts/market-event-intake.sh >> /home/aaron/.openclaw/logs/market-event-intake-cron.log 2>&1" \
   "${END}" >>"${TMP}"
 

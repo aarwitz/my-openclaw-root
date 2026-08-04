@@ -204,10 +204,14 @@ class SignalSafetyTests(unittest.TestCase):
         self.assertIn("state/market-event-brief.json", researcher)
         self.assertIn("transfer_complete", researcher)
         installer = (ROOT / "scripts/install-market-event-cron.sh").read_text()
-        self.assertIn("*/15 6-20 * * 1-5", installer)
+        self.assertIn("*/15 4-20 * * 1-5", installer)
+        self.assertIn("7 0-3,21-23 * * 1-5", installer)
         self.assertIn("# BEGIN AUTOTRADE MARKET EVENT INTAKE", installer)
         self.assertIn("mktemp", installer)
         self.assertIn("trap", installer)
+
+        health = (ROOT / "scripts/system-health-sweep.py").read_text()
+        self.assertEqual(health.count("4 <= et.hour < 16"), 2)
 
     def test_priority_queue_poller_loads_unattended_session_token(self) -> None:
         fd, path = tempfile.mkstemp(suffix=".json", dir="/tmp")
