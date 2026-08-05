@@ -28,6 +28,7 @@ COMPOSE_FILE="/home/aaron/.openclaw/docker-compose.openclaw.yml"
 DOCKER_CONTAINER="openclaw-gateway"
 JOBS_JSON="/home/aaron/.openclaw/cron/jobs.json"
 SNAPSHOT_JSON="/home/aaron/.openclaw/state/trader-intel-snapshot/data.json"
+AUTOTRADE_RETIRED_MARKER="/home/aaron/.openclaw/state/AUTOTRADE_RETIRED"
 ROGUE_UNIT="openclaw-gateway.service"
 
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -156,7 +157,7 @@ fi
 # CHECK 4 — stale app snapshot during market hours (weekday 10:00–16:30 ET,
 # snapshot older than 3h means passes are silently failing to publish).
 # ---------------------------------------------------------------------------
-if [[ "$gateway_ok" == true && -f "$SNAPSHOT_JSON" ]]; then
+if [[ "$gateway_ok" == true && ! -f "$AUTOTRADE_RETIRED_MARKER" && -f "$SNAPSHOT_JSON" ]]; then
   et_dow="$(TZ=America/New_York date +%u)"   # 1..7
   # 10# forces base-10: 0850/0900 are invalid octal and used to crash this test,
   # silently disabling the stale-snapshot page for the whole 08:00-09:59 window.

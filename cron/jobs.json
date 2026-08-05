@@ -6,7 +6,7 @@
       "agentId": "overseer",
       "name": "overseer-pre-market-0900-et",
       "description": "Weekday pre-market decision pass for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450108670,
       "schedule": {
         "kind": "cron",
@@ -42,7 +42,7 @@
       "agentId": "overseer",
       "name": "overseer-open-reaction-0930-et",
       "description": "Weekday market-open reaction pass for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450124665,
       "schedule": {
         "kind": "cron",
@@ -78,7 +78,7 @@
       "agentId": "overseer",
       "name": "overseer-confirmation-1100-et",
       "description": "Weekday confirmation or invalidation pass for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450131990,
       "schedule": {
         "kind": "cron",
@@ -114,7 +114,7 @@
       "agentId": "overseer",
       "name": "overseer-rotation-1330-et",
       "description": "Weekday replacement or rotation pass for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450137308,
       "schedule": {
         "kind": "cron",
@@ -150,7 +150,7 @@
       "agentId": "overseer",
       "name": "overseer-close-risk-1530-et",
       "description": "Weekday close-risk pass for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450142115,
       "schedule": {
         "kind": "cron",
@@ -186,7 +186,7 @@
       "agentId": "overseer",
       "name": "overseer-weekly-audit-0800-et",
       "description": "Weekly Sunday audit-style portfolio summary for AutoTrade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780450146616,
       "schedule": {
         "kind": "cron",
@@ -222,7 +222,7 @@
       "agentId": "overseer",
       "name": "overseer-daily-learning-1630-et",
       "description": "Daily post-close world-model learning pass (debrief + calibrate); runs trade or no-trade.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1780761895374,
       "schedule": {
         "kind": "cron",
@@ -259,7 +259,7 @@
       "agentId": "overseer",
       "name": "catalyst-research-0830-et",
       "description": "Pre-open: fuse quant world model + live news; LLM judges over/under-reaction -> hypotheses.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1781816184031,
       "schedule": {
         "kind": "cron",
@@ -296,7 +296,7 @@
       "agentId": "overseer",
       "name": "pre-market-reconcile-0845-et",
       "description": "Pre-market reconcile broker truth into the DB (sync overnight fills/closes) BEFORE the 9:00 pass, so sizing/risk see accurate exposure.",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1782129889261,
       "schedule": {
         "kind": "cron",
@@ -333,7 +333,7 @@
       "agentId": "researcher",
       "name": "data-scout-monthly",
       "description": "Monthly: audit dataset freshness/decay + scout new alt-data sources (proposals only, operator-gated).",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "kind": "cron",
         "expr": "15 10 1 * *",
@@ -368,7 +368,7 @@
       "agentId": "dwight",
       "name": "pm-pass-daily",
       "description": "Daily: keep every product's backlog ready and dispatch the coding lane (cap 2/day, PRs only).",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "kind": "cron",
         "expr": "0 11 * * 1-5",
