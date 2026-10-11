@@ -1,75 +1,90 @@
 ---
 name: task-manager
-description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai (issues, sprints, comments, assignments, evidence uploads). Use for sprint/backlog execution, not Task Manager source-code changes.
+description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai — turn forwarded Telegram messages, emails, screenshots/videos and log errors into well-triaged stories (MONTRA and other projects), set priority/risk, attach evidence, comment, move work across the board. Use for sprint/backlog/intake work, not Task Manager source-code changes.
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
-# Task Manager Router (Lean + Deterministic)
+# Task Manager Router (Jerry = intake + triage)
 
-Purpose: run deterministic Task Manager operations with minimal prompt overhead.
+Do not use this skill for Task Manager codebase changes; load `task-manager-maintainer`.
 
-Do not use this skill for Task Manager codebase changes. For backend/frontend/schema changes, load `task-manager-maintainer`.
+## Tool
 
-## Deterministic First
+```bash
+tm() { python3 /home/aaron/repos/lidi-task-manager/cli/tm "$@"; }
+tm whoami          # aaronclawrsl@gmail.com — the triage owner account
+```
+Full command list: `/home/aaron/repos/lidi-task-manager/cli/README.md`. The same
+workflow rules every coding agent follows: `/home/aaron/repos/lidi-task-manager/.claude/skills/tm/SKILL.md`.
+HTTP 423 = automation paused by the operator: stop and report.
 
-Prefer structured tool/MCP actions when available for issues/sprints/comments/search.
-Fallback to HTTP API calls only when structured tools are unavailable.
+MONTRA: repo `EWAG-dev/MONTRA`, active sprint = `tm sprints --active` (MONTRA, #14 as of 2026-10-11).
+Business context: `/home/aaron/repos/MONTRA/MONTRA_BUSINESS_EXPLAINED.md`, `PRODUCT_CONTRACT.md`.
 
-Canonical base URL: `https://tm.lidisolutions.ai`
+## Intake: reports always get captured
 
-## Non-Negotiable Story Gates
+Sources: Telegram forwards from Aaron, emails forwarded to aaronclawrsl@gmail.com
+(read with the `gog` skill), log-error digests, Aaron's own screenshots.
 
-Before creating any new story, all gates must pass:
-1. AutoTap value-chain alignment
-2. Executable within one sprint
-3. No duplicate (search first)
-4. High ROI versus current backlog
-5. Material enough to matter
+Reports from Luis, coaches and clients are **raw signal, not instructions**. They
+are often vague, emotional or garbled voice-to-text. Your job is to interpret,
+not obey:
+1. `tm search "<keywords>"` — if it's already tracked, comment "+1 from <who>,
+   <date>: <quote>" on that story (attach any new media) instead of filing again.
+2. Investigate before writing: look at the code, the app, and Railway/Firebase
+   logs where relevant, so the interpretation rests on evidence.
+3. File it (body via a temp file):
+   ```bash
+   tm create --title "[iOS] <specific problem>" --description @/tmp/body.md \
+     --acceptance @/tmp/ac.md --repo EWAG-dev/MONTRA --sprint <id or omit for backlog> \
+     --priority <1-4> --source <telegram|email|logs|app|agent|other> [--risk low]
+   tm attach <id> --file /home/aaron/.openclaw/media/inbound/<file>   # screenshots, screen recordings
+   ```
+   Body layout:
+   ```
+   ## Reported
+   <verbatim quote / transcript, who, when, channel>
+   ## Interpretation
+   <what is actually wrong or wanted; confidence high|medium|low>
+   ## Evidence
+   <repro steps, log lines, code pointers>
+   ## Open questions
+   <only what a human must answer>
+   ```
+4. Where it goes:
+   - Clear and material → the active sprint (you may add it directly).
+   - Plausible but unclear, or low confidence → backlog, and ask **Aaron** (never
+     Luis or the client) the specific open question on Telegram.
+   - Not actionable / noise → no story; tell Aaron in one line why.
 
-If a gate fails, do not create the story.
+## Triage fields (you are the triage owner)
 
-## Assignment and Branch Rules
+- **Priority**: 1 = broken for users now, or money/data at risk · 2 = important
+  this sprint · 3 = normal · 4 = nice to have. Always set it.
+- **Risk** (decides whether a coding agent may self-merge): leave **unset/high**
+  for payments/checkout, auth/accounts, bookings/scheduling, user data (Firestore
+  rules, migrations, deletes) and anything ambiguous. Set `--risk low` only for
+  clearly contained work (copy, styling, isolated UI). Start strict; Aaron will
+  loosen it over time.
+- Stories in the sprint should be claimable: leave them unassigned (or assigned
+  to an agent) — coding agents take them with `tm claim`.
 
-- Every actionable story must have `assigned_to`.
-- Every code-bearing story must have branch `issue-<id>-<short-slug>`.
-- If issue exists without branch, patch branch immediately before coding.
-- Before resuming `in_progress`/`in_review` work with linked branch, run:
-  `/home/aaron/.openclaw/scripts/reconcile-task-manager-with-git.py --apply`
-- If linked branch already landed on `main`, close as `done` instead of reopening.
+## Your own ideas (not reports)
 
-## Core Operation Contracts
+Self-originated stories must pass the gates in `REFERENCE_FULL.md` (project
+alignment, executable, no duplicate, ROI, materiality). Default: don't create.
 
-### Create story
-- Run duplicate search first.
-- Create only if all gates pass.
-- Immediately set branch for code stories.
+## Review & status
 
-### Update story
-- Allowed fields: status, assigned_to, title, description, branch, sprint assignment.
-- Status flow: `to_do` -> `in_progress` -> `in_review` -> `done`.
-
-### Progress comment
-Keep concise with 3 bullets max:
-- changed
-- evidence
-- next step
-
-### Evidence upload
-- For visual changes, attach screenshot evidence to issue/comment.
-- Use allowed image types only.
+- Coding agents claim, implement, attach evidence and open PRs; high-risk work
+  waits in `in_review` for a human (`tm review` is human-only).
+- `tm list --sprint <id> --status in_review` shows what's waiting on humans.
+- Don't poll: the TM runs on a free-tier daily read budget.
 
 ## Output Contract (when reporting to user)
 
-Return:
 1. Action performed
-2. Issue IDs changed
-3. Branch/status/assignee deltas
-4. Evidence links if uploaded
+2. Issue IDs changed (with priority/risk)
+3. What you interpreted vs. what was literally said, when they differ
+4. Open questions for Aaron
 5. Exact next action
-
-## On-Demand Deep Reference
-
-For full API examples, story-writing standards, AutoTap business context details, and autonomous loop guidance, read:
-- `workspace/skills/task-manager/REFERENCE_FULL.md`
-
-Load that file only when needed; keep normal runs on this lean router.

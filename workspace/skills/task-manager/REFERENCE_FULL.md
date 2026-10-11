@@ -1,6 +1,6 @@
 ---
 name: task-manager
-description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai for story/sprint visibility and direct issue mutations by authorized agents. Use this skill for Task Manager issues, comments, sprint assignment, and evidence uploads. Do not use it for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — before creating any story, apply the 5 quality gates (AutoTap value chain, executable, no duplicate, pilot-ready, material). Read ELITE_PROJECT_BRIEF.md for AutoTap business context.
+description: Manage the hosted LIDI Task Manager at https://tm.lidisolutions.ai for story/sprint visibility and direct issue mutations by authorized agents. Use this skill for Task Manager issues, comments, sprint assignment, and evidence uploads. Do not use it for Task Manager source-code changes; use the task-manager-maintainer skill for backend/frontend TM development. IMPORTANT — reports from humans are always captured via the intake flow in SKILL.md; stories Jerry originates himself must pass the 5 quality gates (project alignment, executable, no duplicate, ROI, material).
 metadata: {"clawdbot":{"emoji":"📋"}}
 ---
 
@@ -22,17 +22,17 @@ Source code: `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1; dep
 
 ## ⚠️ Story Creation Rules — READ FIRST
 
-**Jerry creates too many stories.** Follow these hard rules to prevent busywork:
+**Jerry creates too many stories.** These gates apply to stories Jerry *originates*. Reports from Aaron, Luis, coaches, clients or logs always go through the intake flow in `SKILL.md` instead (capture, dedupe, interpret, triage).
 
-### Before creating ANY story, pass ALL five gates:
+### Before creating a self-originated story, pass ALL five gates:
 
-1. **AutoTap value chain test**: Does this directly serve resident engagement → measurable data → owner ROI proof? If the story doesn't trace back to AutoTap's core business (turning empty gyms into leasing advantages), do NOT create it.
+1. **Project alignment test**: Does this directly serve the goals of the project it's filed under (see `/home/aaron/.openclaw/projects.json`)? MONTRA: coaches and clients booking, paying, training and messaging reliably — see `/home/aaron/repos/MONTRA/MONTRA_BUSINESS_EXPLAINED.md`. AutoTap: the value chain below. If it doesn't trace back to that project's core business, do NOT create it.
 
 2. **Executable test**: Can the assignee sit down and complete a concrete deliverable (code change, design, config, doc update) within one sprint? If it's vague ("investigate," "explore," "improve cohesion," "make more consistent"), rewrite it as a specific action or skip it. **Exception**: investigation stories ARE allowed when they are a blocker to an important executable action — in that case, the story title must state what it unblocks (e.g., "[Backend] Investigate booking API response format — blocks: wire booking flow to CoachingView").
 
 3. **Deduplication test**: Search existing issues (`/api/issues/search?q=<keywords>&search_in=all`) BEFORE creating. If a similar story exists — even with different wording — update the existing one instead. Never create a duplicate.
 
-4. **ROI test**: Is this among the highest-impact actions Jerry could take right now? Estimate the effort (small/medium/large) and the impact on AutoTap's ability to close deals, retain residents, or prove ROI. Prioritize high-impact/low-effort. Don't create low-impact stories when higher-impact work exists.
+4. **ROI test**: Is this among the highest-impact actions Jerry could take right now? Estimate the effort (small/medium/large) and the impact on the project's core outcomes (for AutoTap: closing deals, retaining residents, proving ROI). Prioritize high-impact/low-effort. Don't create low-impact stories when higher-impact work exists.
 
 5. **Materiality test**: Is this actually important? Not every screenshot imperfection needs a story. Not every idea deserves a ticket. Ask: "Would Aaron care about this?" If the answer is "probably not," don't create it.
 
@@ -43,7 +43,7 @@ Source code: `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1; dep
 - "Make [screen] more cohesive" — what does that mean concretely? Be specific or skip
 - Duplicate/overlapping stories that cover ground already tracked
 - Polish stories for screens that aren't functionally complete yet
-- Stories for features not in AutoTap's actual service offering
+- Stories for features outside the target product's actual offering
 - Low-ROI busywork when higher-impact work exists in the backlog
 
 ### Stories Jerry SHOULD create:
@@ -56,7 +56,7 @@ Source code: `/home/aaron/repos/lidi-task-manager/` (Cloudflare Worker + D1; dep
 - Investigation spikes that unblock important work: "[Backend] Investigate booking API response format — blocks: wire booking flow to CoachingView"
 - Product ideas backed by research: "[Product] Add coach availability indicator to Home — competitor analysis shows 40% higher booking rates"
 
-### What AutoTap actually delivers (know this before writing stories)
+### What AutoTap actually delivers (AutoTap stories only)
 
 AutoTap sells **human-led wellness activation** for apartment buildings:
 - On-site personal trainers (5am–8pm), 1-on-1 coaching, group fitness
@@ -65,11 +65,11 @@ AutoTap sells **human-led wellness activation** for apartment buildings:
 - AutoTap owner dashboard proving utilization/engagement/retention/NOI
 - Zero CapEx, zero buildouts — AutoTap manages everything
 
-**Key metrics AutoTap sells on**: $130–$400+ rent premium/unit/month, 20–40% faster lease-up, 3× resident satisfaction, 68% utilization growth, 87% participation rate. Every story should serve these outcomes.
+**Key metrics AutoTap sells on**: $130–$400+ rent premium/unit/month, 20–40% faster lease-up, 3× resident satisfaction, 68% utilization growth, 87% participation rate. Every AutoTap story should serve these outcomes.
 
 **Target customers**: Class A/B multifamily, 150+ units, existing fitness amenity, property managers / asset managers / REIT decision-makers.
 
-The app exists to make AutoTap's human wellness service feel like a **private fitness club** to residents and provide **real-time ROI proof** to owners.
+The AutoTap app exists to make AutoTap's human wellness service feel like a **private fitness club** to residents and provide **real-time ROI proof** to owners.
 
 ## API Reference
 
