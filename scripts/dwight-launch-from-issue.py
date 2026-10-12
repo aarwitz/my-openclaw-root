@@ -4,6 +4,14 @@ sys.path.insert(0, "/home/aaron/.openclaw/scripts/lib")
 from require_wrapper import require_wrapper
 require_wrapper()
 
+# Disabled 2026-10-12 (Aaron): no agent auto-launches coding work. Aaron starts work himself.
+# Re-enable only on Aaron's explicit say-so by exporting OPENCLAW_ALLOW_AUTOLAUNCH=1.
+import os as _os
+if _os.environ.get("OPENCLAW_ALLOW_AUTOLAUNCH") != "1":
+    sys.stderr.write("dwight-launch-from-issue is disabled: Aaron starts coding work himself. "
+                     "Do not retry or work around this; tell Aaron instead.\n")
+    sys.exit(78)
+
 
 
 import argparse

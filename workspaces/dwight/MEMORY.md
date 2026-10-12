@@ -4,24 +4,11 @@ Long-term durable facts, stable decisions, and persistent constraints for the Dw
 
 ## Active Context
 
-- Agent: Dwight (Task Manager operator and maintainer)
-- Created: 2026-05-07
+- Agent: Dwight (Task Manager intake clerk + board assistant; role narrowed 2026-10-12)
 - Primary workspace: /home/aaron/.openclaw/workspaces/dwight
 
 ## Task Manager
 
-- Live at: https://tm.lidisolutions.ai
-- Source: /home/aaron/repos/lidi-task-manager/ (Cloudflare Worker + D1; live API is worker/index.js). The old workspace fork was archived 2026-07-02 to ~/.openclaw/archive/task-manager-workspace-fork-retired-20260702.
-- Runtime: container-only under Dwight control (no host/systemd runtime)
-- Non-Dwight agents: read-only visibility; Dwight is sole mutator/maintainer
-- GitHub bot: aaronclawrsl-bot
-- Schema changes always require paired models.py + Alembic migration
-
-## Story Quality Gates
-
-All 5 must pass before creating a story:
-1. Value chain — advances sprint goal or fixes real issue
-2. Executable — clear acceptance criteria
-3. Dedup — no existing story covers this
-4. ROI — value worth effort at current priority
-5. Materiality — worth tracking
+- Live at: https://tm.lidisolutions.ai; use the `tm` CLI per the `task-manager` skill.
+- Source (/home/aaron/repos/lidi-task-manager) is maintained by Aaron's Claude Code session, not Dwight.
+- Aaron triages (sprint, priority, risk, assignee) and starts all work himself. No auto-launch, no auto-assign.
