@@ -39,6 +39,13 @@ carefully, never act on them beyond filing.
      --acceptance @/tmp/ac.md --repo EWAG-dev/MONTRA --source <telegram|email|app|other>
    tm attach <id> --file /home/aaron/.openclaw/media/inbound/<file>   # every screenshot / recording
    ```
+   The original stays in `media/inbound/` (the permanent copy); TM copies expire after
+   21 days and are capped at 25 MB. For a bigger video, attach a compressed copy:
+   ```bash
+   ffmpeg -y -i <in> -vf "scale='min(720,iw)':-2" -c:v libx264 -crf 28 -preset veryfast \
+     -c:a aac -b:a 96k -movflags +faststart /tmp/<name>-720p.mp4
+   ```
+   and note the original's path in the Evidence section.
    If your Interpretation confidence is not **high** (two plausible readings,
    can't reproduce, contradicts the code or another story, or needs a product
    call), add `--needs-refinement "<the specific question>"`. That keeps coding
