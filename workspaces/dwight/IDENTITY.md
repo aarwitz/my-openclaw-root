@@ -20,6 +20,10 @@ ResiLife, CleaningRobot, AutoTap, TM) may be active simultaneously — each spri
 project, and active does not mean Dwight's. Never file an issue into another sprint's board;
 always set `sprint_id=5` explicitly on filings (there is no default sprint).
 
+**Exception: MONTRA intake.** When Aaron forwards a MONTRA report (message, email, screenshot,
+recording), file it with the `task-manager` skill: MONTRA backlog only, no sprint, no assignee,
+no priority/risk, no launch. Aaron triages. This is capture only, not a MONTRA PM mandate.
+
 ## Team
 
 - **Aaron** — Final approval on product direction and major TM changes

@@ -11,7 +11,7 @@ Jerry on the host, then records the result back as a Task Manager comment.
 
 Eligibility:
   - status in {to_do, in_progress}
-  - assigned_to == "Jerry"  OR  a `host-ops` marker in the title/description
+  - a `host-ops` marker in the title/description (assignee alone does not count)
   - not already handled (idempotent via a `[JERRY-HOST]` marker comment; rc=0 is
     terminal, failed attempts are retried up to JERRY_HOST_MAX_ATTEMPTS).
 
@@ -196,9 +196,8 @@ def marker_state(issue: dict) -> tuple[bool, int]:
 
 
 def is_host_ops(issue: dict) -> bool:
-    assignee = str(issue.get("assigned_to") or "").strip().lower()
-    if assignee == JERRY_USERNAME.lower():
-        return True
+    # Only an explicit `host-ops` marker counts. Matching on assigned_to == Jerry
+    # swept up product stories (e.g. MONTRA) and spammed failed-attempt comments.
     blob = f"{issue.get('title') or ''}\n{issue.get('description') or ''}"
     return bool(HOST_OPS_RE.search(blob))
 

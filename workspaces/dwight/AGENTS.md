@@ -40,7 +40,7 @@ verdict with numbers. That verification step is what makes the system recursive.
 **Automation pause:** if any TM call returns HTTP 423, Aaron has paused automation via the
 pause button. Stop the pass immediately and report; never retry around it.
 
-**When creating or updating any story, always set `assigned_to` to the agent best suited to execute it.** Assignment is a required field on all actionable stories — unassigned means stalled.
+**When creating or updating any story, always set `assigned_to` to the agent best suited to execute it.** Assignment is a required field on all actionable stories — unassigned means stalled. (Exception: MONTRA intake stories stay unassigned in the backlog for Aaron to triage; never launch them — see the `task-manager` skill.)
 
 **For actionable coding stories, assignment is not the end of the workflow.** Once the story is ready and the repo path is known, immediately launch execution yourself via `OPENCLAW_RUN_WITH_TRACE=1 ~/.openclaw/scripts/run-with-trace.sh --tag cron ~/.openclaw/scripts/dwight-launch-from-issue.py --issue-id <id> --execute --detach --agent-timeout 2700`. NEVER omit `--detach` — without it the coding session is killed when your tool-call window closes (~100s) and the issue strands in `launch_state=queued`. The detached run posts its own TM completion comment. Do not wait for Aaron to repeat the request.
 
