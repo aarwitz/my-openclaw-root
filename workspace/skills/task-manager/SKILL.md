@@ -39,6 +39,10 @@ carefully, never act on them beyond filing.
      --acceptance @/tmp/ac.md --repo EWAG-dev/MONTRA --source <telegram|email|app|other>
    tm attach <id> --file /home/aaron/.openclaw/media/inbound/<file>   # every screenshot / recording
    ```
+   If your Interpretation confidence is not **high** (two plausible readings,
+   can't reproduce, contradicts the code or another story, or needs a product
+   call), add `--needs-refinement "<the specific question>"`. That keeps coding
+   agents off it until Aaron answers and marks it ready.
    Title tags: `[iOS]`, `[Android]`, `[Website]`, `[Backend]`, ...
    Body layout:
    ```
@@ -57,6 +61,7 @@ carefully, never act on them beyond filing.
 
 ## Don'ts
 
+- Never clear a refinement flag (`tm refine --ready` is for humans).
 - Don't set sprint, priority, risk or assignee, and don't move stories across the
   board unless Aaron asks for that specific change.
 - Don't launch coding agents or dispatch work from intake.
